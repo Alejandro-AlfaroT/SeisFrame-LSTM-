@@ -131,7 +131,7 @@ class CoupledAnalysisTests(unittest.TestCase):
         self.assertEqual(ops.getNodeTags(), [])
 
     def test_review_runner_preserves_source_and_refuses_existing_output(self):
-        from Design.Review_Coupled_Gravity import run_review
+        from tools.review_coupled_gravity import run_review
         with tempfile.TemporaryDirectory() as temp:
             source, destination = Path(temp)/"design.json", Path(temp)/"review"
             payload = json.dumps({"slab": SLAB, "geometry": GEOMETRY, "sections": SECTIONS,

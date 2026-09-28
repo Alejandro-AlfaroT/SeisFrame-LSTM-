@@ -25,7 +25,7 @@ from Design import SMRF_Elastic as elastic
 from Design.SMRF_Floor_Analysis import _beam_inputs
 from Analysis import Gravity as gravity
 from Loads.Gravity_Loads import apply_gravity_loads
-from Model.nodes import node_tag, diaphragm_master_tag
+from Model.Build_Model import node_tag, diaphragm_master_tag
 
 
 def sha(path):

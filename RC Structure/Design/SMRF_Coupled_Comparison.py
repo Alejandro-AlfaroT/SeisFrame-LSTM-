@@ -34,7 +34,7 @@ from Design.SMRF_Coupled_Analysis import analyze_coupled_gravity
 from Design.SMRF_Elastic import build_design_model
 from Design.SMRF_Floor_Analysis import MAX_SHELLS
 from Loads.Gravity_Loads import apply_gravity_loads
-from Model.nodes import node_tag
+from Model.Build_Model import node_tag
 
 METHOD_VERSION = "smrf_transfer_vs_coupled_gravity_comparison_v2_pattern_and_mesh"
 DEFAULT_TOLERANCE = 0.05          # per-column vertical reaction, relative to the coupled model

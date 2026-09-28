@@ -190,6 +190,19 @@ def _beam_inputs(sections, support_model, slab_h, lx, ly):
                       "slab mid-plane, no beam/slab centroid offset.")}
 
 
+def _constrain_plate_node(node, held):
+    """Install the existing zero plate constraints in the active constant pattern.
+
+    The fresh floor builder visits each node once. Using pattern SPs avoids
+    the costly domain-level fix insertion path on large meshes. These are
+    exactly the same homogeneous restraints; rotations 4/5 stay free.
+    """
+    for dof in (1, 2, 6):
+        ops.sp(node, dof, 0.0)
+    if held:
+        ops.sp(node, 3, 0.0)
+
+
 def _extrema(values):
     """Keep extrema with their original element/Gauss-point locations."""
     return {"minimum": min(values, key=lambda item: item["value"]),
@@ -238,6 +251,7 @@ def analyze_floor(slab_record, geometry, sections, loadcase, mesh_per_bay=4,
         "inputs": {"slab": copy.deepcopy(slab_record), "geometry": copy.deepcopy(geometry),
                    "sections": copy.deepcopy(sections)},
         "mesh": grid,
+        "constraint_storage": "homogeneous_SPs_in_separate_constant_pattern",
         "material": {"ec_ksi": ec, "poisson_ratio": nu, "thickness_in": h,
                      "basis": "linear elastic gross isotropic concrete, no cracking or creep"},
         "response_convention": {
@@ -271,6 +285,9 @@ def analyze_floor(slab_record, geometry, sections, loadcase, mesh_per_bay=4,
         ops.wipe()
         ops.model("basic", "-ndm", 3, "-ndf", 6)
         ops.section("ElasticMembranePlateSection", 1, ec, nu, h, 0.0)
+        # Separate from pressure pattern 1; zero constraints persist at every load factor.
+        ops.timeSeries("Constant", 2)
+        ops.pattern("Plain", 2, 2)
         for j in range(ey + 1):
             for i in range(ex + 1):
                 node = tag(i, j)
@@ -281,7 +298,7 @@ def analyze_floor(slab_record, geometry, sections, loadcase, mesh_per_bay=4,
                 held = intersection if flexible else line_support
                 # In-plane DOFs and drilling are suppressed in this pure
                 # linear plate problem; bending rotations remain free.
-                ops.fix(node, 1, 1, int(held), 0, 0, 1)
+                _constrain_plate_node(node, held)
                 if held:
                     supported[node] = (i, j)
         for j in range(ey):

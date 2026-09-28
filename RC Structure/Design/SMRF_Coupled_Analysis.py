@@ -45,8 +45,9 @@ import math
 import openseespy.opensees as ops
 
 from Design.SMRF_Floor_Analysis import _inputs, _integer, _number, MAX_SHELLS
+from Design.SMRF_Floor_Mesh import coupled_floor_mesh
 
-METHOD_VERSION = "smrf_monolithic_eccentric_shell_web_column_gravity_v3_inplane_restraint_options"
+METHOD_VERSION = "smrf_monolithic_eccentric_shell_web_column_gravity_v5_explicit_mesh"
 SECTION_ACTION_SCHEMA = "native_global_actions_applied_loads_and_constraint_actions_v2"
 INPLANE_RESTRAINTS = ("finite_membrane", "rigid_joints", "rigid_floor")
 CONSTRAINT_HANDLERS = ("Transformation", "Lagrange", "Penalty")
@@ -105,7 +106,8 @@ def _assembly_options(inplane_restraint, constraint_handler, penalty_alpha):
 def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                             mesh_per_bay=4, include_member_weight=True, *,
                             inplane_restraint="finite_membrane",
-                            constraint_handler="Transformation", penalty_alpha=1.0e9):
+                            constraint_handler="Transformation", penalty_alpha=1.0e9,
+                            slab_perimeter="centerlines", mesh_spec=None):
     """Solve one explicit gravity combination on all floors simultaneously.
 
     ``floor_loadcases`` is a list of length num_floor in ascending floor order,
@@ -118,6 +120,8 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
     ``inplane_restraint`` and ``constraint_handler`` are declared assembly
     options (module docstring); they are recorded in ``inputs`` and
     ``assembly``. The defaults reproduce the previous method exactly.
+    ``slab_perimeter='beam_outer_faces'`` includes the slab out to the full
+    perimeter beam width; added strips inherit adjacent panel pressures.
     """
     options = _assembly_options(inplane_restraint, constraint_handler, penalty_alpha)
     nf = _integer(geometry.get("num_floor"), "num_floor")
@@ -126,10 +130,8 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
         raise ValueError("include_member_weight must be Boolean.")
     if not isinstance(floor_loadcases, list) or len(floor_loadcases) != nf:
         raise ValueError("Provide one explicit load case per floor, in ascending order.")
-    parsed = [_inputs(slab_record, geometry, sections, case, mesh_per_bay, allow_zero=True) for case in floor_loadcases]
+    parsed = [_inputs(slab_record, geometry, sections, case, mesh_per_bay, allow_zero=True, mesh_spec=mesh_spec) for case in floor_loadcases]
     nx, ny, lx, ly, hs, fc, nu, mesh, _ = parsed[0]
-    if nf*nx*ny*mesh*mesh > MAX_SHELLS:
-        raise ValueError(f"Coupled diagnostic exceeds {MAX_SHELLS} total shells across floors.")
     b = _number(sections.get("b_beam_in"), "b_beam_in")
     hb = _number(sections.get("h_beam_in"), "h_beam_in")
     bc = _number(sections.get("b_col_in"), "b_col_in")
@@ -140,6 +142,12 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
     cm = _number(sections.get("column_stiffness_modifier", 1.), "column_stiffness_modifier")
     if not hs < hb < sh or hc >= lx or bc >= ly or b >= min(lx, ly):
         raise ValueError("Coupled geometry must leave a downstand web, clear column height and clear beam spans.")
+    grid = coupled_floor_mesh(nx, ny, lx, ly, mesh, beam_width_in=b, slab_perimeter=slab_perimeter, mesh_spec=mesh_spec)
+    if nf*grid['shell_count'] > MAX_SHELLS:
+        raise ValueError(f"Coupled diagnostic exceeds {MAX_SHELLS} total shells across floors, including perimeter.")
+    xs = dict(enumerate(grid['x_coordinates_in'], start=grid['index_start']))
+    ys = dict(enumerate(grid['y_coordinates_in'], start=grid['index_start']))
+    cell_x, cell_y = list(xs)[:-1], list(ys)[:-1]
     web = _rectangle(b, hb-hs, fcb, bm, nu)
     column = _rectangle(bc, hc, fcc, cm, nu)
     # From slab mid-plane to downstand-web centroid: -(hs/2+(hb-hs)/2).
@@ -147,7 +155,8 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
     gamma = _number(slab_record["concrete_unit_weight_kcf"], "concrete_unit_weight_kcf") / 1728.
     if ops.getNodeTags() or ops.getEleTags():
         raise RuntimeError("Coupled diagnostic requires an empty OpenSees domain; existing model was preserved.")
-    ex, ey, dx, dy = nx*mesh, ny*mesh, lx/mesh, ly/mesh
+    mx, my = grid['subdivisions_x_per_bay'], grid['subdivisions_y_per_bay']
+    ex, ey = nx*mx, ny*my
     floor_nodes, web_nodes, base_nodes = {}, {}, {}
     positions, applied_nodes, shells, beams, columns, links = {}, {}, [], [], [], []
     masters, constrained = {}, {}
@@ -166,13 +175,19 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
               "status": "not_analyzed", "inputs": {"slab": copy.deepcopy(slab_record),
               "geometry": copy.deepcopy(geometry), "sections": copy.deepcopy(sections),
               "floor_loadcases": copy.deepcopy(floor_loadcases), "include_member_weight": include_member_weight,
-              **options},
+              "slab_perimeter": slab_perimeter, "mesh_spec": copy.deepcopy(mesh_spec), **options},
               "assembly": {**options, "basis": restraint_basis[inplane_restraint],
                            "diaphragm_masters": [], "constrained_node_count_per_floor": 0,
                            "constraint_action_convention": "Force and couple the diaphragm constraint exerts ON the "
                            "slab node, from node equilibrium (element resisting forces of the node and its rigid-linked "
                            "web node, transported, minus the applied load); zero without a diaphragm."},
-              "mesh_per_bay": mesh, "web_section": web, "column_section": column,
+              "mesh_per_bay": mesh, "mesh_metadata": grid, "web_section": web, "column_section": column,
+              "slab_plan_inventory": {"area_in2_per_floor": grid['represented_area_in2'],
+                  "added_area_in2_per_floor": grid['added_area_in2'],
+                  "added_volume_in3_per_floor": grid['added_area_in2']*hs,
+                  "added_self_weight_kip_per_floor": grid['added_area_in2']*hs*gamma,
+                  "mass_assigned": False,
+                  "scope": "Slab-only plan correction; no independent 3D joint-overlap volume verification"},
               "shell_response_convention": {"gauss_order": ["p11", "p22", "p12", "m11", "m22", "m12", "q1", "q2"],
                                             "axes": "local 1=X, local 2=Y, normal=+Z; CCW node ordering",
                                             "units": "membrane/shear kip/in; moments kip-in/in",
@@ -212,12 +227,12 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                 base_nodes[i, j] = n
                 ops.fix(n, 1, 1, 1, 1, 1, 1)
         for k in range(1, nf+1):
-            for j in range(ey+1):
-                for i in range(ex+1):
-                    n = node(i*dx, j*dy, k*sh)
+            for j, y in ys.items():
+                for i, x in xs.items():
+                    n = node(x, y, k*sh)
                     floor_nodes[k, i, j] = n
-                    if i % mesh == 0 or j % mesh == 0:
-                        nw = node(i*dx, j*dy, k*sh+offset)
+                    if 0 <= i <= ex and 0 <= j <= ey and (i % mx == 0 or j % my == 0):
+                        nw = node(x, y, k*sh+offset)
                         web_nodes[k, i, j] = nw
                         # No constraint chains: shell node is retained only;
                         # the web node is constrained only, in one rigid link.
@@ -232,9 +247,9 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                 master = node(nx*lx/2., ny*ly/2., k*sh)
                 ops.fix(master, 0, 0, 1, 1, 1, 0)
                 if inplane_restraint == "rigid_joints":
-                    tied = [floor_nodes[k, i*mesh, j*mesh] for j in range(ny+1) for i in range(nx+1)]
+                    tied = [floor_nodes[k, i*mx, j*my] for j in range(ny+1) for i in range(nx+1)]
                 else:
-                    tied = [floor_nodes[k, i, j] for j in range(ey+1) for i in range(ex+1)]
+                    tied = [floor_nodes[k, i, j] for j in ys for i in xs]
                 ops.rigidDiaphragm(3, master, *tied)
                 masters[k] = master
                 constrained[k] = tied
@@ -244,36 +259,38 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
             result["assembly"]["constrained_node_count_per_floor"] = len(constrained[1])
         tag = 0
         for k in range(1, nf+1):
-            for j in range(ey):
-                for i in range(ex):
+            for j in cell_y:
+                for i in cell_x:
                     tag += 1
                     nodes = [floor_nodes[k, i, j], floor_nodes[k, i+1, j],
                              floor_nodes[k, i+1, j+1], floor_nodes[k, i, j+1]]
                     ops.element("ShellMITC4", tag, *nodes, 1)
-                    pressure = parsed[k-1][-1][i//mesh, j//mesh] / 144.
-                    p = pressure*dx*dy
+                    pi, pj = max(0, min(nx-1, i//mx)), max(0, min(ny-1, j//my))
+                    pressure = parsed[k-1][-1][pi, pj] / 144.
+                    p = pressure*(xs[i+1]-xs[i])*(ys[j+1]-ys[j])
                     weight_ledger["slab_area_load_kip"] += p
-                    gravity_resultant(p, (i+.5)*dx, (j+.5)*dy)
+                    gravity_resultant(p, (xs[i+1]+xs[i])/2, (ys[j+1]+ys[j])/2)
                     for n in nodes:
                         applied_nodes[n] = applied_nodes.get(n, 0.)+p/4
-                    shells.append({"tag": tag, "floor": k, "i": i, "j": j, "nodes": nodes})
+                    shells.append({"tag": tag, "floor": k, "i": i, "j": j, "nodes": nodes,
+                                   "panel_i": pi, "panel_j": pj, "P": p})
             for j in range(ny+1):
                 for i in range(nx+1):
-                    ni = base_nodes[i, j] if k == 1 else floor_nodes[k-1, i*mesh, j*mesh]
-                    nj = floor_nodes[k, i*mesh, j*mesh]
+                    ni = base_nodes[i, j] if k == 1 else floor_nodes[k-1, i*mx, j*my]
+                    nj = floor_nodes[k, i*mx, j*my]
                     tag += 1
                     _frame_element(tag, ni, nj, column, 1)
                     columns.append({"tag": tag, "story": k, "grid_i": i, "grid_j": j, "nodes": [ni, nj]})
             for axis, lines, intervals in (("x", ny+1, ex), ("y", nx+1, ey)):
                 for line in range(lines):
                     for t in range(intervals):
-                        i, j = (t, line*mesh) if axis == "x" else (line*mesh, t)
+                        i, j = (t, line*my) if axis == "x" else (line*mx, t)
                         ni = web_nodes[k, i, j]
                         nj = web_nodes[k, i+int(axis == "x"), j+int(axis == "y")]
                         tag += 1
                         _frame_element(tag, ni, nj, web, 2)
                         beams.append({"tag": tag, "floor": k, "axis": axis, "line_index": line,
-                                      "span_index": t//mesh, "segment_index": t % mesh, "nodes": [ni, nj],
+                                      "span_index": t//(mx if axis == "x" else my), "segment_index": t % (mx if axis == "x" else my), "nodes": [ni, nj],
                                       "body_load_force_kip": [0., 0., 0.]})
         ops.timeSeries("Linear", 1)
         ops.pattern("Plain", 1, 1)
@@ -293,7 +310,7 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                 factor = floor_loadcases[item["floor"]-1]["dead_factor"]
                 w = factor*b*(hb-hs)*gamma*clear/length
                 ops.eleLoad("-ele", item["tag"], "-type", "-beamUniform", 0., -w, 0.)
-                p = w*length/mesh
+                p = w*math.dist(positions[item["nodes"][0]], positions[item["nodes"][1]])
                 item["body_load_force_kip"] = [0., 0., -p]
                 ni, nj = item["nodes"]
                 weight_ledger["beam_drop_weight_kip"] += p
@@ -355,15 +372,14 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                 for d in range(6):
                     shell_forces[n][d] += f[index*6+d]
             stresses = _vector(ops.eleResponse(item["tag"], "stresses"), 32, "shell Gauss resultants")
-            q = parsed[item["floor"]-1][-1][item["i"]//mesh, item["j"]//mesh] / 144.
-            panels.append({"floor": item["floor"], "panel_i": item["i"]//mesh,
-                           "panel_j": item["j"]//mesh, "element": item["tag"],
+            panels.append({"floor": item["floor"], "panel_i": item["panel_i"],
+                           "panel_j": item["panel_j"], "element": item["tag"],
                            "cell_i": item["i"], "cell_j": item["j"],
-                           "bounds_xy_in": [item["i"]*dx, (item["i"]+1)*dx, item["j"]*dy, (item["j"]+1)*dy],
+                           "bounds_xy_in": [xs[item['i']], xs[item['i']+1], ys[item['j']], ys[item['j']+1]],
                            "gauss_resultants_raw": stresses,
                            "node_positions_in": [positions[n] for n in item["nodes"]],
                            "global_nodal_force_kip_kip_in": f,
-                           "applied_nodal_force_kip_kip_in": [0., 0., -q*dx*dy/4., 0., 0., 0.]*4})
+                           "applied_nodal_force_kip_kip_in": [0., 0., -item['P']/4., 0., 0., 0.]*4})
         for group in (beams, columns):
             for item in group:
                 item["local_force_kip_kip_in"] = _vector(ops.eleResponse(item["tag"], "localForce"), 12, "member local force")
@@ -390,7 +406,7 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                     element_at_node[n][d] += transported[d]
         constraint_actions, free_node_residual = [], 0.
         constrained_set = {n for tied in constrained.values() for n in tied}
-        grid_of = {n: (i//mesh, j//mesh) if i % mesh == 0 and j % mesh == 0 else None
+        grid_of = {n: (i//mx, j//my) if i % mx == 0 and j % my == 0 else None
                    for (k, i, j), n in floor_nodes.items()}
         floor_of = {n: k for (k, i, j), n in floor_nodes.items()}
         for n, f in element_at_node.items():
@@ -455,7 +471,7 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
             nodes = [n for (kk, i, j), n in floor_nodes.items() if kk == k]
             floors.append({"floor": k, "maximum_downward_displacement_in": max(0., -min(disps[n][2] for n in nodes)),
                            "column_joint_displacements": [{"grid_i": i, "grid_j": j,
-                                "displacement_rotation": disps[floor_nodes[k, i*mesh, j*mesh]]}
+                                "displacement_rotation": disps[floor_nodes[k, i*mx, j*my]]}
                                 for j in range(ny+1) for i in range(nx+1)],
                            "diaphragm_master_displacement_rotation": disps[masters[k]] if k in masters else None})
         result.update({"weight_ledger": weight_ledger, "base_reactions": reactions,

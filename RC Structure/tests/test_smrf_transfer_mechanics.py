@@ -27,7 +27,7 @@ from Design.SMRF_Elastic import beam_line_family, build_design_model, physical_m
 from Design.SMRF_Beam_Actions import recover_beam_bending, applied_element_loads  # noqa: E402
 from Loads import Gravity_Loads as loads  # noqa: E402
 from Analysis.Gravity import run_gravity_analysis  # noqa: E402
-from Model.nodes import node_tag  # noqa: E402
+from Model.Build_Model import node_tag  # noqa: E402
 
 SLAB = {"thickness_in": 5.0, "concrete_fc_ksi": 4.0,
         "concrete_unit_weight_kcf": 0.15, "superimposed_dead_load_ksf": 0.05}
@@ -132,9 +132,7 @@ class FrameReferenceTests(unittest.TestCase):
 
     # -- reference frame: beams subdivided at every transfer node, loads applied there --
     def _reference(self, dead_factor, live_factor, live_pattern):
-        from Model.nodes import create_nodes
-        from Model.nodes import fix_base_nodes
-        from Model.diaphragms import create_rigid_diaphragms
+        from Model.Build_Model import create_nodes, fix_base_nodes, create_rigid_diaphragms
         from Model.IMK_Hinges import reset_hinge_registry
         ops.wipe()
         ops.model("basic", "-ndm", 3, "-ndf", 6)

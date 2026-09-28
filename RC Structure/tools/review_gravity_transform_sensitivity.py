@@ -25,7 +25,7 @@ from Design.Design_Driver import apply_design
 from Design.SMRF_Elastic import build_design_model, physical_members
 from Loads.Gravity_Loads import apply_gravity_loads
 from Analysis.Gravity import run_gravity_analysis
-from Model.nodes import node_tag
+from Model.Build_Model import node_tag
 
 
 def sha(path):

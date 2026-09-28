@@ -328,7 +328,7 @@ class FrameApplicationTests(unittest.TestCase):
         from Design.SMRF_Elastic import build_design_model
         from Loads.Gravity_Loads import apply_gravity_loads
         from Analysis.Gravity import run_gravity_analysis
-        from Model.nodes import node_tag
+        from Model.Build_Model import node_tag
         expected = sp.NUM_FLOOR * (sp.total_floor_gravity_load() + sp.total_structural_self_weight_per_floor())
         with mock.patch.object(sp, "FLOOR_TRANSFER", self.transfer):
             self.assertEqual(sp.effective_gravity_load_model(), "slab_transfer")

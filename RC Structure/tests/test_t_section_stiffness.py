@@ -19,7 +19,7 @@ import Structure_Parameters as sp  # noqa: E402
 from Design.SMRF_Beam_Slab_Strength import effective_flange_width  # noqa: E402
 from Design.SMRF_Elastic import beam_line_family, build_design_model  # noqa: E402
 from Model import IMK_Hinges  # noqa: E402
-from Model.nodes import node_tag  # noqa: E402
+from Model.Build_Model import node_tag  # noqa: E402
 
 CASE_0144 = {"NUM_BAY_X": 6, "NUM_BAY_Y": 2, "NUM_FLOOR": 8, "BAY_X": 168.0, "BAY_Y": 132.0, "STORY_H": 120.0,
              "B_COL": 24.0, "H_COL": 24.0, "B_BEAM": 10.0, "H_BEAM": 18.0, "FC_COL_KSI": 4.0, "FC_BEAM_KSI": 6.0,

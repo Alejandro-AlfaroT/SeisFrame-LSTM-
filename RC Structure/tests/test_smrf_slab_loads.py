@@ -174,7 +174,7 @@ class SlabLoadTests(unittest.TestCase):
         from Design.SMRF_Elastic import build_design_model
         from Loads.Gravity_Loads import apply_gravity_loads
         from Analysis.Gravity import run_gravity_analysis
-        from Model.nodes import node_tag
+        from Model.Build_Model import node_tag
         sp.NUM_FLOOR = 1
         expected = sp.total_floor_gravity_load() + sp.total_structural_self_weight_per_floor()
         for mode in ("nodal", "beam_uniform"):

@@ -188,14 +188,27 @@ def recover_floor_cut(result, floor, axis, position_in, *, reference_in=None, nu
     if not 0<cut<length*geometry['num_bay_x' if axis=='x' else 'num_bay_y'] or abs(cut/length-round(cut/length))<1e-9:
         raise ValueError('Choose an interior cut between column lines')
     shells = [s for s in result['shell_resultants'] if s['floor']==floor]
-    expected = {(i,j) for i in range(geometry['num_bay_x']*mesh) for j in range(geometry['num_bay_y']*mesh)}
+    from .SMRF_Floor_Mesh import coupled_floor_mesh
+    grid = coupled_floor_mesh(geometry['num_bay_x'],geometry['num_bay_y'],geometry['bay_x_in'],geometry['bay_y_in'],mesh,
+        beam_width_in=result['inputs']['sections']['b_beam_in'],
+        slab_perimeter=result['inputs'].get('slab_perimeter','centerlines'), mesh_spec=result['inputs'].get('mesh_spec'))
+    xs = dict(enumerate(grid['x_coordinates_in'],start=grid['index_start']))
+    ys = dict(enumerate(grid['y_coordinates_in'],start=grid['index_start']))
+    expected = {(i,j) for i in list(xs)[:-1] for j in list(ys)[:-1]}
     if len(shells)!=len(expected) or {(s['cell_i'],s['cell_j']) for s in shells}!=expected:
         raise ValueError('Incomplete or duplicate floor shell inventory')
+    for shell in shells:
+        i,j=shell['cell_i'],shell['cell_j'];z=floor*geometry['story_h_in']
+        expected_nodes=[[xs[i],ys[j],z],[xs[i+1],ys[j],z],[xs[i+1],ys[j+1],z],[xs[i],ys[j+1],z]]
+        actual=shell['node_positions_in']
+        if len(actual)!=4 or any(max(abs(a-b) for a,b in zip(_vector(p,3,'shell position'),q))>1e-8
+                                for p,q in zip(actual,expected_nodes)):
+            raise ValueError('Shell coordinates do not match the declared perimeter and cell inventory')
     webs = [b for b in result['web_segment_actions'] if b['floor']==floor]
     expected_webs = {(a,line,span,k) for a,lines,spans in
                     (('x',geometry['num_bay_y']+1,geometry['num_bay_x']),
                      ('y',geometry['num_bay_x']+1,geometry['num_bay_y']))
-                    for line in range(lines) for span in range(spans) for k in range(mesh)}
+                    for line in range(lines) for span in range(spans) for k in range(grid['subdivisions_x_per_bay' if a=='x' else 'subdivisions_y_per_bay'])}
     if len(webs)!=len(expected_webs) or {(b['axis'],b['line_index'],b['span_index'],b['segment_index']) for b in webs}!=expected_webs:
         raise ValueError('Incomplete or duplicate floor web inventory')
     external = [a for a in result['floor_boundary_actions'] if a['floor']==floor]

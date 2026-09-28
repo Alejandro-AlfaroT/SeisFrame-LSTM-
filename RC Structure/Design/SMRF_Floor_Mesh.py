@@ -67,6 +67,44 @@ def floor_mesh(nx, ny, lx, ly, mesh_per_bay, *, mesh_spec=None, uniform_shell_li
             "shell_budget": budget, "solver": solver}
 
 
+def coupled_floor_mesh(nx, ny, lx, ly, mesh_per_bay, *, beam_width_in,
+                       slab_perimeter='centerlines', mesh_spec=None, uniform_shell_limit=8192):
+    """Add slab-only strips to the beam faces, preserving every interior node.
+
+    Integer indices of the original grid remain unchanged. A face extension
+    adds nodes at -1 and n+1 and cells at -1 and n, without extending beams or
+    changing supports. Every added cell inherits its nearest panel's pressure,
+    including that panel's dead/live factors and pattern. Corner cells occur
+    once in the rectangular grid. Counts include the extension before solving.
+    """
+    if slab_perimeter not in ('centerlines', 'beam_outer_faces'):
+        raise ValueError('slab_perimeter must be centerlines or beam_outer_faces')
+    if (isinstance(beam_width_in, bool) or not isinstance(beam_width_in, (int, float))
+            or not math.isfinite(beam_width_in) or not 0 < beam_width_in < min(lx, ly)):
+        raise ValueError('Beam width must be finite, positive and less than either bay')
+    grid = floor_mesh(nx, ny, lx, ly, mesh_per_bay, mesh_spec=mesh_spec,
+                      uniform_shell_limit=uniform_shell_limit)
+    extension = beam_width_in/2 if slab_perimeter == 'beam_outer_faces' else 0.
+    xs, ys = grid['x_coordinates_in'], grid['y_coordinates_in']
+    if extension:
+        xs, ys = [-extension]+xs+[nx*lx+extension], [-extension]+ys+[ny*ly+extension]
+    count = (len(xs)-1)*(len(ys)-1)
+    if count > grid['shell_budget']:
+        raise ValueError(f'Perimeter-inclusive floor has {count} shells, exceeding budget {grid["shell_budget"]}')
+    coordinates = dict(x_coordinates_in=xs, y_coordinates_in=ys)
+    dx, dy = [b-a for a,b in zip(xs,xs[1:])], [b-a for a,b in zip(ys,ys[1:])]
+    area = (xs[-1]-xs[0])*(ys[-1]-ys[0])
+    return dict(grid, **coordinates, slab_perimeter=slab_perimeter,
+                coordinate_sha256=hashlib.sha256(json.dumps(coordinates, sort_keys=True, separators=(',', ':'),
+                                                           allow_nan=False).encode()).hexdigest(),
+                shell_count=count, node_count=len(xs)*len(ys), index_start=-1 if extension else 0,
+                perimeter_extension_in=extension, represented_area_in2=area,
+                centerline_area_in2=nx*lx*ny*ly, added_area_in2=area-nx*lx*ny*ly,
+                minimum_cell_width_in=min(*dx,*dy),
+                maximum_cell_aspect_ratio=max(max(dx)/min(dy),max(dy)/min(dx)),
+                perimeter_load_basis='Nearest adjacent panel pressure, including factored dead/live pattern; corner area once')
+
+
 # Graded face recipe, version 1. Half-bay node pattern from the column line
 # to midspan, mirrored: two nodes between the column line and the beam face
 # at 2/7 and 4/7 of the face offset, the face itself, then nine nodes over
