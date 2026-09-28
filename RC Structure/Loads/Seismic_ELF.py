@@ -12,7 +12,7 @@ the same forces.
 
 Seismic weight
 --------------
-W is taken from the same accounted weight that Model/mass.py turns into nodal
+W is taken from the same accounted weight that Model/Build_Model.py turns into nodal
 mass (sp.total_floor_seismic_weight()). Legacy mode retains floor D+100%L and
 omits member mass. Slab-aware mode includes computed slab+superimposed dead,
 the configured seismic live-load fraction, and consistently lumped member
@@ -24,7 +24,7 @@ Unit system: kip, inch, second.
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
-from Model.diaphragms import floor_master_node
+from Model.Build_Model import floor_master_node
 
 
 ELF_SERIES_TAG_X = 21
@@ -172,3 +172,17 @@ def apply_elf_loads(direction, model_period_sec=None, load_factor=1.0, elf=None,
 
     return {**elf, "accidental_torsion_kip_in": torsion, "accidental_torsion_ratio": accidental_torsion_ratio,
             "torsion_amplification_ax": torsion_amplification, "torsion_sign": torsion_sign}
+
+
+def apply_lateral_loads():
+    """Uniform test pattern: sp.FX_FLOOR in X at every floor master (Main.py's legacy lateral case).
+
+    Not the ELF demand; kept beside it so every lateral load pattern lives in
+    one module (moved here from Loads/Lateral_Loads.py on 2026-09-25).
+    """
+    ops.timeSeries("Linear", 2)
+    ops.pattern("Plain", 2, 2)
+
+    for k in range(1, sp.NUM_FLOOR + 1):
+        master = floor_master_node(k)
+        ops.load(master, sp.FX_FLOOR, 0.0, 0.0, 0.0, 0.0, 0.0)

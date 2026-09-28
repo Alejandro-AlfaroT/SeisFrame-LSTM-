@@ -3,9 +3,7 @@ import math
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
-from Analysis.Constraints import apply_analysis_constraints
-from Model.diaphragms import floor_master_node
-from Model.nodes import node_tag, roof_master_node
+from Model.Build_Model import apply_analysis_constraints, floor_master_node, node_tag, roof_master_node
 
 
 def _massed_nodes():

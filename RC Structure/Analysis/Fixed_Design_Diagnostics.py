@@ -1,30 +1,47 @@
-"""Fixed-design ground-motion diagnostic with full-rate hinge loops (one case, one record pair, one worker).
+"""Fixed-design diagnostics on a saved record: a direction-explicit pushover, or one ground-motion pair with full-rate hinge loops.
 
-    python Design/Pilot_Ground_Motion_Diagnostic.py --root D:/StructGNN_outputs/dv150_v10 --case case_0074 \
-        --result-id 11 --set-name peer_strong_63 --scale 1.0 --output-root <isolated folder>
-        [--damping-ratio 0.05 --rayleigh-mode-i 0 --rayleigh-mode-j 2 --dt-factor 1.0 --x-only --plot-limit 24]
+    python Analysis/Fixed_Design_Diagnostics.py pushover --root D:/StructGNN_outputs/dv150_v10 --case case_0074 \
+        --runs y+ --output-root <folder> [--du 0.05 --max-steps 1200 --target-drift 0.04 \
+        --gravity-dead 1.0 --gravity-live 0.25 --pattern elf]
 
-What it does, in order: read the saved record and hash it; apply the
-record's OWN geometry (record["geometry"]) and seismic site
-(record["seismic"], checked value by value after applying the named
-entry) -- no generation plan is consulted; install the saved design
-explicitly (Design_Driver.apply_design -- no cache loading, no
-source-identity check, no redesign); build the current IMK model with the
-production NTHA conventions (Ground_Motion_Main.build_gravity_modal_state:
-elastic reference modal analysis, D + L gravity at factor 1.0 through the
-saved slab transfer, then the post-gravity modal diagnostic); measure the
-gravity state; verify the installed sections, reinforcement, slab and
-hinge registry against the record (per member, end and sign for the beam
-strengths); attach a full-rate material recorder to every hinge spring in
-the domain; load the record pair with its component ids; run
-Analysis.NTHA.run_ntha with Rayleigh damping from the reference modes;
-save the production outputs; read the recorders within the retained window;
-evaluate every spring against its own installed backbone (path-aware and
-virgin-backbone yield calls); justify a history stride against the full
-rate; plot the yielded loops; hash the record again; write manifest.json.
-A failed or empty solve still writes the manifest with the observed
-failure and no fabricated response. Diagnostic evidence about the declared
+    python Analysis/Fixed_Design_Diagnostics.py ground-motion --root D:/StructGNN_outputs/dv150_v10 --case case_0074 \
+        --result-id 11 --set-name peer_strong_63 --scale 1.0 --output-root <isolated folder> \
+        [--damping-ratio 0.05 --rayleigh-mode-i 0 --rayleigh-mode-j 2 --dt-factor 1.0 --x-only --plot-limit 24 \
+         --member-material IMKBilin]
+
+Both commands read <root>/<case>/design.json and hash it, apply the record's
+OWN geometry (record["geometry"]) and seismic site (record["seismic"]: the
+named entry is applied, then SDS, SD1, S1 and R are checked value by value)
+-- no generation plan is consulted -- and install the saved design
+explicitly (Design_Driver.apply_design: sections, cage, hoops, slab,
+transfer, slab reinforcement; no cache loading, no source-identity check,
+no redesign). The saved record is read only and its hash is checked again at
+the end. One worker, isolated output. Diagnostic evidence about the declared
 model, kept apart from design qualification and training data.
+
+pushover: Analysis.Pushover_Diagnostic.run_diagnostic for each requested run
+in sequence, writing <output-root>/<case>/<run>/summary.json and steps.jsonl
+plus a manifest with the record's SHA-256 and the current source identity.
+
+ground-motion, in order: build the current IMK model with the production
+NTHA conventions (Ground_Motion_Main.build_gravity_modal_state: elastic
+reference modal analysis, D + L gravity at factor 1.0 through the saved slab
+transfer, then the post-gravity modal diagnostic); measure the gravity
+state; verify the installed sections, reinforcement, slab and hinge registry
+against the record (per member, end and sign for the beam strengths);
+attach a full-rate material recorder to every hinge spring in the domain;
+load the record pair with its component ids; run Analysis.NTHA.run_ntha
+with Rayleigh damping from the reference modes; save the production
+outputs; read the recorders within the retained window; evaluate every
+spring against its own installed backbone (path-aware and virgin-backbone
+yield calls); justify a history stride against the full rate; plot the
+yielded loops; write manifest.json. A failed or empty solve still writes the
+manifest with the observed failure and no fabricated response.
+
+Merged on 2026-09-25 from Design/Benchmark_Diagnostic.py (which used to take
+the geometry and site from the generation plan; it now takes them from the
+record like the ground-motion runner, as reviewed) and
+Design/Pilot_Ground_Motion_Diagnostic.py (unchanged behaviour).
 """
 from __future__ import annotations
 
@@ -43,6 +60,7 @@ sys.path.insert(0, str(RC))
 sys.path.insert(0, str(RC / "Data_Generation"))
 
 
+# ---- shared preamble --------------------------------------------------------------------------------
 def sha256_file(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -54,28 +72,85 @@ def git_head():
         return None
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--root", required=True)
-    parser.add_argument("--case", required=True)
-    parser.add_argument("--result-id", type=int, required=True, help="PEER result_id pair in the record set")
-    parser.add_argument("--set-name", default="peer_strong_63")
-    parser.add_argument("--scale", type=float, default=1.0, help="scale factor applied to both components (the catalog's processed files are in in/s^2; the loader converts units)")
-    parser.add_argument("--output-root", required=True)
-    parser.add_argument("--damping-ratio", type=float, default=0.05)
-    parser.add_argument("--rayleigh-mode-i", type=int, default=0)
-    parser.add_argument("--rayleigh-mode-j", type=int, default=2)
-    parser.add_argument("--dt-factor", type=float, default=1.0)
-    parser.add_argument("--x-only", action="store_true")
-    parser.add_argument("--plot-limit", type=int, default=24)
-    parser.add_argument("--label", default="")
-    parser.add_argument("--member-material", choices=("IMKBilin", "IMKPeakOriented"), default="IMKBilin",
-                        help="member flexural law; PeakOriented uses provisional diagnostic A-mode values 10 and 1")
-    args = parser.parse_args(argv)
+def read_record(root, case):
+    """The saved record, its raw bytes and its path; the bytes are hashed by the callers."""
+    record_path = Path(root) / case / "design.json"
+    raw = record_path.read_bytes()
+    return record_path, raw, json.loads(raw)
 
-    import openseespy.opensees as ops
+
+def install_record(record, case_label):
+    """Apply the record's own geometry and site (values checked), then install the saved design.
+
+    Returns the geometry overrides and the site check so the manifest can state both.
+    """
     import Structure_Parameters as sp
     import Geometry_Overrides as go
+    from Design import Design_Driver as driver
+
+    geometry, seismic = record["geometry"], record["seismic"]
+    overrides = {"NUM_BAY_X": int(geometry["num_bay_x"]), "NUM_BAY_Y": int(geometry["num_bay_y"]), "NUM_FLOOR": int(geometry["num_floor"]),
+                 "STORY_H": float(geometry["story_h_in"]), "BAY_X": float(geometry["bay_x_in"]), "BAY_Y": float(geometry["bay_y_in"])}
+    go.apply_geometry_overrides(overrides, variant_name=case_label, emit=False)
+    sp.apply_seismic_site(seismic["site_label"])
+    site_check = {k: {"record": seismic[k], "installed": getattr(sp, attr), "match": math.isclose(float(seismic[k]), float(getattr(sp, attr)), rel_tol=1e-12)}
+                  for k, attr in (("sds", "ASCE_SDS"), ("sd1", "ASCE_SD1"), ("s1", "ASCE_S1"), ("r", "ASCE_R"))}
+    if not all(v["match"] for v in site_check.values()):
+        raise RuntimeError(f"the named site entry does not reproduce the record's seismic values: {site_check}")
+    driver.apply_design(record)
+    return overrides, site_check
+
+
+def parse_run(text):
+    text = text.strip().lower()
+    if len(text) != 2 or text[0] not in "xy" or text[1] not in "+-":
+        raise argparse.ArgumentTypeError("runs are x+, x-, y+ or y-")
+    return text[0], 1.0 if text[1] == "+" else -1.0
+
+
+# ---- pushover ---------------------------------------------------------------------------------------
+def run_pushover(args):
+    from Design import Design_Driver as driver
+    from Analysis.Pushover_Diagnostic import DiagnosticSettings, run_diagnostic
+
+    record_path, raw, record = read_record(args.root, args.case)
+    overrides, site_check = install_record(record, args.case)
+    period = driver._model_period()
+    out_root = Path(args.output_root) / args.case
+    out_root.mkdir(parents=True, exist_ok=True)
+    manifest = {"diagnostic_runner": "Analysis/Fixed_Design_Diagnostics.py pushover",
+                "case": {"case_id": args.case, "geometry": overrides, "site_label": record["seismic"]["site_label"], "site_check": site_check,
+                         "geometry_applied_from": "record['geometry']", "site_applied_from": "record['seismic']['site_label'], values checked"},
+                "record": str(record_path), "record_sha256": hashlib.sha256(raw).hexdigest(), "record_bytes": len(raw),
+                "schema_version": record.get("schema_version"), "request_identity_sha256": (record.get("request_identity") or {}).get("sha256"),
+                "model_period_sec": period, "source_identity": driver.design_request_identity()["source_sha256"], "git_head": git_head(),
+                "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "runs": {}}
+    for direction, sign in args.runs:
+        name = f"{direction}{'+' if sign > 0 else '-'}"
+        settings = DiagnosticSettings(direction=direction, sign=sign, load_pattern=args.pattern, model_period_sec=period,
+                                      gravity_dead_factor=args.gravity_dead, gravity_live_factor=args.gravity_live,
+                                      du_in=args.du, max_steps=args.max_steps, target_roof_drift_ratio=args.target_drift,
+                                      stop_on_strength_loss_fraction=args.stop_fraction, record_every=args.record_every,
+                                      label=args.label or f"{args.case} {name}")
+        print(f"[{args.case}] run {name}: du {args.du} in, {args.max_steps} steps max, target drift {args.target_drift}, "
+              f"gravity D x {args.gravity_dead} + L x {args.gravity_live}, pattern {args.pattern}", flush=True)
+        summary = run_diagnostic(settings, out_root / name, verbose=args.verbose)
+        manifest["runs"][name] = {"stop_reason": summary["stop_reason"], "completed_steps": summary["completed_steps"],
+                                  "peak_base_shear_kip": summary["peak_base_shear_kip"], "checks": summary["checks"],
+                                  "event_count": summary["event_count"], "elapsed_sec": summary["elapsed_sec"]}
+        print(f"[{args.case}] {name}: {summary['stop_reason']} after {summary['completed_steps']} steps, peak base shear "
+              f"{summary['peak_base_shear_kip']:.2f} kip, checks all_pass={summary['checks']['all_pass']}", flush=True)
+    manifest["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    manifest["record_sha256_after"] = sha256_file(record_path)
+    manifest["record_unchanged"] = manifest["record_sha256"] == manifest["record_sha256_after"]
+    (out_root / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    return manifest
+
+
+# ---- ground motion ----------------------------------------------------------------------------------
+def run_ground_motion(args):
+    import openseespy.opensees as ops
+    import Structure_Parameters as sp
     from Design import Design_Driver as driver
     from Analysis.NTHA import run_ntha
     from Analysis import Hinge_Hysteresis_Diagnostic as hd
@@ -83,14 +158,14 @@ def main(argv=None):
     import Ground_Motion_Main as gm
 
     started = time.time()
-    record_path = Path(args.root) / args.case / "design.json"
-    sha_before = sha256_file(record_path)
-    record = json.loads(record_path.read_bytes())
+    record_path, raw, record = read_record(args.root, args.case)
+    sha_before = hashlib.sha256(raw).hexdigest()
     out = Path(args.output_root) / args.case / f"peer_{args.result_id}_scale_{args.scale:g}{'_x_only' if args.x_only else ''}"
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"output folder {out} is not empty; the pilot writes into a fresh folder only")
     out.mkdir(parents=True, exist_ok=True)
-    manifest = {"diagnostic_version": hd.DIAGNOSTIC_VERSION, "label": args.label, "case_id": args.case,
+    manifest = {"diagnostic_version": hd.DIAGNOSTIC_VERSION, "diagnostic_runner": "Analysis/Fixed_Design_Diagnostics.py ground-motion",
+                "label": args.label, "case_id": args.case,
                 "record_path": str(record_path), "record_sha256_before": sha_before, "status": "started"}
 
     def write_manifest():
@@ -100,28 +175,28 @@ def main(argv=None):
         (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
 
     try:
-        # --- geometry and site from the record itself ---------------------------------------------------
-        geometry, seismic = record["geometry"], record["seismic"]
-        overrides = {"NUM_BAY_X": int(geometry["num_bay_x"]), "NUM_BAY_Y": int(geometry["num_bay_y"]), "NUM_FLOOR": int(geometry["num_floor"]),
-                     "STORY_H": float(geometry["story_h_in"]), "BAY_X": float(geometry["bay_x_in"]), "BAY_Y": float(geometry["bay_y_in"])}
-        go.apply_geometry_overrides(overrides, variant_name=args.case, emit=False)
-        sp.apply_seismic_site(seismic["site_label"])
-        site_check = {k: {"record": seismic[k], "installed": getattr(sp, attr), "match": math.isclose(float(seismic[k]), float(getattr(sp, attr)), rel_tol=1e-12)}
-                      for k, attr in (("sds", "ASCE_SDS"), ("sd1", "ASCE_SD1"), ("s1", "ASCE_S1"), ("r", "ASCE_R"))}
-        if not all(v["match"] for v in site_check.values()):
-            raise RuntimeError(f"the named site entry does not reproduce the record's seismic values: {site_check}")
-        driver.apply_design(record)
-        # An explicit diagnostic choice, never a mutation of the saved design.
+        # --- geometry and site from the record itself, then the saved design ------------------------------
+        overrides, site_check = install_record(record, args.case)
+        # An explicit diagnostic choice, never a mutation of the saved design. The default is the
+        # production material, so the runner exercises what generation would install.
+        from Data_Generation.Graph_Exporter import installed_deterioration_policy
         sp.IMK_MATERIAL_TYPE = args.member_material
-        if args.member_material == "IMKPeakOriented":
+        deterioration_mode = getattr(sp, "IMK_DETERIORATION_MODE", "direct")
+        diagnostic_a_mode = args.member_material == "IMKPeakOriented" and deterioration_mode == "direct"
+        if diagnostic_a_mode:
+            # The 2026-09-22 provisional A-mode values belong to the direct convention only. Under
+            # haselton_2008 the A and K modes are suppressed (1e12) whatever these constants say,
+            # so overriding them there would only misreport the identity.
             sp.IMK_LAMBDA_A, sp.IMK_C_A = 10.0, 1.0
             sp.IMK_CYCLIC_CALIBRATION_ID = "peak_oriented_diagnostic_defaults_20260922"
             sp.IMK_CYCLIC_CALIBRATION_STATUS = "provisional_not_experimentally_calibrated"
         manifest["member_material_profile"] = {
             "material_type": sp.IMK_MATERIAL_TYPE, "energy_convention": sp.IMK_ENERGY_CONVENTION,
+            "deterioration_mode": deterioration_mode,
+            "installed_deterioration": installed_deterioration_policy(),
             "calibration_id": sp.IMK_CYCLIC_CALIBRATION_ID, "status": sp.IMK_CYCLIC_CALIBRATION_STATUS,
-            "lamda_a": sp.IMK_LAMBDA_A if args.member_material == "IMKPeakOriented" else None,
-            "c_a": sp.IMK_C_A if args.member_material == "IMKPeakOriented" else None,
+            "lamda_a": sp.IMK_LAMBDA_A if diagnostic_a_mode else None,
+            "c_a": sp.IMK_C_A if diagnostic_a_mode else None,
             "joint_springs_installed": False,
         }
         current_identity = driver.design_request_identity()
@@ -146,6 +221,12 @@ def main(argv=None):
         audit, inventory, hinges = hd.run_audit()
         gravity_measured = hd.measured_gravity_state(inventory)
         coverage = hd.attach_hinge_recorders(out / "recorders", hinges)
+        joint_coverage = None
+        if getattr(args, "joint_loops", False):
+            from Analysis import Joint_Loops_Diagnostic as jl
+            joint_coverage = jl.attach_joint_recorders(out / "recorders")
+            print(f"[{args.case}] joint pinching springs recorded at full rate: "
+                  f"{len(joint_coverage['joint_element_order']) if joint_coverage else 0} joints (diagnostic only)", flush=True)
         valid = [m for m in reference_modal if m.get("valid")]
         print(f"[{args.case}] installed design verified: {verification['consistent']} ({len(verification['differences'])} differences); "
               f"hinges {len(hinges)} (domain {coverage['domain_hinge_count']}); T1 {valid[0]['period']:.4f} s, T2 {valid[1]['period']:.4f} s; "
@@ -261,6 +342,12 @@ def main(argv=None):
                                    "yielded": [r for r in rows_eval if r.get("yielded")],
                                    "criteria_disagreements": [r for r in rows_eval if r.get("criteria_disagree")][:50],
                                    "histories_npz": histories, "evaluation_json": str(out / "hinge_evaluation.json"), "plots": plots})
+        if joint_coverage:
+            from Analysis import Joint_Loops_Diagnostic as jl
+            manifest["joints"] = jl.run_joint_evaluation(joint_coverage, out, last_time, plot_limit=args.plot_limit)
+            js = manifest["joints"]["summary"]
+            print(f"[{args.case}] joint springs: {js['yielded_springs']} / {js['springs']} yielded; max rotation "
+                  f"{js['max_rotation_over_theta_y']:.2f} theta_y; max moment {js['max_moment_over_mn']:.2f} Mn", flush=True)
         manifest["status"] = "completed" if not status["failed"] else "solver_failed"
         if time_history:
             print(f"[{args.case}] peak interstory drift X {100 * peak_x:.3f}% (story {manifest['response']['peak_story_drift_x_story']}), "
@@ -277,6 +364,59 @@ def main(argv=None):
     write_manifest()
     print(f"[{args.case}] {manifest['status']}; record unchanged {manifest['record_unchanged']}; {manifest['elapsed_sec']:.0f} s; manifest {out / 'manifest.json'}", flush=True)
     return manifest
+
+
+# ---- command line -----------------------------------------------------------------------------------
+def build_parser():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    def common(sub):
+        sub.add_argument("--root", required=True, help="verification root holding <case>/design.json")
+        sub.add_argument("--case", required=True)
+        sub.add_argument("--output-root", required=True)
+        sub.add_argument("--label", default="")
+
+    push = commands.add_parser("pushover", help="direction-explicit pushover diagnostic on the saved design")
+    common(push)
+    push.add_argument("--runs", nargs="+", type=parse_run, default=[("y", 1.0)], help="x+, x-, y+ or y-")
+    push.add_argument("--du", type=float, default=0.05)
+    push.add_argument("--max-steps", type=int, default=1200)
+    push.add_argument("--target-drift", type=float, default=0.04)
+    push.add_argument("--gravity-dead", type=float, default=1.0)
+    push.add_argument("--gravity-live", type=float, default=0.25)
+    push.add_argument("--pattern", default="elf", choices=("elf", "uniform", "triangular"))
+    push.add_argument("--stop-fraction", type=float, default=0.2)
+    push.add_argument("--record-every", type=int, default=1)
+    push.add_argument("--verbose", action="store_true")
+    push.set_defaults(func=run_pushover)
+
+    gm = commands.add_parser("ground-motion", help="one record pair on the saved design with full-rate hinge loops")
+    common(gm)
+    gm.add_argument("--result-id", type=int, required=True, help="PEER result_id pair in the record set")
+    gm.add_argument("--set-name", default="peer_strong_63")
+    gm.add_argument("--scale", type=float, default=1.0, help="scale factor applied to both components (the catalog's processed files are in in/s^2; the loader converts units)")
+    gm.add_argument("--damping-ratio", type=float, default=0.05)
+    gm.add_argument("--rayleigh-mode-i", type=int, default=0)
+    gm.add_argument("--rayleigh-mode-j", type=int, default=2)
+    gm.add_argument("--dt-factor", type=float, default=1.0)
+    gm.add_argument("--x-only", action="store_true")
+    gm.add_argument("--plot-limit", type=int, default=24)
+    gm.add_argument("--joint-loops", action="store_true",
+                    help="also record the joint pinching springs at full rate and plot their loops (Analysis/Joint_Loops_Diagnostic; "
+                         "diagnostic only, never a production output)")
+    import Structure_Parameters as sp          # plain data; the OpenSees imports stay inside the run functions
+    gm.add_argument("--member-material", choices=("IMKBilin", "IMKPeakOriented"), default=sp.IMK_MATERIAL_TYPE,
+                    help="member flexural law (default: the production setting in Structure_Parameters). Under the "
+                         "direct deterioration convention PeakOriented uses the provisional diagnostic A-mode "
+                         "values 10 and 1; under haselton_2008 A and K are suppressed and nothing is overridden")
+    gm.set_defaults(func=run_ground_motion)
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    return args.func(args)
 
 
 if __name__ == "__main__":

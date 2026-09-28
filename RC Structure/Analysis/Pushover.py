@@ -4,13 +4,12 @@ from pathlib import Path
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
-from Analysis.Constraints import apply_analysis_constraints
+from Model.Build_Model import apply_analysis_constraints, node_tag, roof_master_node
 from Analysis.Diagnostics import (
     collect_failed_element_diagnostics,
     parse_failed_element_tags,
 )
 from Analysis.Mechanism_Checks import MechanismTracker
-from Model.nodes import node_tag, roof_master_node
 from RC_Design_Check import build_column_PM_diagram, get_element_tags, run_checks
 
 

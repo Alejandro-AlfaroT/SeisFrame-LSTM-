@@ -6,7 +6,7 @@ import Structure_Parameters as sp
 from Data_Generation.Graph_Exporter import collect_element_rows
 from Design.ACI_Checks import build_pm_diagram, check_column_pm
 from Design.Config import DesignConfig
-from Model.diaphragms import floor_master_node
+from Model.Build_Model import floor_master_node
 from Model.IMK_Hinges import hinge_backbone, hinge_element_tag, imk_hinge_thresholds
 
 

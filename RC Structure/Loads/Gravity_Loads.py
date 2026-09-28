@@ -12,7 +12,7 @@ load intensity (kip/in²) multiplied by its tributary width:
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
-from Model.nodes import node_tag
+from Model.Build_Model import node_tag
 
 
 def _column_count():

@@ -21,7 +21,7 @@ from Analysis.NTHA import run_ntha
 from Analysis.Diagnostics import print_failed_element_diagnostics
 from Data_Generation.Graph_Exporter import save_analysis_sample
 from Loads.Gravity_Loads import apply_gravity_loads
-from Loads.Lateral_Loads import apply_lateral_loads
+from Loads.Seismic_ELF import apply_lateral_loads
 from Loads.Ground_Motion import (
     ground_motion_catalog_summary,
     load_ground_motion_pair_by_result_id,

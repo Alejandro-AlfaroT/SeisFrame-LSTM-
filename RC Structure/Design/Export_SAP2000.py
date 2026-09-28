@@ -83,7 +83,7 @@ def load_record(path):
 
 
 def node_tag(nx, ny, k, i, j):
-    """Identical to Model.nodes.node_tag so joint labels match OpenSees."""
+    """Identical to Model.Build_Model.node_tag so joint labels match OpenSees."""
     return k * ((nx + 1) * (ny + 1)) + j * (nx + 1) + i + 1
 
 
@@ -109,7 +109,7 @@ def _beam_stiffness_ratios(record, frame):
 
 
 class Frame:
-    """Geometry and numbering, mirroring Model/elements.py exactly."""
+    """Geometry and numbering, mirroring Model/Build_Model.py exactly."""
 
     def __init__(self, record):
         g = record["geometry"]
@@ -578,7 +578,7 @@ def build(record, variant):
                                if k in ("base_moment_ratio_frame_over_coupled", "max_column_vertical_relative_difference",
                                         "frame_total_vertical_kip", "coupled_total_vertical_kip")},
         "stiffness_modifiers": {"column": col_mod, "beam": beam_mod},
-        "labels": {"joint": "Model.nodes.node_tag(k, i, j)", "frame": "OpenSees element tag, columns then beam_x then beam_y",
+        "labels": {"joint": "Model.Build_Model.node_tag(k, i, j)", "frame": "OpenSees element tag, columns then beam_x then beam_y",
                    "diaphragm": "DIAPH<k>, one per elevated floor"},
         "known_differences": [
             "SAP linear static has no P-Delta unless you enable it; the OpenSees drift screen includes it (theta ~0.02 -> ~2% drift).",

@@ -26,7 +26,7 @@ from test_imk_materials import rotation_history
 FILES = ["Model/Joint_Panel.py", "Model/JOINT_PANEL.md", "Model/IMK_Materials.py",
          "Model/IMK_Hinges.py", "Model/IMK_Calibration.py", "Structure_Parameters.py",
          "Analysis/Hinge_Hysteresis_Diagnostic.py", "Analysis/Pushover_Diagnostic.py",
-         "Design/Pilot_Ground_Motion_Diagnostic.py", "Data_Generation/Graph_Exporter.py", "Ground_Motion_Main.py",
+         "Analysis/Fixed_Design_Diagnostics.py", "Data_Generation/Graph_Exporter.py", "Ground_Motion_Main.py",
          "tests/test_joint_panel.py", "tests/test_imk_materials.py", "tests/test_beam_hinge_asymmetry.py",
          "tests/test_generation_regressions.py", "tests/test_hinge_hysteresis_fixture.py", "tests/run_imk_verification.py"]
 def hashes():

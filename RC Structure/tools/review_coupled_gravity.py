@@ -2,7 +2,7 @@
 
 Does not resize, qualify, modify or resume the source design or any dataset.
 Example (from project root):
-  python 'RC Structure/Design/Review_Coupled_Gravity.py' --design-file ... --output-dir ...
+  python 'RC Structure/tools/review_coupled_gravity.py' --design-file ... --output-dir ...
 """
 from __future__ import annotations
 

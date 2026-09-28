@@ -176,7 +176,7 @@ def compare(targets, sap_dir):
                 unavailable(loc, f"{case} joint results missing")
                 continue
             gi, gj = (int(v) for v in st.get("governing_node", "0,0").split(","))
-            # Joint tags are Model.nodes.node_tag(k, i, j); the geometry rides in the targets.
+            # Joint tags are Model.Build_Model.node_tag(k, i, j); the geometry rides in the targets.
             geometry = targets["geometry"]
             per_floor = (int(geometry["num_bay_x"]) + 1) * (int(geometry["num_bay_y"]) + 1)
             n_top = story * per_floor + gj * (int(geometry["num_bay_x"]) + 1) + gi + 1

@@ -59,14 +59,11 @@ from pathlib import Path
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
-from Analysis.Constraints import apply_analysis_constraints
+from Model.Build_Model import apply_analysis_constraints, build_model, floor_master_node, node_tag, roof_master_node
 from Analysis.Gravity import run_gravity_analysis
 from Loads.Gravity_Loads import apply_gravity_loads
 from Loads.Seismic_ELF import elf_story_forces
-from Model.Build_Model import build_model
-from Model.diaphragms import floor_master_node
 from Model.IMK_Hinges import hinge_element_tag, hinge_registry, imk_hinge_stiffness
-from Model.nodes import node_tag, roof_master_node
 
 
 DIAGNOSTIC_VERSION = "pushover_diagnostic_v1_direction_explicit"

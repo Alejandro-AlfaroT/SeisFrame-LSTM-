@@ -963,8 +963,9 @@ class CollapseCompletionTests(unittest.TestCase):
     """A collapsed run is finished, not failed.
 
     Hybrid_Exporter keeps and labels a run that stopped early because the
-    structure collapsed, and Calibrate_Intensity censors rather than discards
-    it. The scheduler judged the same run only by step count, so it stayed in
+    structure collapsed, and Calibrate_Intensity keeps it as an ordinary
+    observation below its drift ceiling (it does not censor). The scheduler
+    judged the same run only by step count, so it stayed in
     the remaining list and was retried on every invocation -- forever, since
     the analysis is deterministic.
     """
