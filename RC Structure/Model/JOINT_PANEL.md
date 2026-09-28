@@ -134,3 +134,23 @@ degradation governs a code-conforming SMRF or which calibration is adequate.
 - OpenSees [rigidLink](https://opensees.github.io/OpenSeesDocumentation/user/manual/model/mp_constraint/rigidLink.html): small-rotation constraint matrix.
 - OpenSees [Lagrange constraints](https://opensees.github.io/OpenSeesDocumentation/user/manual/analysis/constraint/lagrangeMultipliers.html): indefinite matrix requirement.
 - Golias and De Risi (2026), [full-scale exterior joint experiments](https://doi.org/10.3390/buildings16081638), Section 5: a scissors panel and separate fixed-end rotation contribution. Those low-standard exterior specimens are a topology/deformation-accounting reference, not a calibration source for this SMRF model. The two-plane extension and work mapping above are our stated idealization.
+
+## Frame integration (2026-09-27)
+
+At the user's decision the building now carries joint springs (`Model/Joint_Springs.py`,
+`JOINT_MODEL = "imk_pinching_scissors"`), overriding the 2026-09-23 "not yet": a centreline
+variant of the topology above (two coincident cores per elevated joint, no finite faces, members
+keep their centreline lengths, loads and masses), IMKPinching in directions 4 and 5, calibrated
+per joint from ACI 318-19 Table 18.8.4.3 strength (the design record's saved category) and
+ASCE/SEI 41-17 Table 10-11 deformation, with `Mn = Vn h_b`, `K = G Aj h_b`, no cyclic
+deterioration and kappaF = kappaD = 0.25. The deformation scope is `joint_shear_and_slip`: the
+member hinges drop Haselton's bond-slip term (`IMK_Calibration.bond_slip_indicator`). Items 1
+and 2 of the list above are therefore answered by declared, provisional choices (transcribed
+table rows, a representative pinching level, slip attributed to the joint), not by experimental
+calibration (the ASCE 41 rows were verified on 2026-09-27 against Table 6-9 of the Elwood et al.
+2007 PEER update that produced them; an ASCE 41 "interior joint" has beams on both faces in the
+plane's direction); item 3's torsion benchmark remains open and item 4's matched comparison was
+run on 2026-09-27 (`outputs/diag_gm_peakoriented_joints_20260927`). The joint
+keys are part of the ground-motion output identity, and `joint_springs.csv` in every NTHA output
+records what each joint plane was given and the rotation it reached. This module's finite-size
+subassembly and its `JointShearCalibration` contract (shear only) are unchanged.

@@ -118,6 +118,7 @@ def evaluate_case(envelope_path: Path, column_diagram, column_av, beam_av):
                 fc=sp.FC_COL_KSI,
                 Av=column_av,
                 s=sp.COL_STIRRUP_SPACING,
+                h=sp.H_COL,
             )
             _consider(dcr_shear, "column_shear", ele_tag)
         else:

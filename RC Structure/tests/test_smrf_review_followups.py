@@ -38,6 +38,11 @@ class FinalQualificationCounterexamples(unittest.TestCase):
         sp.NUM_BAY_X = sp.NUM_BAY_Y = 1
         sp.NUM_FLOOR = 2
         sp.NUM_MODES = 3 * sp.NUM_FLOOR
+        # The toy 10-in beam meets an 18-in column with four #8 per face: one bar passes per layer, so
+        # its two bars would take two layers (allowed since 2026-09-27) and the layered depth leaves the
+        # one-iteration search no capacity-shear section. The fixture starts at the 18-in variant of
+        # its depth, where three bars pass per layer and the record fails nothing of its own.
+        sp.B_BEAM = 18.0
         try:
             record = driver.design_structure(max_section_iter=1, max_steel_iter=1, verbose=False)
         finally:

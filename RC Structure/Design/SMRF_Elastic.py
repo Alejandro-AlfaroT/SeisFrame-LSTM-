@@ -1,15 +1,13 @@
 """Elastic cracked-stiffness frame for preliminary design, not NTHA.
 
-Same all-grid-line connectivity/tag order as Model.elements. No IMK springs,
+Same all-grid-line connectivity/tag order as Model.Build_Model. No IMK springs,
 no material yielding, and no mutation of the chosen response-history model.
 Columns retain P-Delta transformations. Centerline joints and rigid floors
 are explicit idealizations; qualification still requires reviewing them.
 """
 import openseespy.opensees as ops
 import Structure_Parameters as sp
-from Model.nodes import create_nodes, fix_base_nodes, node_tag
-from Model.diaphragms import create_rigid_diaphragms
-from Model.mass import assign_nodal_masses
+from Model.Build_Model import create_nodes, fix_base_nodes, node_tag, create_rigid_diaphragms, assign_nodal_masses
 from Model.IMK_Hinges import reset_hinge_registry
 
 

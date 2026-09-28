@@ -61,7 +61,7 @@ from Design.SMRF_Joints import (MPR_BASIS, beam_capacity_shear_envelope, rectang
 
 METHOD_VERSION = "aci318_19_capacity_design_v2_table_18_8_4_3_inputs"
 _BAR = {3: (0.375, 0.11), 4: (0.5, 0.20), 5: (0.625, 0.31), 6: (0.75, 0.44), 7: (0.875, 0.60),
-        8: (1.0, 0.79), 9: (1.128, 1.00), 10: (1.27, 1.27), 11: (1.41, 1.56)}
+        8: (1.0, 0.79), 9: (1.128, 1.00), 10: (1.27, 1.27), 11: (1.41, 1.56), 14: (1.693, 2.25), 18: (2.257, 4.00)}
 PHI_SHEAR = 0.75
 PHI_JOINT = 0.85
 SPACING_GRID_IN = 1.0
@@ -157,7 +157,10 @@ def probable_beam_strengths(state, position, axis):
     section = {"b_in": state["sections"]["b_beam_in"], "h_in": state["sections"]["h_beam_in"],
                "fc_ksi": state["sections"]["fc_beam_ksi"], "fy_ksi": state["materials"]["fy_ksi"],
                "bar_size": beam["bar_size"], "top_bars": beam["top_bars"], "bot_bars": beam["bot_bars"],
-               "centroid_offset_in": beam["centroid_offset_in"]}
+               # The direction's own top/bottom offsets when the orthogonal layers stack at the joints,
+               # and its actual bar rows (2026-09-27) where the state carries them.
+               "centroid_offset_in": (beam.get("centroid_offsets_by_axis_in") or {}).get(axis, beam["centroid_offset_in"]),
+               "layers": (beam.get("layers") or {}).get(axis)}
     layout = slab.get("layout")
     slab_arg = {"thickness_in": slab["thickness_in"] if layout is not None else 0.0}
     nominal = composite_beam_strengths(section, slab_arg, layout, geometry, axis, position)
@@ -271,7 +274,8 @@ def design_beam_shear(state, strengths, transfer):
     sections, mats, beam, geometry = state["sections"], state["materials"], state["beam"], state["geometry"]
     fc, fy = sections["fc_beam_ksi"], mats["fy_ksi"]
     bw, h = sections["b_beam_in"], sections["h_beam_in"]
-    d = h - beam["centroid_offset_in"]
+    # The smallest effective depth over directions and faces once the orthogonal layers stack.
+    d = h - beam.get("worst_centroid_offset_in", beam["centroid_offset_in"])
     sds = state["sds"]
     families = {}
     worst_ve, worst_mechanism = 0.0, 0.0
@@ -1529,13 +1533,69 @@ def design_splices(state):
     ln = geometry["story_h_in"] - h
     lap_col = 1.3 * straight_development_length(col["bar_size"], sections["fc_col_ksi"], fy, top_bar=False)
     center_half = ln / 2.0
-    col_lap_fits = lap_col <= center_half
+    # 25.5.1.1: lap splices are not permitted for bars larger than No. 11 (No. 14 and No. 18 column bars,
+    # offered since 2026-09-27 by the column cage rule), so those bars take Type 2 mechanical splices.
+    lap_permitted = int(col["bar_size"]) <= 11
+    col_lap_fits = lap_permitted and lap_col <= center_half
     result["column"] = {"class_b_lap_in": lap_col, "center_half_clear_height_in": center_half,
+                        "lap_splice_permitted_25.5.1.1": lap_permitted,
                         "lap_splice_feasible": col_lap_fits,
                         "splice_type": "class_B_lap_center_half" if col_lap_fits else "type_2_mechanical_18.2.7",
-                        "basis": "18.7.4.3 (laps only in the center half, tension laps, hoops per 18.7.5.2/.3); 25.5.2.1 Class B"}
+                        "basis": ("18.7.4.3 (laps only in the center half, tension laps, hoops per 18.7.5.2/.3); 25.5.2.1 Class B; "
+                                  "25.5.1.1 (no lap splices above No. 11: Type 2 mechanical, 18.2.7.1)")}
     result["all_designed"] = True
     return result
+
+
+def design_bar_threading(state):
+    """The beam bars pass between the column bars within the layer limit, and the stacked layers clear the slab mats.
+
+    Design-basis rule of 2026-09-27 (Design/SMRF_Cage_Geometry.joint_assembly): a candidate whose
+    beam bars cannot thread the column with the 25.2.1 clearance in at most ``beam["max_layers"]``
+    layers (one at first; two since the same day's decision, the second layer directly below the
+    first and priced in the strengths) is not accepted, and the search grows the column where a
+    lane-keeping cage exists or widens the beam. The stacking convention is the one the state carries
+    (Structure_Parameters.beam_bar_stacking_convention); a legacy single elevation is evaluated as
+    x_over_y for the geometry only.
+    """
+    from Design.SMRF_Cage_Geometry import joint_assembly
+    beam, column, sections = state["beam"], state["column"], state["sections"]
+    slab = state.get("slab") or {}
+    max_layers = int(beam.get("max_layers", 1))
+    layer_order = beam.get("layer_order") or "blocked"
+    record = {
+        "sections": sections,
+        "reinforcement": {
+            "col_bar_size": column["bar_size"], "col_top_bars": column["top_bars"], "col_side_bars": column["side_bars"],
+            "col_stirrup_bar_size": column["stirrup_bar_size"], "col_clear_cover_in": column["clear_cover_in"],
+            "beam_bar_size": beam["bar_size"], "beam_top_bars": beam["top_bars"], "beam_bot_bars": beam["bot_bars"],
+            "beam_stirrup_bar_size": beam.get("stirrup_bar_size", STIRRUP_LADDER[0][0]),
+            "beam_clear_cover_in": beam["clear_cover_in"],
+            "beam_longitudinal_centroid_offset_in": beam["centroid_offset_in"],
+            "beam_bar_area_in2": _BAR[beam["bar_size"]][1],
+            "beam_bar_stacking": {"max_layers": max_layers, "layer_order": layer_order,
+                                  "convention": beam.get("stacking_convention")}},
+        "materials": {"fy_ksi": state["materials"]["fy_ksi"],
+                      "aggregate_size_in": state["materials"].get("aggregate_size_in", 0.75)},
+        "slab": {"thickness_in": slab.get("thickness_in") or 0.0},
+        "slab_reinforcement": {"layout": slab.get("layout")} if slab.get("layout") else {},
+        "capacity_design": {},
+    }
+    convention = beam.get("stacking_convention") or "x_over_y"
+    assembly = joint_assembly(record, stacking=convention if convention in ("x_over_y", "y_over_x") else "x_over_y",
+                              max_layers=max_layers, layer_order=layer_order)
+    directions = {axis: {key: value for key, value in d.items() if key != "nominal_positions_in_conflict"}
+                  for axis, d in assembly["directions"].items()}
+    return {"passes": all(d["fits_within_layer_limit"] for d in directions.values()),
+            "max_layers": max_layers, "layer_order": layer_order, "layers": assembly["stacking"]["layers"],
+            "by_direction": directions,
+            "stacking": assembly["stacking"], "stacking_convention": convention,
+            "slab_clashes": assembly["slab_clashes"], "slab_tight_crossings": assembly["slab_tight_crossings"],
+            "slab_mats_placed": assembly["slab_mats_placed"],
+            "stacking_clear_of_mats": not assembly["slab_clashes"],
+            "basis": ("beam bars threaded between the column bars in plan with the 25.2.1 clearance, one layer "
+                      "(Design/SMRF_Cage_Geometry); orthogonal top and bottom layers stacked at the joint, the "
+                      "lower direction's offsets carried into its strengths")}
 
 
 def build_capacity_design(state):
@@ -1547,9 +1607,28 @@ def build_capacity_design(state):
     joints = design_joint_shear(state, strengths, columns, beams)
     anchorage = design_anchorage(state)
     splices = design_splices(state)
+    threading = design_bar_threading(state)
+    beams["bars_thread_column"] = threading
     checks = []
     checks.append(make_check("detailing.splices_designed", "ACI 318-19 18.6.3.3 / 18.7.4.3 / 18.2.7 / 25.5",
                              1, 1, "==", details={"beam": splices["beam"], "column": splices["column"]}))
+    checks.append(make_check("beam.bars_thread_column",
+                             f"ACI 318-19 25.2.1 clearance; at most {threading['max_layers']} layer(s) between the column bars (25.2.2)",
+                             int(threading["passes"]), 1, "==",
+                             details={**{axis: {"bars_per_layer_that_fit": d["bars_per_layer_that_fit"],
+                                                "layers_needed": d["layers_needed"],
+                                                "layers_placed": threading["layers"].get(axis),
+                                                "column_bar_lanes_blocked_in": d["column_bar_lanes_blocked_in"]}
+                                         for axis, d in threading["by_direction"].items()},
+                                      "max_layers": threading["max_layers"]}))
+    checks.append(make_check("beam.bar_stacking_clear_of_slab_mats", "ACI 318-19 25.2.2; orthogonal layers at the joint",
+                             int(threading["stacking_clear_of_mats"]), 1, "==",
+                             details={"convention": threading["stacking_convention"],
+                                      "lower_direction": threading["stacking"]["lower_direction"],
+                                      "lower_layer_centroid_from_face_in": threading["stacking"]["lower_layer_centroid_from_face_in"],
+                                      "overlaps": threading["slab_clashes"],
+                                      "tight_crossings": len(threading["slab_tight_crossings"]),
+                                      "slab_mats_placed": threading["slab_mats_placed"]}))
     checks.append(make_check("beam.capacity_shear_section", "ACI 318-19 22.5.1.2 with 18.6.5.1 Ve",
                              beams["vs_required_kip"], beams["vs_limit_kip"], "<=", "kip"))
     checks.append(make_check("beam.hoops_selected", "ACI 318-19 18.6.4.4 / 18.6.5", int(beams["hoops"] is not None), 1, "=="))
@@ -1601,7 +1680,7 @@ def build_capacity_design(state):
                                      "<=", "in", f"interior/{axis}"))
     beam_evidence = [data for entries in beams["families"].values() for data in entries]
     return {"method_version": METHOD_VERSION, "column_shear_method": columns["column_shear_method"],
-            "beam_strengths": strengths, "beams": beams,
+            "beam_strengths": strengths, "beams": beams, "bar_threading": threading,
             "columns": columns, "joints": joints, "anchorage": anchorage, "splices": splices,
             "transverse": {"beam": beams["hoops"], "column": columns["hoops"]},
             "joint_evidence": {"beam_capacity_shear": beam_evidence, "joint_shear": joints["evidence"]},

@@ -51,11 +51,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import datetime, timezone
 import glob
 import json
 import math
 import os
 from pathlib import Path
+import re
 import sys
 
 import numpy as np
@@ -160,8 +162,15 @@ def geometric_mean_sa(spectra, record_x, record_y, period):
 
 
 def collect_pilot_observations(dataset_roots):
-    """Read completed runs: period, record pair, applied scale, peak drift."""
+    """Read completed runs: period, record pair, applied scale, peak drift.
+
+    Exclusions, as implemented: a failed run below 1% drift (it died before it
+    said anything) and any run above COLLAPSE_DRIFT_CEILING (a diverged solve).
+    A failed run at or above 1% is kept as an ordinary observation; nothing is
+    censored.
+    """
     observations = []
+    design_schemas = {}
     for root in dataset_roots:
         pattern = str(Path(root) / "cases" / "*" / "ntha" / "*" / "summary.json")
         for path_str in sorted(glob.glob(pattern)):
@@ -200,9 +209,17 @@ def collect_pilot_observations(dataset_roots):
                 (path.parent / "global_parameters.json").read_text(encoding="utf-8")
             ) if (path.parent / "global_parameters.json").exists() else {}
 
+            # The design route and hinge model this run was produced with, so the
+            # artifact can say what it is valid for (see MODEL_IDENTITY_KEYS).
+            case_dir = path.parents[2]
+            if case_dir not in design_schemas:
+                design_schemas[case_dir] = _design_schema_version(case_dir / "design.json")
+            model = {key: global_parameters.get(key) for key in MODEL_IDENTITY_KEYS}
+            model["design_schema_version"] = design_schemas[case_dir]
+
             observations.append(
                 {
-                    "case_id": path.parents[2].name,
+                    "case_id": case_dir.name,
                     "run_name": path.parent.name,
                     "period_sec": float(period),
                     "record_x": record_x,
@@ -211,9 +228,105 @@ def collect_pilot_observations(dataset_roots):
                     "peak_drift_ratio": float(drift),
                     "num_floor": int(global_parameters.get("num_floor") or 0),
                     "story_h_in": float(global_parameters.get("story_h_in") or 0.0),
+                    "model": model,
                 }
             )
     return observations
+
+
+def _design_schema_version(design_path):
+    try:
+        return json.loads(Path(design_path).read_text(encoding="utf-8")).get("schema_version")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Model identity: what a calibration is valid for
+# ---------------------------------------------------------------------------
+# A drift model fitted on one design route or hinge model does not transfer to
+# another. The 2026-09-06/08 artifacts were fitted on rc_design_v1 designs with
+# IMKBilin hinges and 10-14 ft stories; the current route differs on every
+# count, and until 2026-09-26 nothing recorded that. The artifact now carries
+# the identity of the pilot it came from, and the generator refuses one that
+# does not match the running code unless told otherwise.
+MODEL_IDENTITY_KEYS = (
+    "design_schema_version",
+    "element_formulation",
+    "imk_material_type",
+    "imk_deterioration_mode",
+    "imk_use_calibrated_backbone",
+    "imk_hinge_stiffness_mode",
+    "imk_hinge_stiffness_factor",
+)
+
+
+def current_model_identity():
+    """The design route and hinge model the running code would generate with.
+
+    Read without importing the design driver, which imports OpenSees: the
+    scheduler must stay OpenSees-free. Structure_Parameters is plain data.
+    """
+    import Structure_Parameters as sp
+
+    source = (RC_DIR / "Design" / "Design_Driver.py").read_text(encoding="utf-8")
+    match = re.search(r'^DESIGN_SCHEMA_VERSION\s*=\s*"([^"]+)"', source, re.M)
+    return {
+        "design_schema_version": match.group(1) if match else None,
+        "element_formulation": sp.ELEMENT_FORMULATION,
+        "imk_material_type": sp.IMK_MATERIAL_TYPE,
+        "imk_deterioration_mode": getattr(sp, "IMK_DETERIORATION_MODE", "direct"),
+        "imk_use_calibrated_backbone": bool(sp.IMK_USE_CALIBRATED_BACKBONE),
+        "imk_hinge_stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", "member_stiffness_factor"),
+        "imk_hinge_stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
+    }
+
+
+def pilot_model_identity(observations):
+    """What the pilot runs actually used, from their global_parameters.json and design.json.
+
+    One value per key when every run agrees; the list of values (and the key
+    under "mixed_keys") otherwise; None when the pilot predates the key.
+    """
+    values, mixed = {}, []
+    for key in MODEL_IDENTITY_KEYS:
+        seen = []
+        for item in observations:
+            value = (item.get("model") or {}).get(key)
+            if value is not None and value not in seen:
+                seen.append(value)
+        if not seen:
+            values[key] = None
+        elif len(seen) == 1:
+            values[key] = seen[0]
+        else:
+            values[key] = seen
+            mixed.append(key)
+    return {"values": values, "mixed_keys": mixed}
+
+
+def calibration_model_mismatch(payload, current=None):
+    """Keys on which the artifact's model differs from the running code; {} when it matches.
+
+    The pilot's own recorded value wins; a key the pilot predates falls back to
+    the code state at fit time. An artifact with no model identity (fitted
+    before 2026-09-26) mismatches on every key.
+    """
+    current = current or current_model_identity()
+    recorded = payload.get("model_identity") or {}
+    pilot = (recorded.get("pilot") or {}).get("values") or {}
+    mixed = set((recorded.get("pilot") or {}).get("mixed_keys") or [])
+    at_fit = recorded.get("current_at_fit") or {}
+    differences = {}
+    for key in MODEL_IDENTITY_KEYS:
+        if key in mixed:
+            differences[key] = {"calibration": pilot.get(key), "current": current.get(key),
+                                "note": "the pilot mixed several values"}
+            continue
+        expected = pilot.get(key) if pilot.get(key) is not None else at_fit.get(key)
+        if expected != current.get(key):
+            differences[key] = {"calibration": expected, "current": current.get(key)}
+    return differences
 
 
 def fit_drift_model(observations, spectra):
@@ -330,12 +443,23 @@ def build_calibration(dataset_roots, output_path, seed=0):
     coefficients, fit_report = fit_drift_model(observations, spectra)
     period_ratio, period_report = fit_period_ratio(observations)
 
+    floors = [item["num_floor"] for item in observations if item.get("num_floor")]
+    heights = [item["story_h_in"] for item in observations if item.get("story_h_in")]
     payload = {
         "schema_version": CALIBRATION_SCHEMA,
         "coefficients": coefficients,
         "fit": fit_report,
         "period_ratio": period_ratio,
         "period_ratio_fit": period_report,
+        "model_identity": {
+            "keys": list(MODEL_IDENTITY_KEYS),
+            "pilot": pilot_model_identity(observations),
+            "current_at_fit": current_model_identity(),
+            "dataset_roots": [str(Path(root).resolve()) for root in dataset_roots],
+            "fitted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "num_floor_range": [min(floors), max(floors)] if floors else None,
+            "story_h_in_range": [min(heights), max(heights)] if heights else None,
+        },
         "target_drift_bands": [
             {"name": name, "low": low, "high": high, "share": share}
             for name, low, high, share in TARGET_DRIFT_BANDS
@@ -356,13 +480,31 @@ def build_calibration(dataset_roots, output_path, seed=0):
     return payload
 
 
-def load_calibration(path):
+def load_calibration(path, require_model=None):
+    """Read a calibration artifact.
+
+    With ``require_model`` (True for the running code, or a
+    ``current_model_identity()``-shaped dict) an artifact fitted on a different
+    design route or hinge model is refused.
+    """
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if payload.get("schema_version") != CALIBRATION_SCHEMA:
         raise ValueError(
             f"Unexpected calibration schema {payload.get('schema_version')!r}; "
             f"expected {CALIBRATION_SCHEMA!r}."
         )
+    if require_model:
+        current = current_model_identity() if require_model is True else require_model
+        differences = calibration_model_mismatch(payload, current)
+        if differences:
+            detail = "; ".join(
+                f"{key}: calibration {value['calibration']!r}, current {value['current']!r}"
+                for key, value in differences.items()
+            )
+            raise ValueError(
+                f"Calibration {path} was fitted on a different design route or hinge model "
+                f"than the running code: {detail}. Refit it on a pilot generated by the current code."
+            )
     return payload
 
 

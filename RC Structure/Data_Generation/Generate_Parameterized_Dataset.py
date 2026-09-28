@@ -190,32 +190,36 @@ def eligible_record_ids(set_name, max_npts):
     return sorted(eligible)
 
 
-def build_runs(case_records, intensity_levels, scale_factors=None):
+def build_runs(case_records, intensity_levels, scale_factors=None, targets=None):
     """Expand a case's record and intensity assignments into concrete runs.
 
     Run names are produced by the same helper the analysis uses, so the
     scheduler can tell a finished run from a pending one without importing
-    OpenSees or guessing at the naming convention.
+    OpenSees or guessing at the naming convention. Under a calibration the
+    target drift each factor was chosen for is kept on the run, so achieved
+    versus target (and cap clipping) can be audited from the plan.
     """
     runs = []
     per_record = len(intensity_levels)
     for record_index, result_id in enumerate(case_records):
         for slot in range(per_record):
+            position = record_index * per_record + slot
             scale = (
-                scale_factors[record_index * per_record + slot]
+                scale_factors[position]
                 if scale_factors is not None
                 else intensity_levels[slot]
             )
-            runs.append(
-                {
-                    "run_index": len(runs) + 1,
-                    "result_id": int(result_id),
-                    "scale_factor": float(scale),
-                    "run_name": analysis_run_name(
-                        f"peer_{int(result_id)}", scale_factor=float(scale)
-                    ),
-                }
-            )
+            run = {
+                "run_index": len(runs) + 1,
+                "result_id": int(result_id),
+                "scale_factor": float(scale),
+                "run_name": analysis_run_name(
+                    f"peer_{int(result_id)}", scale_factor=float(scale)
+                ),
+            }
+            if targets is not None and position < len(targets):
+                run["target_drift_ratio"] = float(targets[position])
+            runs.append(run)
     return runs
 
 
@@ -451,6 +455,7 @@ def build_plan(
 
         scale_factors = None
         estimated_period_sec = None
+        case_targets = None
         if plan_targets is not None:
             geometry = {"num_floor": floors, "story_height_in": story_ft * 12}
             start = (local_index - 1) * runs_per_case
@@ -482,7 +487,7 @@ def build_plan(
                 "bay_y_width_ft": width_y_ft,
                 "bay_x_in": width_x_ft * 12,
                 "bay_y_in": width_y_ft * 12,
-                "runs": build_runs(case_records, intensity_levels, scale_factors),
+                "runs": build_runs(case_records, intensity_levels, scale_factors, case_targets),
                 "estimated_period_sec": estimated_period_sec,
             }
         )
@@ -659,7 +664,8 @@ def complete_run(root, case, run):
 
     A run that stops early because the structure collapsed is finished, not
     failed. Hybrid_Exporter already keeps and labels such a run, and
-    Calibrate_Intensity censors it rather than discarding it, but the
+    Calibrate_Intensity keeps it as an ordinary observation up to its 20%
+    drift ceiling (it does not censor), but the
     scheduler only ever looked at the step count -- so a collapse stayed in
     the remaining list and was retried on every invocation. The analysis is
     deterministic, so each retry reproduced the same collapse and the batch
@@ -781,11 +787,14 @@ def command_for(args, case, paths):
         "--story-h", str(case["story_height_in"]),
         "--seismic-site", str(case["seismic_site"]),
     ]
-    # The child expands records against intensities, matching build_runs.
+    # Each plan run is handed over as one explicit (record pair, scale), so the
+    # child executes exactly the plan. A calibrated plan pairs every record
+    # with its own target-matched factor; the former records x scales cross
+    # product replaced that with pairings nobody asked for (fixed 2026-09-26).
     for result_id in case["result_ids"]:
         command.extend(["--result-id", str(result_id)])
-    for scale in sorted({run["scale_factor"] for run in case_runs(case)}):
-        command.extend(["--scale-factor", str(scale)])
+    for run in case_runs(case):
+        command.extend(["--run-pair", f"{int(run['result_id'])}:{float(run['scale_factor'])}"])
     return command
 
 
@@ -1008,6 +1017,14 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--allow-stale-calibration",
+        action="store_true",
+        help=(
+            "Accept a calibration whose recorded design route or hinge model "
+            "differs from the current code; it is refused otherwise."
+        ),
+    )
+    parser.add_argument(
         "--records-per-case",
         type=int,
         default=DEFAULT_RECORDS_PER_CASE,
@@ -1083,9 +1100,27 @@ def main():
     calibration = None
     record_pairs = None
     if args.intensity_calibration:
-        from Calibrate_Intensity import load_calibration
+        from Calibrate_Intensity import (
+            calibration_model_mismatch,
+            current_model_identity,
+            load_calibration,
+        )
 
         calibration = load_calibration(args.intensity_calibration)
+        # A calibration fitted on another design route or hinge model would
+        # place every run on the wrong intensity; refuse it unless overridden.
+        stale = calibration_model_mismatch(calibration, current_model_identity())
+        if stale and not args.allow_stale_calibration:
+            detail = "; ".join(
+                f"{key}: calibration {value['calibration']!r}, current {value['current']!r}"
+                for key, value in stale.items()
+            )
+            raise SystemExit(
+                f"Intensity calibration {args.intensity_calibration} was fitted on a different "
+                f"design route or hinge model than this code generates with: {detail}. Refit it "
+                "with Calibrate_Intensity.py on a pilot produced by the current code, or pass "
+                "--allow-stale-calibration to proceed knowingly (into a new output root)."
+            )
         record_pairs = eligible_record_pairs(args.set_name, args.max_npts)
         fit = calibration.get("fit", {})
         print(
@@ -1095,6 +1130,8 @@ def main():
         )
         if not fit.get("fitted"):
             print(f"  WARNING: {fit.get('reason')}")
+        if stale:
+            print(f"  WARNING: stale calibration accepted by --allow-stale-calibration: {sorted(stale)}")
 
     cases = load_plan(
         root,

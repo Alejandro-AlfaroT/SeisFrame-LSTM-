@@ -145,6 +145,180 @@ def longitudinal_cover_in(member_type, bar_size=None, stirrup_bar_size=None):
             + 0.5 * rebar_diameter(bar_size))
 
 
+# ---- Orthogonal beam bar stacking at the joints (design-basis rule, 2026-09-27) --------------
+# The x and y beam bars cannot share an elevation where they cross at a joint. One direction's
+# top bars sit on top; that direction's bottom bars then sit nearer the bottom face (mirrored),
+# so each direction gives up one layer of depth at one face. Bars run straight, so the lower
+# position holds along the whole member and enters every strength that uses the bar depth.
+#   "inner_over_outer"  the direction whose slab mats are the INNER mats sits on top, so the
+#                       lower direction's bars cross only the inner mats and clear the outer
+#                       bottom mat (Design/SMRF_Cage_Geometry.joint_assembly); resolved per design
+#                       from the slab layout's outer_axis (x mats outer -> "y_over_x").
+#   "x_over_y", "y_over_x"  fixed conventions.   "none"  legacy single elevation.
+BEAM_BAR_STACKING = "inner_over_outer"
+BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN = 1.0     # ACI 318-19 25.2.2, clear between layers
+# Layers of beam bars per face (user decision 2026-09-27: "we can just add another layer"). The bars
+# of a direction that do not pass the column bars in one layer take a second layer directly below
+# (25.2.2), each layer one pitch (db + max(1 in, db)) apart; the lower direction's cage then starts
+# below the upper direction's last layer. Beyond this many layers the beam widens (or the column
+# grows where a lane-keeping cage exists), as before.
+BEAM_BAR_MAX_LAYERS = 2
+# How the two directions' layers order at a face (user decision 2026-09-27, "lets interleave the
+# layers"). "interleaved": upper first layer, lower first layer, upper second, lower second, ...
+# one pitch apart, so a direction's own layers sit two pitches apart with the crossing bars between
+# them (25.2.2 alignment kept) and neither direction gives up a whole cage's depth. "blocked": one
+# direction's whole cage below the other's (the convention until this decision).
+BEAM_BAR_LAYER_ORDER = "interleaved"
+_BEAM_LAYER_CACHE = {}
+
+
+def beam_bar_stacking_convention():
+    """The resolved stacking: 'x_over_y', 'y_over_x' or 'none'."""
+    mode = BEAM_BAR_STACKING
+    if mode in ("none", "x_over_y", "y_over_x"):
+        return mode
+    if mode != "inner_over_outer":
+        raise ValueError(f"Unknown BEAM_BAR_STACKING {mode!r}")
+    layout = (SLAB_REINFORCEMENT or {}).get("layout") if SLAB_THICKNESS_IN is not None else None
+    outer = (layout or {}).get("outer_axis", "x")
+    return "y_over_x" if outer == "x" else "x_over_y"
+
+
+def beam_bar_layer_pitch_in(bar_size=None):
+    """Centre-to-centre distance between two layers of beam bars: db + the 25.2.2 clear (>= db, 1 in)."""
+    db = rebar_diameter(BEAM_BAR_SIZE if bar_size is None else bar_size)
+    return db + max(BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, db)
+
+
+def beam_bars_per_layer(bar_size=None, bars_per_face=None, stirrup_bar_size=None):
+    """{axis: n}: how many beam bars of this size pass the current column cage in one layer, per direction.
+
+    The same geometry as the capacity check beam.bars_thread_column and the column cage rule
+    (Design/SMRF_Cage_Geometry.column_cage_admits_beam_bars), on the live column cage and beam width.
+    None without a slab (the legacy route has no joint assembly).
+    """
+    if SLAB_THICKNESS_IN is None:
+        return None
+    size = BEAM_BAR_SIZE if bar_size is None else bar_size
+    n = max(BEAM_TOP_BARS, BEAM_BOT_BARS) if bars_per_face is None else bars_per_face
+    stirrup = BEAM_STIRRUP_BAR_SIZE if stirrup_bar_size is None else stirrup_bar_size
+    key = (B_COL, H_COL, COL_CLEAR_COVER_IN, COL_STIRRUP_BAR_SIZE, COL_BAR_SIZE, COL_TOP_BARS, COL_SIDE_BARS,
+           B_BEAM, BEAM_CLEAR_COVER_IN, stirrup, size, n, AGGREGATE_MAX_SIZE_IN)
+    cached = _BEAM_LAYER_CACHE.get(key)
+    if cached is None:
+        from Design.SMRF_Cage_Geometry import column_cage_admits_beam_bars
+        if len(_BEAM_LAYER_CACHE) > 4096:
+            _BEAM_LAYER_CACHE.clear()
+        cached = column_cage_admits_beam_bars(
+            B_COL, H_COL, COL_CLEAR_COVER_IN, rebar_diameter(COL_STIRRUP_BAR_SIZE), rebar_diameter(COL_BAR_SIZE),
+            COL_TOP_BARS, COL_SIDE_BARS, B_BEAM, BEAM_CLEAR_COVER_IN, rebar_diameter(stirrup), rebar_diameter(size),
+            n, AGGREGATE_MAX_SIZE_IN)["bars_per_layer"]
+        _BEAM_LAYER_CACHE[key] = dict(cached)
+    return dict(cached)
+
+
+def _split_into_layers(n, fit, limit=None):
+    """Bar counts per layer, filling each layer to what the lanes admit; one layer when everything fits.
+
+    When no lane exists at all, or the bars would need more layers than ``limit`` allows, the bars
+    are kept at one elevation: the arrangement is not one the rule accepts, the threading check
+    fails on it, and the strengths are not priced on an arrangement that will not be built.
+    """
+    if fit is None or fit <= 0 or fit >= n:
+        return [n]
+    layers, remaining = [], n
+    while remaining > 0:
+        layers.append(min(fit, remaining))
+        remaining -= layers[-1]
+    if limit is not None and len(layers) > limit:
+        return [n]
+    return layers
+
+
+def beam_bar_layer_slots(n_near, n_far, order=None):
+    """Slot indices (0 nearest the face, one pitch apart) of the near and far directions' layers.
+
+    "blocked": the near direction's layers first, then the far direction's. "interleaved": near
+    first layer, far first layer, near second, far second, ... A single layer per direction gives the
+    same slots either way.
+    """
+    order = BEAM_BAR_LAYER_ORDER if order is None else order
+    if order == "blocked":
+        return list(range(n_near)), list(range(n_near, n_near + n_far))
+    if order != "interleaved":
+        raise ValueError(f"Unknown BEAM_BAR_LAYER_ORDER {order!r}")
+    near, far, slot = [], [], 0
+    for i in range(max(n_near, n_far)):
+        if i < n_near:
+            near.append(slot)
+            slot += 1
+        if i < n_far:
+            far.append(slot)
+            slot += 1
+    return near, far
+
+
+def beam_bar_layers(bar_size=None, top_bars=None, bot_bars=None, stirrup_bar_size=None, max_layers=None):
+    """Per direction and face: the layers the beam bars occupy and their centroid offset from that face.
+
+    {axis: {face: {"layers", "per_layer", "offsets_in", "centroid_in"}}}. At the top face the upper
+    direction's first layer comes first (offset base) and the layers then follow
+    BEAM_BAR_LAYER_ORDER (interleaved: upper, lower, upper, lower ...; blocked: the upper cage, then
+    the lower), one pitch apart; at the bottom face the mirror (the lower direction's bars nearest
+    the face). A direction whose bars pass the column bars in one layer has one layer. Without a
+    slab or with stacking "none": one layer at the nominal offset for both directions and faces.
+    """
+    base = (longitudinal_cover_in("beam", bar_size) if stirrup_bar_size is None
+            else longitudinal_cover_in("beam", bar_size, stirrup_bar_size))
+    counts = {"top": BEAM_TOP_BARS if top_bars is None else top_bars,
+              "bottom": BEAM_BOT_BARS if bot_bars is None else bot_bars}
+    convention = beam_bar_stacking_convention()
+    if convention == "none" or SLAB_THICKNESS_IN is None:
+        return {axis: {face: {"layers": 1, "per_layer": [counts[face]], "offsets_in": [base], "centroid_in": base}
+                       for face in counts} for axis in ("x", "y")}
+    pitch = beam_bar_layer_pitch_in(bar_size)
+    # Under a one-layer limit the bars stay at one elevation (the threading check fails when they do
+    # not fit); with more layers allowed, the lanes decide the split.
+    limit = BEAM_BAR_MAX_LAYERS if max_layers is None else max_layers
+    fit = (beam_bars_per_layer(bar_size, max(counts.values()), stirrup_bar_size) if limit > 1
+           else {"x": None, "y": None})
+    upper_axis, lower_axis = ("x", "y") if convention == "x_over_y" else ("y", "x")
+    result = {"x": {}, "y": {}}
+    for face in ("top", "bottom"):
+        near, far = (upper_axis, lower_axis) if face == "top" else (lower_axis, upper_axis)
+        near_layers = _split_into_layers(counts[face], fit[near], limit)
+        far_layers = _split_into_layers(counts[face], fit[far], limit)
+        near_slots, far_slots = beam_bar_layer_slots(len(near_layers), len(far_layers))
+        near_offsets = [base + k * pitch for k in near_slots]
+        far_offsets = [base + k * pitch for k in far_slots]
+        for axis, layers, offsets in ((near, near_layers, near_offsets), (far, far_layers, far_offsets)):
+            result[axis][face] = {"layers": len(layers), "per_layer": layers, "offsets_in": offsets,
+                                  "centroid_in": sum(c * o for c, o in zip(layers, offsets)) / sum(layers)}
+    return result
+
+
+def beam_bar_stacking_offsets_in(bar_size=None, stirrup_bar_size=None, top_bars=None, bot_bars=None, max_layers=None):
+    """{axis: {"top": offset, "bottom": offset}}: face-to-centroid offsets of the beam bars, in inches.
+
+    The centroid of that direction's layers at that face (beam_bar_layers): the stacked orthogonal
+    cages and, where the lanes force it, the second layer of bars. Without a slab (legacy route) or
+    with stacking "none" both directions use the nominal offset at both faces.
+    """
+    layers = beam_bar_layers(bar_size, top_bars, bot_bars, stirrup_bar_size, max_layers)
+    return {axis: {face: layers[axis][face]["centroid_in"] for face in ("top", "bottom")} for axis in ("x", "y")}
+
+
+def beam_centroid_offset_in(axis, face, bar_size=None):
+    """Face-to-centroid offset of the beam bars of one direction at one face ('top' or 'bottom')."""
+    return beam_bar_stacking_offsets_in(bar_size)[axis][face]
+
+
+def beam_worst_centroid_offset_in(bar_size=None, top_bars=None, bot_bars=None, max_layers=None):
+    """The largest offset over directions and faces: the conservative single value for sizing."""
+    offsets = beam_bar_stacking_offsets_in(bar_size, None, top_bars, bot_bars, max_layers)
+    return max(value for faces in offsets.values() for value in faces.values())
+
+
 def longitudinal_clear_spacing_in(member_type, bar_size=None):
     """ACI 318-19 25.2.1 / 25.2.3 unbundled single-layer minimum spacing.
 
@@ -277,9 +451,11 @@ IMK_HINGE_ELEMENT_TAG_BASE = 4000000
 IMK_USE_CALIBRATED_BACKBONE = True
 
 # RC member flexure uses peak-oriented reloading (the intended split:
-# IMKPeakOriented for flexure, IMKPinching for joint shear/slip through its
-# own adapter and topology, Model/Joint_Panel). IMKBilin remains selectable
-# for reproducing legacy runs, with its own argument signature.
+# IMKPeakOriented for flexure, IMKPinching for joint shear through its own
+# adapter and topology, Model/Joint_Panel, which is a diagnostic prototype
+# accepting shear-only inputs; the member/joint slip partition is unresolved
+# and no pinching spring is installed in the frame). IMKBilin remains
+# selectable for reproducing legacy runs, with its own argument signature.
 IMK_MATERIAL_TYPE = "IMKPeakOriented"
 
 # Cyclic deterioration capacities handed to the member materials.
@@ -348,6 +524,34 @@ IMK_THETA_U_POS = 0.120
 IMK_THETA_U_NEG = 0.120
 IMK_D_POS = 1.0
 IMK_D_NEG = 1.0
+
+# ---- Beam-column joints in the nonlinear frame (user decision 2026-09-27) ---------------------
+# The intended split: IMKPeakOriented for member flexure, IMKPinching for joint shear and slip.
+#   "rigid_centerline"       the legacy frame: beams and columns meet at one node, no joint spring.
+#   "imk_pinching_scissors"  two coincident cores per elevated joint (the joint node stays the
+#                            column core; a beam core shares its translations and vertical-axis
+#                            rotation) joined by IMKPinching springs in the two vertical shear
+#                            planes. Centreline geometry is kept. IMK formulation only; the
+#                            elastic design model is unchanged. See Model/Joint_Springs.py.
+JOINT_MODEL = "imk_pinching_scissors"
+# What the joint spring's rotation stands for. "joint_shear_and_slip" removes Haselton's bond-slip
+# term from the member hinges (a_sl = 0, IMK_Calibration.bond_slip_indicator) and reads the joint
+# spring as carrying bar slip as well as panel shear; "joint_shear_only" keeps a_sl = 1 in the
+# members. Either way slip is counted once.
+JOINT_DEFORMATION_SCOPE = "joint_shear_and_slip"
+# Strength from ACI 318-19 Table 18.8.4.3 (gamma, Aj from the design record's joint-shear category
+# when it has one), deformation from ASCE/SEI 41-17 Table 10-11 for conforming joints, scissors
+# conjugacy Mn = Vn h_b and K = G Aj h_b. Transcribed, not experimentally calibrated.
+JOINT_CALIBRATION_BASIS = "aci318_t18_8_4_3_strength__asce41_17_t10_11_deformation__scissors_v1"
+JOINT_CALIBRATION_STATUS = "provisional_transcribed_not_experimentally_calibrated"
+JOINT_STIFFNESS_MODIFIER = 1.0        # on G Aj h_b of the uncracked panel
+JOINT_KAPPA_F = 0.25                  # IMKPinching break-point ratios: Ibarra, Medina & Krawinkler (2005)
+JOINT_KAPPA_D = 0.25                  #   representative pinching level, not an RC joint fit
+JOINT_LAMBDA_SUPPRESSION = 1.0e12     # no cyclic deterioration in the joint law (every mode suppressed)
+JOINT_SHEAR_CATEGORIES = None         # the design record's capacity_design.joints.joints, set by apply_design
+JOINT_BEAM_CORE_TAG_BASE = 1500000    # nodes; below the IMK hinge nodes (2000000+)
+JOINT_ELEMENT_TAG_BASE = 1500000      # elements; above the members, below the IMK hinges (4000000+)
+JOINT_MATERIAL_TAG_BASE = 1500000     # materials; below the IMK materials (3000000+)
 
 # Effective (cracked) section stiffness for seismic analysis.
 # ACI 318-19 Table 6.6.3.1.1(a): beams 0.35*Ig, columns 0.70*Ig.

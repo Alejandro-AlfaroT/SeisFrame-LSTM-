@@ -715,5 +715,19 @@ class StationaryPointEnvelopeTests(unittest.TestCase):
         self.assertGreater(interior, 0)                                     # the sweep exercises interior peaks
 
 
+class DesignBasisDefaults(unittest.TestCase):
+    """2026-09-27 (Codex repair review, item 2): the column-own probable envelope on the physical base clear
+    height is the requested design basis; records without a method key are still read as joint-limited."""
+
+    def test_new_designs_request_column_own_on_the_physical_base_height(self):
+        from Design.Config import DesignConfig
+        from Design.SMRF_Capacity_Design import (COLUMN_SHEAR_METHOD_COLUMN_OWN, COLUMN_SHEAR_METHOD_DEFAULT,
+                                                 COLUMN_SHEAR_METHOD_JOINT_LIMITED, CLEAR_HEIGHT_PHYSICAL)
+        cfg = DesignConfig()
+        self.assertEqual(cfg.capacity.column_shear_method, COLUMN_SHEAR_METHOD_COLUMN_OWN)
+        self.assertEqual(cfg.capacity.column_clear_height_convention, CLEAR_HEIGHT_PHYSICAL)
+        self.assertEqual(COLUMN_SHEAR_METHOD_DEFAULT, COLUMN_SHEAR_METHOD_JOINT_LIMITED, "saved records without the key keep their rule")
+
+
 if __name__ == "__main__":
     unittest.main()

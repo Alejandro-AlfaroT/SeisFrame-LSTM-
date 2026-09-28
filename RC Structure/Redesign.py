@@ -261,13 +261,93 @@ def column_layout_confinable(*args):
 COLUMN_MAX_TIED_FACE_BARS = _max_tied_face_bars()   # ACI 318-19 18.7.5.2(f)
 
 
-def _col_candidates(Ast_lo, Ast_hi, cfg=None):
+def _column_cage_threads_beam_bars(bar_size, n_top, n_side_pf):
+    """Do the current beam bars pass this column cage in one layer, in both directions?
+
+    The column cage rule (design basis 2026-09-27): the lanes between the column bars must admit the
+    beam bars of both framing directions in a single layer with the 25.2.1 clearance, the same geometry
+    as the capacity check beam.bars_thread_column (Design/SMRF_Cage_Geometry).
+    """
+    from Design.SMRF_Cage_Geometry import column_cage_admits_beam_bars
+    return column_cage_admits_beam_bars(
+        sp.B_COL, sp.H_COL, sp.COL_CLEAR_COVER_IN, sp.rebar_diameter(sp.COL_STIRRUP_BAR_SIZE),
+        sp.rebar_diameter(bar_size), n_top, n_side_pf,
+        sp.B_BEAM, sp.BEAM_CLEAR_COVER_IN, sp.rebar_diameter(sp.BEAM_STIRRUP_BAR_SIZE),
+        sp.rebar_diameter(sp.BEAM_BAR_SIZE), max(sp.BEAM_TOP_BARS, sp.BEAM_BOT_BARS),
+        sp.AGGREGATE_MAX_SIZE_IN, max_layers=sp.BEAM_BAR_MAX_LAYERS)["passes"]
+
+
+def _column_cage_beam_layers(bar_size, n_top, n_side_pf):
+    """Layers the current beam bars need to pass this column cage (the larger of the two directions);
+    one on the legacy path, 99 when a direction has no lane at all."""
+    if sp.SLAB_THICKNESS_IN is None:
+        return 1
+    from Design.SMRF_Cage_Geometry import column_cage_admits_beam_bars
+    needed = column_cage_admits_beam_bars(
+        sp.B_COL, sp.H_COL, sp.COL_CLEAR_COVER_IN, sp.rebar_diameter(sp.COL_STIRRUP_BAR_SIZE),
+        sp.rebar_diameter(bar_size), n_top, n_side_pf,
+        sp.B_BEAM, sp.BEAM_CLEAR_COVER_IN, sp.rebar_diameter(sp.BEAM_STIRRUP_BAR_SIZE),
+        sp.rebar_diameter(sp.BEAM_BAR_SIZE), max(sp.BEAM_TOP_BARS, sp.BEAM_BOT_BARS),
+        sp.AGGREGATE_MAX_SIZE_IN, max_layers=sp.BEAM_BAR_MAX_LAYERS)["layers_needed"]
+    return max(99 if n is None else n for n in needed.values())
+
+
+def scwb_cage_order(candidate, cfg=None):
+    """Sort key of the strong-column escalation: the beam-bar layers a cage forces (when the column-side
+    one-layer preference is on), then the least steel, then the smallest bar."""
+    cfg = cfg or DesignConfig()
+    layers = (_column_cage_beam_layers(candidate[0], candidate[1], candidate[3])
+              if cfg.rebar.col_prefer_fewest_beam_layers and sp.SLAB_THICKNESS_IN is not None else 0)
+    return (layers, candidate[4], candidate[0])
+
+
+def col_candidates_for_beam_bars(Ast_lo, Ast_hi, cfg=None):
+    """(candidates, threaded): the column cages the column cage rule offers for the current beam bars.
+
+    First the cages in the steel band whose lanes admit the beam bars in one layer; if none, the
+    threading cages above the band up to the ACI maximum ratio (a cage that threads and is stronger
+    than the band asks beats one that does not thread: the band is a search preference, not a code
+    requirement); only when no threading cage exists at this column at all, every cage in the band,
+    with ``threaded`` False, so strength is never left short. The legacy path (no slab) is untouched.
+    """
+    cfg = cfg or DesignConfig()
+    if sp.SLAB_THICKNESS_IN is None:
+        return _col_candidates(Ast_lo, Ast_hi, cfg), True
+    threading = _col_candidates(Ast_lo, Ast_hi, cfg, threading=True)
+    if threading:
+        return threading, True
+    ceiling = min(0.06, cfg.rebar.rho_col_max) * sp.B_COL * sp.H_COL
+    if ceiling > Ast_hi:
+        threading = _col_candidates(Ast_lo, ceiling, cfg, threading=True)
+        if threading:
+            return threading, True
+    return _col_candidates(Ast_lo, Ast_hi, cfg), False
+
+
+def column_cages_that_thread_exist(cfg=None):
+    """Whether any constructible cage at this column, over the whole ACI ratio range, admits the beam bars.
+
+    The planner's lever: when such cages exist but strength or the strong-column rule needed more steel
+    than they hold, a larger column keeps the lanes and needs less steel; when none exists, the beam
+    band is too narrow for any cage and the beam widens.
+    """
+    cfg = cfg or DesignConfig()
+    if sp.SLAB_THICKNESS_IN is None:
+        return True
+    ag = sp.B_COL * sp.H_COL
+    return bool(_col_candidates(max(0.01, cfg.rebar.rho_col_min) * ag, min(0.06, cfg.rebar.rho_col_max) * ag, cfg,
+                                threading=True))
+
+
+def _col_candidates(Ast_lo, Ast_hi, cfg=None, threading=False):
     """
     All (bar_size, n_top, n_bot, n_side_per_face, Ast) column combos where:
       - Ast_lo ≤ Ast ≤ Ast_hi
       - ACI ρ limits satisfied
       - n_top == n_bot (symmetric)
       - n_side_per_face in col_n_side_options from cfg
+      - with ``threading``, the lanes between the bars admit the current beam bars in one layer
+        (the column cage rule; SMRF path only)
     """
     cfg        = cfg or DesignConfig()
     Ag         = sp.B_COL * sp.H_COL
@@ -315,18 +395,36 @@ def _col_candidates(Ast_lo, Ast_hi, cfg=None):
                 if sp.SLAB_THICKNESS_IN is not None and not column_layout_confinable(
                         sp.B_COL, sp.H_COL, sp.FC_COL_KSI, sp.FY_KSI, sp.COL_CLEAR_COVER_IN, n_top, n_side_pf):
                     continue
-                if Ast_lo <= Ast <= Ast_hi:
-                    candidates.append((bar_size, n_top, n_bot, n_side_pf, Ast))
+                if not (Ast_lo <= Ast <= Ast_hi):
+                    continue
+                # The column cage rule: the beam bars of both directions must pass between these bars
+                # in one layer (checked last; it is the costliest filter).
+                if threading and sp.SLAB_THICKNESS_IN is not None and not _column_cage_threads_beam_bars(bar_size, n_top, n_side_pf):
+                    continue
+                candidates.append((bar_size, n_top, n_bot, n_side_pf, Ast))
     return candidates
 
 
-def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None):
+def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threading=None):
     """
     All (bar_size, n_top, n_bot) beam combos where both top and bottom
     steel fall within their respective [lo, hi] bands.
     ACI §9.6.1.2 minimum is enforced inside lo for each direction.
+
+    On the SMRF path (slab set) the bars must also pass the current column
+    cage within the layer limit (Structure_Parameters.BEAM_BAR_MAX_LAYERS,
+    the lanes deciding the per-layer count); when no cage does, the width
+    rule alone keeps a cage on offer and the capacity check
+    beam.bars_thread_column fails, so the search moves the section.
+    ``threading``: None tries the lanes first and falls back; True/False
+    force one screen.
     """
     cfg        = cfg or DesignConfig()
+    if threading is None:
+        if sp.SLAB_THICKNESS_IN is None:
+            return _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg, threading=False)
+        found = _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg, threading=True)
+        return found or _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg, threading=False)
     candidates = []
     if cfg.rebar.beam_symmetric:
         # The larger directional demand governs both faces. The upper
@@ -348,17 +446,35 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None):
         db = sp.rebar_diameter(bar_size)
         if through_depth is not None and 20.0 * db > through_depth:
             continue
+        # Lateral cover to the bar centre for the spacing across the width; the depth uses the worst
+        # face offset once the orthogonal cages stack at the joints and the lanes force a second
+        # layer (conservative sizing, per candidate: the split depends on the bar count).
         cover = (sp.longitudinal_cover_in("beam", bar_size)
                  if sp.SLAB_THICKNESS_IN is not None else cfg.rebar.cover_in)
-        d = sp.H_BEAM - cover
         clear_min = sp.longitudinal_clear_spacing_in("beam", bar_size)
-        code_min = (_beam_As_min(sp.FC_BEAM_KSI, sp.FY_KSI, sp.B_BEAM, d)
-                    if sp.SLAB_THICKNESS_IN is not None else 0.0)
         for n_top in cfg.rebar.beam_n_iter():
             As_top = n_top * Ab
-            if n_top < 2 or d <= 0 or As_top > 0.025 * sp.B_BEAM * d:
+            if n_top < 2:
                 continue
-            if (sp.B_BEAM - 2 * cover) / (n_top - 1) - db < clear_min:
+            if sp.SLAB_THICKNESS_IN is not None and threading:
+                # The bars must pass the column bars (and the beam width) within the layer limit;
+                # the lanes decide the per-layer count (Structure_Parameters.beam_bars_per_layer).
+                fit = min(sp.beam_bars_per_layer(bar_size, n_top).values())
+                if fit <= 0 or math.ceil(n_top / fit) > sp.BEAM_BAR_MAX_LAYERS:
+                    continue
+                d = sp.H_BEAM - sp.beam_worst_centroid_offset_in(bar_size, n_top, n_top)
+                code_min = _beam_As_min(sp.FC_BEAM_KSI, sp.FY_KSI, sp.B_BEAM, d)
+            elif sp.SLAB_THICKNESS_IN is not None:
+                # Fallback: one layer across the width, the stacked-cage depth only.
+                if (sp.B_BEAM - 2 * cover) / (n_top - 1) - db < clear_min:
+                    continue
+                d = sp.H_BEAM - sp.beam_worst_centroid_offset_in(bar_size, n_top, n_top, max_layers=1)
+                code_min = _beam_As_min(sp.FC_BEAM_KSI, sp.FY_KSI, sp.B_BEAM, d)
+            else:
+                if (sp.B_BEAM - 2 * cover) / (n_top - 1) - db < clear_min:
+                    continue
+                d, code_min = sp.H_BEAM - cover, 0.0
+            if d <= 0 or As_top > 0.025 * sp.B_BEAM * d:
                 continue
             if not (max(As_top_lo, code_min) <= As_top <= As_top_hi):
                 continue
@@ -417,18 +533,33 @@ def _pick_col(candidates, Pu: float = 0.0, Mu: float = 0.0, cfg=None):
     if not candidates:
         return None
     cfg = cfg or DesignConfig()
+    target = cfg.dcr.dcr_target
+    priced = {}
+
+    def _dcr_estimate(c):
+        # Each cage is priced once (the P-M sweep is the costly part); the ceiling screen and the
+        # objective both read the cached value.
+        key = tuple(c)
+        if key not in priced:
+            bar_size, n_top, n_bot, n_side_pf, Ast = c
+            cap = _phi_Mn_at_Pu(Pu, Ast, candidate=c)
+            priced[key] = 999.0 if cap is None or cap < 1e-6 else Mu / cap
+        return priced[key]
+
+    if cfg.rebar.col_prefer_fewest_beam_layers and sp.SLAB_THICKNESS_IN is not None:
+        # The column-side one-layer preference (2026-09-27): among the cages that keep the estimated
+        # DCR within the ceiling (every cage when none does), those the current beam bars pass in the
+        # fewest layers come first; the objective then decides among them. A tie-break among cages
+        # that pass, never a reason to install one that does not.
+        if cfg.dcr.objective == "min_volume" or Mu < 1e-4:
+            feasible = list(candidates)
+        else:
+            feasible = [c for c in candidates if _dcr_estimate(c) <= cfg.dcr.dcr_hard_max] or list(candidates)
+        fewest = min(_column_cage_beam_layers(c[0], c[1], c[3]) for c in feasible)
+        candidates = [c for c in feasible if _column_cage_beam_layers(c[0], c[1], c[3]) == fewest]
 
     if cfg.dcr.objective == "min_volume" or Mu < 1e-4:
         return min(candidates, key=lambda c: c[4])
-
-    target = cfg.dcr.dcr_target
-
-    def _dcr_estimate(c):
-        bar_size, n_top, n_bot, n_side_pf, Ast = c
-        cap = _phi_Mn_at_Pu(Pu, Ast, candidate=c)
-        if cap is None or cap < 1e-6:
-            return 999.0
-        return Mu / cap
 
     return _least_steel_within_tolerance(
         candidates,
@@ -438,12 +569,28 @@ def _pick_col(candidates, Pu: float = 0.0, Mu: float = 0.0, cfg=None):
     )
 
 
+def _beam_candidate_layers(bar_size, n_top, n_bot):
+    """Layers a beam cage needs to pass the current column bars (Structure_Parameters.beam_bars_per_layer);
+    one on the legacy path, 99 when no lane admits the bar."""
+    if sp.SLAB_THICKNESS_IN is None:
+        return 1
+    n = max(n_top, n_bot)
+    fit = min(sp.beam_bars_per_layer(bar_size, n).values())
+    return math.ceil(n / fit) if fit > 0 else 99
+
+
 def _pick_beam(candidates, Mu_pos: float = 0.0, Mu_neg: float = 0.0, cfg=None):
     """
     Select the best beam candidate according to the objective function.
 
     "min_deviation"  → candidate whose governing DCR is closest to dcr_target.
     "min_volume"     → smallest total As (original behaviour).
+
+    With cfg.rebar.beam_prefer_fewest_layers (SMRF path, 2026-09-27) the
+    cages whose estimated DCR stays within the ceiling are first narrowed to
+    those needing the fewest layers between the column bars -- larger bars
+    in one layer keep the depth a second layer would cost -- and the
+    objective then decides among them.
     """
     if not candidates:
         return None
@@ -451,16 +598,12 @@ def _pick_beam(candidates, Mu_pos: float = 0.0, Mu_neg: float = 0.0, cfg=None):
     fc     = sp.FC_BEAM_KSI
     fy     = sp.FY_KSI
     b      = sp.B_BEAM
-    d      = sp.H_BEAM - sp.longitudinal_cover_in("beam")
-
-    if cfg.dcr.objective == "min_volume":
-        return min(candidates, key=lambda c: (c[1] + c[2]) * sp.rebar_area(c[0]))
-
-    target = cfg.dcr.dcr_target
+    d      = sp.H_BEAM - sp.beam_worst_centroid_offset_in()
+    prefer_fewest_layers = cfg.rebar.beam_prefer_fewest_layers and sp.SLAB_THICKNESS_IN is not None
 
     def _dcr_estimate(c):
         bar_size, n_top, n_bot = c
-        candidate_d = (sp.H_BEAM - sp.longitudinal_cover_in("beam", bar_size)
+        candidate_d = (sp.H_BEAM - sp.beam_worst_centroid_offset_in(bar_size, n_top, n_bot)
                        if sp.SLAB_THICKNESS_IN is not None else d)
         Ab       = sp.rebar_area(bar_size)
         As_top   = n_top * Ab
@@ -473,6 +616,17 @@ def _pick_beam(candidates, Mu_pos: float = 0.0, Mu_neg: float = 0.0, cfg=None):
         dcr_pos    = Mu_pos / phi_Mn_pos if phi_Mn_pos > 1e-6 else 0.0
         return max(dcr_neg, dcr_pos)
 
+    if prefer_fewest_layers:
+        # Layers first, among the cages that keep the estimated DCR within the ceiling (every cage
+        # when none does, so a shortfall is still sized on the objective).
+        feasible = [c for c in candidates if _dcr_estimate(c) <= cfg.dcr.dcr_hard_max] or list(candidates)
+        fewest = min(_beam_candidate_layers(*c) for c in feasible)
+        candidates = [c for c in feasible if _beam_candidate_layers(*c) == fewest]
+
+    if cfg.dcr.objective == "min_volume":
+        return min(candidates, key=lambda c: (c[1] + c[2]) * sp.rebar_area(c[0]))
+
+    target = cfg.dcr.dcr_target
     return _least_steel_within_tolerance(
         candidates,
         deviation=lambda c: abs(_dcr_estimate(c) - target),
@@ -668,14 +822,20 @@ def redesign_steel(design_results: dict, cfg: Optional[DesignConfig] = None):
         if abs(Ast_hi - Ast_lo) < 0.05:
             Ast_hi = min(Ast_lo * 1.5, Ast_aci_max)
 
-        candidates = _col_candidates(Ast_lo, Ast_hi, cfg)
+        # The column cage rule (2026-09-27): cages whose lanes admit the beam bars come first.
+        candidates, threaded = col_candidates_for_beam_bars(Ast_lo, Ast_hi, cfg)
 
         if not candidates:
             penalty_log.append(
                 f"Column: no candidate in Ast band [{Ast_lo:.2f}, {Ast_hi:.2f}] in²; "
                 "falling back to ACI minimum arrangement."
             )
-            candidates = _col_candidates(Ast_aci_min, Ast_aci_min * 1.5, cfg)
+            candidates, threaded = col_candidates_for_beam_bars(Ast_aci_min, Ast_aci_min * 1.5, cfg)
+        if candidates and not threaded:
+            penalty_log.append(
+                "Column: no cage at this column lets the beam bars through in one layer; "
+                "a strength cage is installed and the threading check will fail (column cage rule)."
+            )
 
         best = _pick_col(candidates, Pu=Pu, Mu=Mu, cfg=cfg)
         if best:
@@ -698,7 +858,10 @@ def redesign_steel(design_results: dict, cfg: Optional[DesignConfig] = None):
         fc = sp.FC_BEAM_KSI
         fy = sp.FY_KSI
         b  = sp.B_BEAM
-        d  = sp.H_BEAM - sp.longitudinal_cover_in("beam")
+        # The steel band is sized on the stacked-cage depth (one layer per direction); each candidate
+        # is then priced at its own layered depth in _pick_beam. Sizing the band on the installed
+        # bars' own layering would be self-referential and can starve the candidate list.
+        d  = sp.H_BEAM - sp.beam_worst_centroid_offset_in(max_layers=1)
 
         def _mu_neg(r):
             if hasattr(r, "limit_states"):

@@ -27,13 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import openseespy.opensees as ops                                              # noqa: E402
 import Structure_Parameters as sp                                              # noqa: E402
 from Analysis import Hinge_Hysteresis_Diagnostic as hd                         # noqa: E402
-from Analysis.Constraints import apply_analysis_constraints                    # noqa: E402
+from Model.Build_Model import apply_analysis_constraints, build_model, roof_master_node  # noqa: E402
 from Analysis.Gravity import run_gravity_analysis                              # noqa: E402
 from Design import Design_Driver as driver                                      # noqa: E402
 from Loads.Gravity_Loads import apply_gravity_loads                            # noqa: E402
-from Model.Build_Model import build_model                                       # noqa: E402
 from Model.IMK_Hinges import hinge_registry                                     # noqa: E402
-from Model.nodes import roof_master_node                                        # noqa: E402
 
 
 class CyclicMeasurementFixture(unittest.TestCase):

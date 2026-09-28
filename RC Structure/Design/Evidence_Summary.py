@@ -308,7 +308,8 @@ def write_evidence_summary(r, out_dir, elapsed=None):
     line()
     fi = fam["x_interior"]; fe = fam["x_edge"]
     ab = {6: 0.44, 7: 0.60, 8: 0.79, 5: 0.31, 4: 0.20}[b["beam_bar_size"]]
-    d_eff = s["h_beam_in"] - b["beam_longitudinal_centroid_offset_in"]
+    # the hogging hand check at the family's own top-bar elevation (staggered since 2026-09-27)
+    d_eff = s["h_beam_in"] - (fi.get("centroid_offsets_in") or {}).get("top", b["beam_longitudinal_centroid_offset_in"])
     As = b["beam_top_bars"] * ab
     a = As * 60.0 / (0.85 * s["fc_beam_ksi"] * s["b_beam_in"])
     hand_rect = As * 60.0 * (d_eff - a / 2.0)

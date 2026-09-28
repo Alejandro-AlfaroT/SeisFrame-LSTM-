@@ -29,7 +29,7 @@ are not composite beam strengths. Slab membrane forces are now nonzero, so
 the existing zero-membrane reinforcement routine must **not** consume these
 results without a membrane-plus-bending design/recovery method.
 
-`Review_Coupled_Gravity.py` makes a reproducible review from a saved design,
+`tools/review_coupled_gravity.py` makes a reproducible review from a saved design,
 requires a new output directory, records the source SHA256, and runs no NTHA.
 The 8-story, 3-by-3 review from `smrf_evidence_review_20260913/design.json`
 completed uniform 1.2D+1.6L and roof-corner live cases at 4 and 8 subdivisions
@@ -42,7 +42,7 @@ not a convergence certificate: peak local membrane forces increased from
 Investigate spatial recovery/idealized connection concentrations before
 using those peaks for reinforcement. Historical source designs were not edited.
 
-The 308-test suite includes independent symmetric-column PL/EA comparisons,
+The test suite (661 tests on 2026-09-26) includes independent symmetric-column PL/EA comparisons,
 roof load transmitted through an unloaded floor, actual load/weight accounting,
 asymmetric force/moment balance at meshes 2/4/6, rigid-offset compatibility,
 nonzero membrane action, support-stiffness sensitivity, protected domains,
@@ -206,7 +206,8 @@ question is not closed by these numbers; they are what closing it will be
 argued from.
 
 The in-plane restraint behind that gap was isolated on 2026-09-24
-(`docs/handoffs/2026-09-24-coupled-inplane-restraint.md`): the coupled
+(handoff note `2026-09-24-coupled-inplane-restraint.md`, archived outside the
+repository on 2026-09-25): the coupled
 diagnostic now takes a declared `inplane_restraint` (`finite_membrane`,
 `rigid_joints`, `rigid_floor`) and `constraint_handler` (Transformation,
 Lagrange, Penalty; a diaphragm over slab nodes that retain web nodes is a
@@ -535,12 +536,21 @@ pure and tested):
   beam capacity-shear section (22.5.1.2 with 18.6.5.1 Ve) takes the *wider*
   variant of the current depth first, because on short clear spans
   18.6.2.1(a) (ln >= 4d) caps the depth and bw d is the lever -- the beam
-  ladder now offers each depth at its paired width and one 4-in wider
-  variant, ordered by the capacity proxy b h^2 sqrt(f'c) so a jump lands on
-  the lightest rung that should carry the demand; both fall back to the
-  column only at the top of the beam ladder. When the clear span forbids a
-  target rung the search lands on the next feasible rung above it, never a
-  lighter one;
+  ladder now offers each depth at its paired width and up to three 4-in
+  wider variants, none wider than deep (one variant until 2026-09-27; the
+  third reaches 24 in at the common depths, three quarters of a 32-in
+  column), ordered by the capacity proxy
+  b h^2 sqrt(f'c) so a jump lands on the lightest rung that should carry
+  the demand; both fall back to the column only at the top of the beam
+  ladder. When the clear span forbids a target rung the search lands on the
+  next feasible rung above it, never a lighter one;
+- the beam bars must pass between the column bars in one layer with the
+  25.2.1 clearance (2026-09-27, `beam.bars_thread_column`, see "Beam bar
+  threading and orthogonal stacking"); the column cage generator offers
+  only cages whose lanes admit them (the column cage rule), so when the
+  check still fails the column grows if such cages exist at its size
+  (`column_cage_threading`) and the beam takes the wider variant of its
+  depth if none does;
 - beam bars are offered only where 18.8.2.3 lets them pass through the
   joints (20 db within the column dimension parallel to the bars, in each
   direction with an interior joint), and the through-bar depth is a
@@ -1109,7 +1119,10 @@ checks; the driver installs the hoops before the state is captured, so
   crediting six legs to a column with three top bars; a 3-top-bar column
   now gets a 3-leg set (hoop plus one crosstie) at the spacing that shear
   and confinement then need, or the section grows. `detailing.cage_layout`
-  and `column.cage_layout` / `beam.cage_layout` evaluate the arrangement.
+  and `column.cage_layout` / `beam.cage_layout` evaluate the arrangement;
+  `beam.bars_thread_column` and `beam.bar_stacking_clear_of_slab_mats`
+  (2026-09-27) evaluate the assembled joint, where the beam bars of both
+  directions, the column bars and the slab mats must fit together.
 - Joint shear (18.8.4): Vj = 1.25 fy (beam top bars + slab bars in the
   effective flange) + 1.25 fy (opposite beam bottom bars) - Vcol, with
   Vcol = sum Mpr / H (2 sum Mpr / H at a terminating roof column), for every
@@ -1314,7 +1327,8 @@ for the joint adapter's SCWB checks; the driver's SCWB screen
 IMK beam hinges, which are now asymmetric (`Model/IMK_Hinges.beam_yield_moments`).
 The spring sign was measured: hogging is positive deformation at end i and
 negative at end j (`tests/test_beam_hinge_asymmetry.py`), so each end's
-IMKBilin receives (My-, My+) or (My+, My-) accordingly. On the 3x3x8 review
+IMK material (IMKPeakOriented in production, IMKBilin for legacy runs) receives
+(My-, My+) or (My+, My-) accordingly. On the 3x3x8 review
 geometry the interior-beam negative strength roughly doubles (1049 -> 1999
 kip-in with 3#6 top bars) and the column screen moves from 18x18 to 22x22;
 the exact joint check then fails only at roof joints, where a single column
@@ -1347,6 +1361,395 @@ These tests validate bounded algorithms and implementation conventions, not
 full SMRF engineering qualification. Representative coupled floors, frame
 demands, anchorage/cage details and nonlinear behavior still require independent
 engineering checks before a new pilot can establish the methodology.
+
+## Beam bar threading and orthogonal stacking
+
+The 2026-09-27 detailing review (`Design/SMRF_Cage_Geometry`,
+`tools/review_cage_geometry`) assembled the joint of the local case_0002
+frame in three dimensions: hoop and crosstie geometry with hook orientation
+and bend dimensions, the beam bars of both directions threaded in plan
+between the column bars, the vertical stacking of the two orthogonal layers,
+and the slab mats crossing the beam. Two things the section drawings could
+not show came out of it. First, the 16 x 24 beam's six #8 bars do not pass
+between the 32 x 32 column's fourteen #11 bars in one layer: the column bars
+block lanes across the beam band and only three (x) or four (y) bars fit
+with the 25.2.1 clearance, so the bars would need two layers. Second, the x
+and y bars cannot share an elevation where they cross, so one direction's
+top layer sits a bar diameter plus the 25.2.2 clear below the other's, and
+its bottom layer the same distance above; the record's strengths used one
+depth for both directions.
+
+Both are now design-basis rules of the loop:
+
+- Threading (`SMRF_Capacity_Design.design_bar_threading`, check
+  `beam.bars_thread_column`): every candidate is assembled at an interior
+  joint; the beam bars of each direction must thread the column bars in one
+  layer with the aggregate-dependent 25.2.1 clearance. A candidate that
+  fails is not accepted and `_plan_next_rungs` steps the beam to the wider
+  variant of its depth (`beam_bar_threading`, a beam step reason like the
+  capacity shear). Width is the lever because the lanes between column bars
+  are fixed by the column cage; a second layer would give up depth in both
+  directions and larger bars fit worse. The beam ladder therefore offers
+  up to three wider variants per depth instead of one (`Section_Design
+  .BEAM_WIDTH_VARIANTS`), none wider than it is deep
+  (`BEAM_MAX_WIDTH_DEPTH_RATIO`, a stated proportioning preference, not
+  18.6.2.1(b)); on the 4-in ladder a 24-in beam clears the lanes of a
+  32-in column and, at three quarters of the column face, also confines
+  the joint per 15.2.8. Because the ladder is ordered by the capacity proxy,
+  a wider and shallower rung can sit above the rung a step asked for; the
+  planner therefore holds the depth or width a step pulled on as a floor
+  and lands on the first rung at or above the proposal that keeps it. The
+  check records the lanes blocked, the bars per layer that fit and the
+  layers needed, per direction.
+- Stacking (`Structure_Parameters.BEAM_BAR_STACKING`,
+  `beam_bar_stacking_offsets_in`, check
+  `beam.bar_stacking_clear_of_slab_mats`): the direction whose slab mats
+  are the inner mats sits on top (`inner_over_outer`, resolved per design
+  from the layout's outer axis, so x mats outer gives `y_over_x`), because
+  the lower direction's bars then cross only the inner mats and clear the
+  outer bottom mat. The lower direction's top bars sit at the nominal offset
+  plus db plus max(1 in, db); its bottom bars the same amount above the
+  bottom face; the upper direction keeps the nominal offset at the top and
+  takes the lower one at the bottom. Bars run straight, so the lower
+  position holds along the member and enters every strength that uses the
+  bar depth: the composite and rectangular face strengths
+  (`composite_beam_strengths` takes a top and a bottom offset), the hinge
+  yield moments, the ACI flexure checks per direction and face, and the
+  capacity-shear and steel-sizing depth through the worst offset. The
+  record carries `reinforcement.beam_bar_stacking` (mode, convention,
+  offsets per direction and face, the clearance basis); `apply_design`
+  restores the mode and refuses a record whose offsets do not reproduce,
+  and a record from before the rule is restored at its single elevation
+  (`none`). On case_0002 the lower top layer takes the hogging strength of
+  that direction down by about a tenth (d 21.5 to 19.5 in at 24 in deep);
+  sagging barely moves because the bottom bars of that direction stay at
+  the nominal offset.
+
+Both checks are capacity-design checks, so the candidate screen, the
+selected-iteration constraints and qualification all see them, and the
+identity of a design changes: records designed before 2026-09-27 carry
+neither field, and a rerun of any of them writes to a new output root.
+
+What the rule did on the plan that motivated it
+(`outputs/dv_local_stacking_20260927`, case_0002, 2x5x8 at 12 x 15 ft bays
+and 14 ft stories, SDC E): the width lever alone did not close it. Ten
+iterations took the beam from 16 x 24 to 22 x 28 (five #10) and the column
+from 32 x 32 to 36 x 36 fc-5 (six #11 per face, lanes at 8.8 / 14.9 / 21.1 /
+27.2 in), and three beam bars still pass per layer in each direction; the
+search stopped on its iteration budget with 26 x 28 proposed and
+`beam.bars_thread_column` the only failing capacity check. Each widening
+stiffens the beam and raises its moment, the column then grows for the
+strength hierarchy and joint shear and gains bars per face, and the lanes
+narrow faster than the beam widens. The lever the rule lacked was the
+column cage, and the design basis adopted it the same day (user decision,
+2026-09-27): the column cage rule below.
+
+The column cage rule. The column cage generator
+(`Redesign.col_candidates_for_beam_bars`), which both the strength pick
+and the strong-column escalation (`_scwb_column_steel`) draw from, offers
+only cages whose lanes admit the current beam bars of both directions in
+one layer, by the same geometry as `beam.bars_thread_column`
+(`SMRF_Cage_Geometry.column_cage_admits_beam_bars`). The order of offers:
+threading cages inside the steel band; then threading cages above the band
+up to the ACI maximum ratio, because a cage that threads and is stronger
+than the band asks beats one that does not thread (the DCR band is a
+search preference, not a code requirement); only when no cage at the
+column threads at all, every cage in the band, so strength is never left
+short. Each history entry and the record's `detailing.column_cage_rule`
+say whether threading cages exist at the column and whether the installed
+cage threads. The planner reads them when the threading check fails: cages
+that thread exist but strength or the strong-column rule needed more steel
+than they hold, so the column grows (`column_cage_threading`, a column
+step: a larger column keeps the lanes and needs less steel); none exist,
+so the beam band is too narrow and the beam widens as before. On a 32-in
+column with #11 bars the rule turns a 20-in beam with six #8 bars from
+five per layer (four bars per face) into a fit (three per face, one
+interior side bar); a 16-in beam admits no cage, because 18.7.5.2(e) puts
+a bar in the middle of every face wider than 14 in of clear spacing. The
+legacy path (no slab) is untouched.
+
+The first case_0002 run under the rule (`outputs/dv_local_cage_rule_20260927`)
+showed its other half. From iteration 6 on every candidate's cage let the
+beam bars through, but a lane-keeping cage on a 36-in column holds at most
+sixteen #11 (1.9 %), and the strong-column check stopped at a ratio of 1.12
+against 1.20 at 36 x 36 fc-5 / 26 x 28 with six #9; at the top of the
+column ladder (36 x 36 fc-8) the search stopped on `joint_scwb`. Fewer,
+larger bars is the rule's own remedy, so No. 14 joined the column bar
+ladder (`Config.RebarConfig.bar_sizes_col`; No. 18 is not offered): the
+same lanes hold 44 % more steel. No. 14 cannot be lap spliced (25.5.1.1),
+so `design_splices` gives those columns Type 2 mechanical splices
+(18.2.7.1) and records `lap_splice_permitted_25.5.1.1`.
+
+The second run under the rule (`outputs/dv_local_cage_rule_n14_20260927`)
+threaded from iteration 6 on and still ended on `joint_scwb` at the top of
+the column ladder (36 x 36 fc-8 / 26 x 26 with seven #9: strong-column
+ratio 1.14 with sixteen #14 already exhausted within the practical 4 %),
+because a wider, stronger beam keeps raising the column the joint needs.
+The user's decision then (2026-09-27): "if widening the beam changes too
+many things, we can just add another layer".
+
+Two layers of beam bars. `Structure_Parameters.BEAM_BAR_MAX_LAYERS = 2`.
+The bars of a direction that the column lanes do not admit in one layer
+take a second layer directly below the first (25.2.2, bars over bars), one
+pitch db + max(1 in, db) apart; each layer is filled to what the lanes admit
+(`beam_bars_per_layer`, the same geometry as `beam.bars_thread_column` on
+the live column cage and beam width). The orthogonal cages stack as
+before: at the top face the upper direction's layers come first and the
+lower direction's cage starts below its last layer; at the bottom face the
+mirror. `beam_bar_layers` gives every direction and face its layers,
+per-layer counts, offsets and centroid, and the strengths read that
+centroid everywhere they read an offset (composite and rectangular face
+strengths, the hinge yield moments, the flexure checks per direction, the
+capacity-shear and steel-sizing depth through the worst offset); the
+record carries it as `reinforcement.beam_bar_stacking.layers` with
+`max_layers` and `layer_pitch_in`, `apply_design` restores the limit the
+record was designed under, and a record from before the decision is read
+at one layer. The threading check `beam.bars_thread_column` passes at up
+to `max_layers` layers and its details list the layers placed; the joint
+assembly's hook tail is measured from the deepest top layer. Bars that
+would need more layers than the limit are kept at one elevation and the
+check fails, so the strengths are never priced on an arrangement that
+will not be built; the search then grows the column where a lane-keeping
+cage exists or widens the beam, as before. The column cage rule keeps its
+place with "threads" meaning "within the layer limit", and the beam
+candidate screen (`Redesign._beam_candidates`) prefers cages the lanes
+admit within the limit, falling back to the width rule alone when the
+current column admits none (the check then fails and the section moves);
+the steel band is sized on the stacked-cage depth, each candidate priced
+at its own layered depth. On a 32-in column with four #11 per face a 16-in
+beam with six #8 now places two layers of three: the upper direction's
+top bars centre 3.5 in from the face, the lower direction's 7.5 in, and
+the lower direction's hogging lever arm falls by about a quarter, which
+the strengths now carry.
+
+What the plan case did under two layers
+(`outputs/dv_local_two_layers_20260927`): from iteration 3 on the
+threading check, the strong-column check (minimum ratio 1.22 with sixteen
+#14 in a 36 x 36 fc-8 column, mechanical splices), joint shear (worst
+0.87) and drift all pass. The search exhausted the ladder at 26 x 28 fc-8
+with six #10 in two layers (x [4, 2], y [3, 3]) on one failing capacity
+check, `beam.capacity_shear_section` (22.5.1.2): block stacking of two
+#10 layers (pitch 2.54 in) puts the lower direction's top-bar centroid
+9.1 in from the face, so that direction keeps about 19 in of the 28, and
+the beam can be neither deeper (108 in clear under 36-in columns on the
+12-ft bay caps the depth at 28 by 18.6.2.1(a)) nor wider (the b <= h
+preference stops at 26). The choices this leaves are engineering ones: a
+beam pick that prefers the fewest layers among candidates within the DCR
+tolerance (larger bars in one layer), interleaving the orthogonal layers
+(x1 y1 x2 y2, a worst loss of two pitches instead of two and a half), or
+relaxing the ladder caps. The user chose the first (2026-09-27, "the larger
+bars per layer option").
+
+Fewest layers first. `RebarConfig.beam_prefer_fewest_layers` (default
+True; a declared search preference recorded with the request identity):
+among the beam cages whose estimated DCR stays within the ceiling, the
+pick (`Redesign._pick_beam`) first keeps those needing the fewest layers
+between the current column bars (`_beam_candidate_layers`, the lanes of
+`Structure_Parameters.beam_bars_per_layer`), and the DCR objective with
+its least-steel tie-break decides among them; when no cage is within the
+ceiling every cage stays in, fewest layers first, so a shortfall is still
+sized and the section grows. Each candidate's DCR is estimated at its own
+layered depth, so a one-layer cage of larger bars competes with the depth
+it keeps. No. 11 joined the beam bar ladder for this (`bar_sizes_beam`),
+still screened per column by 18.8.2.3. On a 32-in column with four #11
+per face and a 20-in beam, six #8 need two layers (five pass per layer)
+and four #10 one; at a demand where the objective alone prefers the six
+#8, the pick now takes the four #10.
+
+On the plan case (`outputs/dv_local_larger_bars_20260927`) the preference
+had nothing to choose: the 36 x 36 column the strong-column check needs
+carries six bars on each face the y beams meet (four interior side bars
+plus the corners), so the y direction admits three beam bars per layer;
+one layer therefore means at most three bars, and three #11 (4.68 in^2)
+are short of the roughly 6.2 in^2 the beam needs even at the depth one
+layer keeps. Every candidate in the band still took two layers and the
+search ended exactly where the two-layer run did. A hand check shows four
+#11 in one layer would carry the demand (d about 22.4 in, phi Mn about
+6,800 kip-in against about 6,700 needed), but four bars need a cage with
+two interior side bars, whose strong-column ratio at this column falls to
+about 0.95. The remaining paths are engineering choices: a column ladder
+beyond 36 in (at 40 in the same cage leaves four lanes per layer and the
+strong-column check eases), No. 18 column bars at four and two per face
+with a column-side one-layer preference, interleaved orthogonal layers, or
+a relaxed width-to-depth cap. The user raised the column ladder's cap to
+42 in, with a 40-in rung (2026-09-27, `Section_Design.COLUMN_SIZES_IN`);
+a larger column gives the strong-column check its lever arm back without
+adding face bars, and a cage with two interior side bars then keeps four
+or five beam lanes per layer.
+
+On the 42-in ladder (`outputs/dv_local_col42_20260927`) the plan case
+settles on a 42 x 42 fc-5 column with sixteen #14 at 2.0 % (five and three
+per face, four beam lanes per layer in both directions), a 26 x 28 fc-8
+beam, a strong-column ratio of 1.23, joint shear at 0.94 and drift
+passing; the beam still carries six #11 in two layers of four and two, its
+top-bar centroid 9.4 in from the face in the lower direction, and the beam
+capacity-shear section is the one failing check. The one-layer alternative
+of four #11 (d about 22.4 in, phi Mn about 7,175 kip-in) sits at a DCR of
+about 1.006 against the demand of about 7,220 kip-in, one percent over the
+ceiling, so the fewest-layers preference could not take it, and five #11
+need a second layer. What remains is a convention or a cap: interleaving
+the orthogonal layers (x1 y1 x2 y2) would put the worst centroid about
+7.5 in from the face instead of 9.4 and recover a tenth of the depth,
+which the shear section limit scales with; a 30-in-wide beam would need
+the width-to-depth preference relaxed. The user chose interleaving
+(2026-09-27, "lets interleave the layers").
+
+Interleaved layers. `Structure_Parameters.BEAM_BAR_LAYER_ORDER =
+"interleaved"` (the earlier convention is kept as "blocked"): at a face
+the two directions' layers alternate, upper first layer, lower first
+layer, upper second, lower second, one pitch apart
+(`beam_bar_layer_slots`, mirrored in `SMRF_Cage_Geometry.layer_slots`),
+so a direction's own two layers sit two pitches apart with the crossing
+bars between them (their plan alignment per 25.2.2 is kept) and neither
+direction gives up a whole cage's depth. With one layer per direction the
+two orders coincide. The record carries `beam_bar_stacking.layer_order`,
+`apply_design` restores it (blocked for records without it), and the
+threading check evaluates the joint under the same order the strengths
+use. On the 16-in beam through the 32-in column the lower direction's
+top-bar centroid moves from 7.5 to 6.5 in from the face.
+
+On the plan case (`outputs/dv_local_interleaved_20260927`) the centroid
+moved from 9.4 to 7.9 in at the 42 x 42 / 26 x 28 candidate, and the beam
+capacity-shear section (22.5.1.2 with Vc = 0 in the hinge zone, 18.6.5.2)
+still fails; the shortfall is not small: Vs required over Vs limit is
+1.26 at the selected record, 1.39 on the 42-in run and 1.45 on the
+two-layer run. The limit 8 sqrt(f'c) bw d scales with d, and at the
+42-in record a one-layer beam (d about 25 in instead of 18.6) would bring
+the ratio to about 1.02, so the depth the second layer costs is the
+driver, on a plan whose 12-ft bays leave 102 in of clear span and make
+Ve = sum Mpr / ln large. The search's selection policy also shows here:
+the objective (beam DCR nearest the target, with penalties) selected
+iteration 4, a 36 x 36 / 24 x 24 candidate that fails joint shear at
+1.30, over iteration 10, which passes it; qualification decides, as
+designed, and the saved record is the selected one. The lever this
+leaves, an engineering choice, is on the column side: among cages that
+meet strength and the strong-column rule, prefer those admitting the beam
+bars in one layer (at 42 in a four-and-two #14 cage admits six per
+layer, and iteration 9 reached it with seven #9 in six and one), so the
+beam keeps its depth and the shear section closes; the alternatives are a
+34-in-wide beam under a relaxed width-to-depth cap, or accepting this
+plan as one the rules do not close. The user asked whether the column-side
+preference is allowed in practice, and it is: coordinating the column
+verticals so the beam bars pass through the joint core is ordinary
+detailing, and the preference only reorders cages that already satisfy
+18.7.4.1, 25.2.3, 18.7.5.2, 18.7.5.4, the strong-column rule and joint
+shear. The user then chose it (2026-09-27, "wire the column-side one-layer
+preference").
+
+Column-side one-layer preference. `RebarConfig.col_prefer_fewest_beam_layers`
+(default True, recorded with the request identity). In the strength pick
+(`Redesign._pick_col`), among the cages whose estimated DCR stays within
+the ceiling (every cage when none does), those the current beam bars pass
+in the fewest layers (`_column_cage_beam_layers`, the larger of the two
+directions) come first, and the objective decides among them. In the
+strong-column escalation (`_scwb_column_steel`) the pool is ordered by
+`scwb_cage_order`: layers, then the least steel, then the smallest bar,
+and the first cage satisfying every failed joint is installed, so a
+one-layer cage with more steel is taken before a two-layer cage with less,
+within the practical ratio. The history and `detailing.column_cage_rule`
+record `installed_cage_beam_layers` and whether the preference was on. A
+tie-break among cages that pass; strength and the joint rule still decide.
+
+With it the plan case closes (`outputs/dv_local_col_one_layer_20260927`,
+nine iterations, stop `candidate_screen_passed`): a 42 x 42 fc-4 column
+with sixteen #11 at 1.4 % (five and three per face, four beam lanes per
+layer in both directions, Type 2 mechanical splices because the Class B
+lap of 70.05 in just exceeds the 70-in centre half), a 22 x 28 fc-8 beam
+with four #11 in one layer, the strong-column ratio at 1.26, joint shear
+at 0.71, drift passing and the capacity-shear section at 0.993 of its
+limit. The capacity design has no failing and no open item. Qualification
+leaves one item open, `demands.torsional_irregularity`, the story-strength
+gate (review item M1) reserved for the user and Codex, and the DCR band
+preference reads the column at 0.55 against its 0.60 floor, a research
+preference and not a code requirement. Iterations 1 to 7 carried two
+layers; at 42 in the five-and-three cage admitted four bars per layer,
+the beam pick took four #11 in one layer at iteration 8, and the strength
+step closed the pair at iteration 9.
+
+Consistent bar elevations (Codex item 1, 2026-09-27). Two adapters that
+build a beam section from a record still placed every beam bar at the
+nominal elevation: the joint adapter's section builder
+(`SMRF_Joint_Adapter.section_bar_coordinates`, behind
+`record_section_capacity`) and the generated cage sections that serve as
+the independent reference (`SMRF_Generated_Sections.beam_section_from_design`).
+Both now read `reinforcement.beam_bar_stacking.layers[axis]` and place each
+face's rows at the staggered elevations with their per-layer counts, so the
+beam and joint checks price the same section; a record from before the
+rule, or a call without a direction, keeps the nominal row, and rows that
+do not add up to the bar count are refused. A test pins the joint adapter's
+rectangular capacity to the strength module's within two percent at the
+staggered elevations (the residual is the compression-steel treatment), and
+the evidence summary's hand check now takes the family's own top-bar
+elevation. The record's own strengths, the hinges, the flexure checks and
+the capacity design already read the staggered elevations. The per-joint
+strong-column check, however, prices the beams through the joint adapter,
+so the fix reached the loop: on the review candidate the adapter had priced
+every beam face at 8,970 kip-in and now prices the lower direction's
+hogging at 7,915 and the upper direction's at 9,242, the strength module's
+own numbers to four places. Re-qualifying the review candidate under the
+consistent code (`outputs/review_candidate_requalification_20260927`)
+gives 1,222 passing items, none failing and one open (the story-strength
+gate), 576 per-joint strong-column items from 1.309 to 6.721, joint shear
+at 0.708 of capacity and the capacity-shear section at 0.74 % margin. A
+fresh search under the same code (`outputs/dv_local_consistent_elevations_20260927`)
+diverged from the earlier one at its first iteration (joint strong-column
+1.286 against 1.274) and exhausted its ten-iteration budget at 40 x 40 with
+a two-layer 26 x 28 beam; the review candidate stands as the candidate, and
+the search's budget and selection policy are a separate question.
+
+Codex's repair review (2026-09-27, later) accepted the one-layer elevation
+repair and the M1 screen for the unchanged 42-in candidate only, kept the
+fresh search record as a regression case, and set three tasks, all now in
+the code:
+
+- Actual bar rows throughout the strengths. `composite_beam_strengths`
+  takes the direction's rows (`beam["layers"]`, one direction of
+  `Structure_Parameters.beam_bar_layers`) and makes every row its own
+  steel layer, so a second row of the compression face that lies below the
+  neutral axis is counted in tension where it belongs; the collapsed
+  centroid understated the two-layer candidate's Mn by 7 to 11 percent and
+  its Mpr by 6 to 8 percent (Codex's measurement). The family strengths,
+  the probable strengths, the hinge yield moments and the record's families
+  all pass the rows; the result carries `bar_rows` and `steel_area_in2`.
+- Malformed row metadata is rejected. `validate_bar_rows` checks equal
+  array lengths (a zip would silently drop bars: three of four with one
+  elevation), positive integer counts, the declared layer count, counts
+  that add up to the face, positive strictly increasing elevations inside
+  mid-depth, and a declared centroid the rows reproduce; the strength
+  module, the joint adapter, the generated sections and `apply_design`
+  share it.
+- Column-own shear on the physical base clear height is the design basis.
+  `CapacityPolicy.column_shear_method` now defaults to
+  `column_own_probable_envelope_v3` with `physical_base`; the joint-limited
+  rule rested on an unsupported 50/50 sharing reduction, and under the
+  column-own demand the review candidate's story-2 cage needed Vs = 852 kip
+  against a section ceiling of 835 kip and 589 kip installed, in both
+  directions, which ties alone cannot cure. Records without the key are
+  still read as joint-limited, never relabelled. The larger column-own
+  shear is not inserted as a beneficial subtraction in joint shear.
+  The design loop then resizes sections and hoops together
+  (`outputs/dv_local_col_own_v3_20260927`), with every failed iteration
+  kept in the history.
+
+The bounded candidate under that basis (`Design/Verify_Designs
+--max-section-iter 20`, recorded in the root's plan; the production budget
+of 10 is unchanged; `outputs/dv_local_col_own_v3_iter20_20260927`, summary
+in `case_0002/CANDIDATE.md`) does not close. Twelve iterations reach the
+top of both ladders, 42 x 42 fc-8 and 26 x 28 fc-8, and stop with the
+candidate set exhausted. The strong-column ratio (1.21), joint shear
+(0.78) and drift pass, the column capacity-shear section passes only at
+fc-8, and the beam capacity-shear section is 12.6 percent short at every
+fc-8 pair: the column-own demand needs a cage of five and four #11 (or four
+and four #14) per face, those cages leave the beam bars three to four
+lanes per layer, five #11 take two rows, and the lower direction keeps
+about 20 in of the 28. Iteration 9 reached one row with a four-and-two #14
+cage at fc-6 and still fell short, and the search then closed the lanes
+again for the column shear. The plan's 12-ft bay caps the beam at 28 in
+deep and the ladder preference at 26 in wide, so the levers left are a
+30-in beam under a relaxed width-to-depth preference, a column ladder
+beyond 42 in, or treating this plan as one the rules do not close and
+taking a representative case with 15-ft bays. The Codex-accepted review
+candidate is unchanged and was designed under the joint-limited rule.
 
 ## Generation safeguard and diagnostic use
 

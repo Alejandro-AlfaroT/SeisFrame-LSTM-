@@ -7,8 +7,8 @@ import numpy as np
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
-from Model.diaphragms import floor_master_node
-from Model.nodes import node_tag
+from Model.Build_Model import floor_master_node, node_tag
+from Model.IMK_Calibration import bond_slip_indicator
 
 
 ELEMENT_TYPE_ID = {
@@ -518,6 +518,40 @@ def collect_reinforcement_geometry():
     }
 
 
+def installed_deterioration_policy():
+    """What the member springs are actually handed as deterioration capacities.
+
+    The IMK_LAMBDA_* constants describe the direct convention only. Under
+    IMK_DETERIORATION_MODE == "haselton_2008" each member receives
+    Lamda_S = Lamda_C = lambda(nu, s/d) * theta_y,member with A and K
+    suppressed, so the policy that fixes those values is recorded here (the
+    per-member nu makes the column values member specific; the beam and the
+    nu = 0 column values are quoted as anchors). Part of the output identity.
+    """
+    from Model.IMK_Calibration import deterioration_for_member   # lazy: avoids a cycle at import time
+    mode = getattr(sp, "IMK_DETERIORATION_MODE", "direct")
+    modes = ["S", "C", "K"] + (["A"] if sp.IMK_MATERIAL_TYPE == "IMKPeakOriented" else [])
+    if mode == "direct":
+        return {"mode": "direct", "basis": "IMK_LAMBDA_* constants passed unchanged (E_ref = Lamda * My)",
+                "lamda": {m: getattr(sp, f"IMK_LAMBDA_{m}") for m in modes}}
+    anchors = {}
+    for member_type in ("beam_x", "column"):
+        d = deterioration_for_member(member_type, 0.0)
+        anchors["beam" if member_type == "beam_x" else "column_nu_0"] = {
+            "spacing_depth_ratio": d["deterioration_spacing_depth_ratio"],
+            "theta_y_member_rad": d["energy_reference_member_theta_y_rad"],
+            "lambda_haselton": d["lambda_haselton_dimensionless"],
+            "lamda_opensees_rad": d["lambda_opensees_rad"],
+        }
+    reference = deterioration_for_member("column", 0.0)
+    return {"mode": mode, "basis": reference["deterioration_source"],
+            "calibrated_modes": [m for m in modes if m not in reference["deterioration_suppressed_modes"]],
+            "suppressed_modes": {m: reference["deterioration_suppression_lambda_rad"]
+                                 for m in reference["deterioration_suppressed_modes"] if m in modes},
+            "axial_ratio_clamp": [0.0, 0.70],
+            "anchors": anchors}
+
+
 def collect_global_parameters():
     return {
         "num_bay_x": sp.NUM_BAY_X,
@@ -574,8 +608,23 @@ def collect_global_parameters():
             "c_a": sp.IMK_C_A if sp.IMK_MATERIAL_TYPE == "IMKPeakOriented" else None,
             "d_pos": sp.IMK_D_POS, "d_neg": sp.IMK_D_NEG,
         },
+        # What the springs are actually given. Under haselton_2008 the IMK_LAMBDA_* constants above are
+        # NOT installed: S and C receive lambda(nu, s/d) * theta_y,member per member and A/K are
+        # suppressed, so the mode and its policy are part of the output identity (2026-09-26).
+        "imk_deterioration_mode": getattr(sp, "IMK_DETERIORATION_MODE", "direct"),
+        "imk_use_calibrated_backbone": sp.IMK_USE_CALIBRATED_BACKBONE,
+        "imk_installed_deterioration": installed_deterioration_policy(),
         "imk_hinge_stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", "member_stiffness_factor"),
         "imk_hinge_stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
+        # Joint springs and the member slip term they take over (2026-09-27).
+        "joint_model": getattr(sp, "JOINT_MODEL", "rigid_centerline"),
+        "joint_deformation_scope": getattr(sp, "JOINT_DEFORMATION_SCOPE", "joint_shear_only"),
+        "joint_calibration_basis": getattr(sp, "JOINT_CALIBRATION_BASIS", None),
+        "joint_calibration_status": getattr(sp, "JOINT_CALIBRATION_STATUS", None),
+        "joint_stiffness_modifier": getattr(sp, "JOINT_STIFFNESS_MODIFIER", None),
+        "joint_kappa": {"f": getattr(sp, "JOINT_KAPPA_F", None), "d": getattr(sp, "JOINT_KAPPA_D", None)},
+        "joint_lambda_suppression": getattr(sp, "JOINT_LAMBDA_SUPPRESSION", None),
+        "imk_bond_slip_indicator": bond_slip_indicator(),
         "imk_beam_theta_y": sp.IMK_BEAM_THETA_Y,
         "imk_column_theta_y": sp.IMK_COLUMN_THETA_Y,
         "imk_theta_p_pos": sp.IMK_THETA_P_POS,

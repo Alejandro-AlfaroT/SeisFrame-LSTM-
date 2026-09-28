@@ -60,12 +60,25 @@ def capacity_state_from_record(record):
     # joint-limited method they were produced with, never relabelled.
     saved_capacity = record.get("capacity_design") or {}
     saved_columns = saved_capacity.get("columns") or {}
+    # The orthogonal beam bar stacking the record was designed with (2026-09-27): each direction's
+    # top/bottom offsets and the convention. A record from before the rule carries none and is
+    # read at its single elevation, never relabelled.
+    nominal = rebar["beam_longitudinal_centroid_offset_in"]
+    stacking = rebar.get("beam_bar_stacking") or {}
+    offsets = stacking.get("offsets_in") or {axis: {"top": nominal, "bottom": nominal} for axis in ("x", "y")}
     return {
         "geometry": geometry,
         "sections": {key: sections[key] for key in ("b_col_in", "h_col_in", "fc_col_ksi", "b_beam_in", "h_beam_in", "fc_beam_ksi")},
-        "materials": {"fy_ksi": materials["fy_ksi"], "es_ksi": materials["es_ksi"], "normalweight": materials["normalweight"]},
+        "materials": {"fy_ksi": materials["fy_ksi"], "es_ksi": materials["es_ksi"], "normalweight": materials["normalweight"],
+                      "aggregate_size_in": materials.get("aggregate_size_in", 0.75)},
         "beam": {"bar_size": rebar["beam_bar_size"], "top_bars": rebar["beam_top_bars"], "bot_bars": rebar["beam_bot_bars"],
-                 "centroid_offset_in": rebar["beam_longitudinal_centroid_offset_in"], "clear_cover_in": rebar["beam_clear_cover_in"],
+                 "centroid_offset_in": nominal, "clear_cover_in": rebar["beam_clear_cover_in"],
+                 "stirrup_bar_size": rebar["beam_stirrup_bar_size"],
+                 "centroid_offsets_by_axis_in": offsets,
+                 "worst_centroid_offset_in": max(v for faces in offsets.values() for v in faces.values()),
+                 "stacking_convention": stacking.get("convention", "none"),
+                 "max_layers": int(stacking.get("max_layers", 1)), "layer_order": stacking.get("layer_order", "blocked"),
+                 "layers": stacking.get("layers"),
                  "self_weight_kip_per_in": self_weight, "drop_weight_kip_per_in": drop_weight},
         "column": {"bar_size": rebar["col_bar_size"], "top_bars": rebar["col_top_bars"], "bot_bars": rebar["col_bot_bars"],
                    "side_bars": rebar["col_side_bars"], "centroid_offset_in": cover,

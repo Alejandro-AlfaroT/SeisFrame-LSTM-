@@ -62,7 +62,7 @@ from Loads.Gravity_Loads import apply_gravity_loads
 from Loads.Seismic_ELF import apply_elf_loads
 from Design.SMRF_Elastic import build_design_model as build_model
 from RC_Design_Check import get_element_tags
-from Redesign import apply_updates, redesign_steel
+from Redesign import apply_updates, column_cages_that_thread_exist, redesign_steel
 
 
 DESIGN_ARTIFACT_NAME = "design.json"
@@ -78,7 +78,7 @@ _STATE_KEYS = (
     "SLAB_THICKNESS_IN", "FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF", "SEISMIC_LIVE_LOAD_FRACTION",
     "BEAM_CLEAR_COVER_IN", "COL_CLEAR_COVER_IN", "AGGREGATE_MAX_SIZE_IN",
     "REINFORCEMENT_SPECIFICATION", "MATERIAL_EXPOSURE", "FLOOR_TRANSFER",
-    "SLAB_REINFORCEMENT", "SLAB_ACTIONS",
+    "SLAB_REINFORCEMENT", "SLAB_ACTIONS", "BEAM_BAR_STACKING", "BEAM_BAR_MAX_LAYERS", "BEAM_BAR_LAYER_ORDER",
 )
 
 
@@ -304,9 +304,12 @@ def _beam_strength_families():
     beam = {"b_in": sp.B_BEAM, "h_in": sp.H_BEAM, "fc_ksi": sp.FC_BEAM_KSI, "fy_ksi": sp.FY_KSI,
             "bar_size": sp.BEAM_BAR_SIZE, "top_bars": sp.BEAM_TOP_BARS, "bot_bars": sp.BEAM_BOT_BARS,
             "centroid_offset_in": sp.longitudinal_cover_in("beam")}
+    offsets = sp.beam_bar_stacking_offsets_in()          # the stacked orthogonal layers, per direction
+    rows = sp.beam_bar_layers()                           # and the actual rows each direction's bars occupy
     slab = {"thickness_in": sp.SLAB_THICKNESS_IN if layout is not None else 0.0}
     geometry = {"bay_x_in": sp.BAY_X, "bay_y_in": sp.BAY_Y, "h_col_in": sp.H_COL, "b_col_in": sp.B_COL}
-    return {f"{axis}_{position}": composite_beam_strengths(beam, slab, layout, geometry, axis, position)
+    return {f"{axis}_{position}": composite_beam_strengths({**beam, "centroid_offset_in": offsets[axis], "layers": rows[axis]},
+                                                           slab, layout, geometry, axis, position)
             for axis in ("x", "y") for position in ("edge", "interior")}
 
 
@@ -746,9 +749,17 @@ def _capacity_state(cfg, combination_actions):
         "sections": {"b_col_in": sp.B_COL, "h_col_in": sp.H_COL, "fc_col_ksi": sp.FC_COL_KSI,
                      "b_beam_in": sp.B_BEAM, "h_beam_in": sp.H_BEAM, "fc_beam_ksi": sp.FC_BEAM_KSI},
         "materials": {"fy_ksi": sp.FY_KSI, "es_ksi": sp.ES_KSI,
-                      "normalweight": sp.CONCRETE_UNIT_WEIGHT_KCF == 0.150},
+                      "normalweight": sp.CONCRETE_UNIT_WEIGHT_KCF == 0.150,
+                      "aggregate_size_in": sp.AGGREGATE_MAX_SIZE_IN},
         "beam": {"bar_size": sp.BEAM_BAR_SIZE, "top_bars": sp.BEAM_TOP_BARS, "bot_bars": sp.BEAM_BOT_BARS,
                  "centroid_offset_in": sp.longitudinal_cover_in("beam"), "clear_cover_in": sp.BEAM_CLEAR_COVER_IN,
+                 "stirrup_bar_size": sp.BEAM_STIRRUP_BAR_SIZE,
+                 # Orthogonal layers stacked at the joints: each direction's top/bottom offsets, the
+                 # worst single value for shear depth, and the convention (design-basis rule 2026-09-27).
+                 "centroid_offsets_by_axis_in": sp.beam_bar_stacking_offsets_in(),
+                 "worst_centroid_offset_in": sp.beam_worst_centroid_offset_in(),
+                 "stacking_convention": sp.beam_bar_stacking_convention(),
+                 "max_layers": sp.BEAM_BAR_MAX_LAYERS, "layer_order": sp.BEAM_BAR_LAYER_ORDER, "layers": sp.beam_bar_layers(),
                  # The smeared line weight the frame element carries over its full
                  # centerline length (drop weight spread over L, see
                  # Structure_Parameters.beam_self_weight_kip_per_in) and the
@@ -810,21 +821,31 @@ def _capacity_design(cfg, combination_actions):
     they are part of the design state, not a report appended afterwards.
     """
     from Design.SMRF_Capacity_Design import build_capacity_design
-    capacity = build_capacity_design(_capacity_state(cfg, combination_actions))
-    for member, prefix in (("beam", "BEAM"), ("column", "COL")):
-        hoops = capacity["transverse"][member]
-        if hoops is not None:
-            setattr(sp, f"{prefix}_STIRRUP_BAR_SIZE", hoops["bar_size"])
-            setattr(sp, f"{prefix}_STIRRUP_SPACING", hoops["spacing_in"])
-            if member == "column":
-                # Legs are chosen per direction; the scalar the hinge calibration
-                # and legacy shear checks read is the lighter direction.
-                sp.COL_STIRRUP_LEGS = hoops["legs_model"]
-                sp.COL_STIRRUP_LEGS_BY_DIRECTION = dict(hoops["legs"])
-            else:
-                setattr(sp, f"{prefix}_STIRRUP_LEGS", hoops["legs"])
-    _sync_cfg_to_sp(cfg)
-    return capacity
+    # A selected hoop diameter moves the longitudinal bars, changing the
+    # probable moments which generated its own shear demand. Return evidence
+    # for a stable installed cage, not the input to the last hoop selection.
+    seen = set()
+    for _ in range(8):
+        before = _cage_signature()
+        if before in seen:
+            raise RuntimeError("Capacity hoop selection cycled; installed-cage closure was not established.")
+        seen.add(before)
+        capacity = build_capacity_design(_capacity_state(cfg, combination_actions))
+        for member, prefix in (("beam", "BEAM"), ("column", "COL")):
+            hoops = capacity["transverse"][member]
+            if hoops is not None:
+                setattr(sp, f"{prefix}_STIRRUP_BAR_SIZE", hoops["bar_size"])
+                setattr(sp, f"{prefix}_STIRRUP_SPACING", hoops["spacing_in"])
+                if member == "column":
+                    # The scalar used by legacy checks is the lighter direction.
+                    sp.COL_STIRRUP_LEGS = hoops["legs_model"]
+                    sp.COL_STIRRUP_LEGS_BY_DIRECTION = dict(hoops["legs"])
+                else:
+                    setattr(sp, f"{prefix}_STIRRUP_LEGS", hoops["legs"])
+        _sync_cfg_to_sp(cfg)
+        if _cage_signature() == before:
+            return capacity
+    raise RuntimeError("Capacity hoop selection exceeded 8 updates; installed-cage closure was not established.")
 
 
 def _transverse_geometry(cfg):
@@ -860,9 +881,12 @@ def _apply_transverse_geometry(cfg):
 
 
 def _cage_signature():
-    """The installed longitudinal bars, for change detection in the steel pass."""
+    """Every installed cage quantity that can change strength or detailing."""
     return (sp.COL_BAR_SIZE, sp.COL_TOP_BARS, sp.COL_BOT_BARS, sp.COL_SIDE_BARS,
-            sp.BEAM_BAR_SIZE, sp.BEAM_TOP_BARS, sp.BEAM_BOT_BARS)
+            sp.BEAM_BAR_SIZE, sp.BEAM_TOP_BARS, sp.BEAM_BOT_BARS, sp.BEAM_SIDE_BARS,
+            sp.COL_STIRRUP_BAR_SIZE, sp.COL_STIRRUP_SPACING, sp.COL_STIRRUP_LEGS,
+            tuple(sorted((sp.COL_STIRRUP_LEGS_BY_DIRECTION or {}).items())),
+            sp.BEAM_STIRRUP_BAR_SIZE, sp.BEAM_STIRRUP_SPACING, sp.BEAM_STIRRUP_LEGS)
 
 
 def _state_record_core():
@@ -912,6 +936,18 @@ def _state_record_core():
             "beam_clear_cover_in": sp.BEAM_CLEAR_COVER_IN,
             "col_clear_cover_in": sp.COL_CLEAR_COVER_IN,
             "beam_longitudinal_centroid_offset_in": sp.longitudinal_cover_in("beam"),
+            # The orthogonal top and bottom layers stacked at the joints: the convention and each
+            # direction's face offsets; the nominal offset above is the upper layer's.
+            "beam_bar_stacking": {"mode": sp.BEAM_BAR_STACKING, "convention": sp.beam_bar_stacking_convention(),
+                                  "offsets_in": sp.beam_bar_stacking_offsets_in(),
+                                  "max_layers": sp.BEAM_BAR_MAX_LAYERS, "layer_order": sp.BEAM_BAR_LAYER_ORDER,
+                                  "layers": sp.beam_bar_layers(), "layer_pitch_in": sp.beam_bar_layer_pitch_in(),
+                                  "interlayer_clear_min_in": sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN,
+                                  "basis": ("orthogonal beam bars cannot share an elevation where they cross at a joint; "
+                                            "the lower direction's cage runs straight below the upper direction's last "
+                                            "layer, so each direction gives up depth at one face; bars the column lanes "
+                                            "do not admit in one layer take a second layer directly below (25.2.2), "
+                                            "up to max_layers (design-basis rules 2026-09-27)")},
             "col_longitudinal_centroid_offset_in": sp.longitudinal_cover_in("column"),
             "col_bar_diameter_in": sp.rebar_diameter(sp.COL_BAR_SIZE),
             "beam_bar_diameter_in": sp.rebar_diameter(sp.BEAM_BAR_SIZE),
@@ -985,15 +1021,20 @@ def _scwb_column_steel(cfg, joint_scwb):
     on the next steel iteration by the full per-joint evaluation. Returns
     (update or None, exhausted).
     """
-    from Redesign import _col_candidates
+    from Redesign import col_candidates_for_beam_bars, scwb_cage_order
     from Design.SMRF_Joint_Adapter import record_section_capacity
     failing = joint_scwb["_failing"]
     if not failing:
         return None, False
     state = joint_scwb["_state"]
     ag = sp.B_COL * sp.H_COL
-    candidates = sorted(_col_candidates(cfg.rebar.rho_col_min * ag, cfg.rebar.rho_col_practical_max * ag, cfg),
-                        key=lambda c: (c[4], c[0]))
+    # The column cage rule (2026-09-27): the escalation draws from the cages whose lanes admit the
+    # beam bars; when those run out within the practical ratio the column grows rather than the cage
+    # closing the lanes. Only when no cage at this column threads does it draw from every cage. With
+    # the column-side one-layer preference the cages the beam bars pass in fewer layers come first,
+    # then the least steel: the first cage that satisfies every failed joint is installed.
+    pool, _threaded = col_candidates_for_beam_bars(cfg.rebar.rho_col_min * ag, cfg.rebar.rho_col_practical_max * ag, cfg)
+    candidates = sorted(pool, key=lambda c: scwb_cage_order(c, cfg))
     ordered = sorted(failing, key=lambda item: item[0]["details"]["ratio_provided"])
 
     def trial_record(candidate):
@@ -1035,6 +1076,30 @@ def _scwb_column_steel(cfg, joint_scwb):
 
 def _public(joint_scwb):
     return {key: value for key, value in joint_scwb.items() if not key.startswith("_")}
+
+
+def _column_cage_rule_summary(cfg, capacity):
+    """The column cage rule's state for one evaluated candidate (design basis 2026-09-27).
+
+    ``threading_cages_available`` says whether any constructible cage at this column admits the beam
+    bars in one layer; ``installed_cage_threads`` whether the cage the steel pass installed does. The
+    planner reads the first when the second is False: cages exist, so the column grows; none exist, so
+    the beam widens.
+    """
+    threading = capacity.get("bar_threading") or {}
+    layers_needed = [d.get("layers_needed") for d in (threading.get("by_direction") or {}).values()]
+    return {"basis": ("column cages are offered only where their lanes admit the beam bars of both directions within "
+                      "the layer limit (Redesign.col_candidates_for_beam_bars: the strength pick and the strong-column "
+                      "escalation); among those, cages the beam bars pass in fewer layers come first when "
+                      "col_prefer_fewest_beam_layers is on; when no such cage exists at the column a strength cage "
+                      "is installed and the beam widens; when they exist but strength or the strong-column rule "
+                      "needed more steel, the column grows"),
+            "threading_cages_available": column_cages_that_thread_exist(cfg),
+            "one_layer_preference": bool(cfg.rebar.col_prefer_fewest_beam_layers),
+            "installed_cage_beam_layers": max((99 if n is None else n for n in layers_needed), default=None),
+            "installed_cage_threads": threading.get("passes"),
+            "bars_per_layer_installed": {axis: d.get("bars_per_layer_that_fit")
+                                         for axis, d in (threading.get("by_direction") or {}).items()}}
 
 
 def _scwb_steel_floor(cfg, actions, expected_ids):
@@ -1104,6 +1169,7 @@ def _steel_pass(cfg, model_period_sec, max_steel_iter, torsion=None):
             worst["column"] = max(worst["column"], column_dcr)
             worst["beam"] = max(worst["beam"], beam_dcr)
             governing_results.update({(action["id"], tag): result for tag, result in results.items()})
+        checked_cage = _cage_signature()
 
         # Never return demands from the state before the last steel update.
         if steel_iteration == max_steel_iter - 1:
@@ -1131,6 +1197,15 @@ def _steel_pass(cfg, model_period_sec, max_steel_iter, torsion=None):
         _capacity_design(cfg, actions)
         joint_scwb = {**_public(_joint_scwb_state(actions, expected_ids)),
                       "steel_raised": False, "steel_exhausted": (joint_scwb or {}).get("steel_exhausted", False)}
+    if _cage_signature() != checked_cage:
+        # The bounded finalization can select hoops after the last strength
+        # evaluation. Hoops affect both effective depth and shear resistance;
+        # recheck the installed cage even when the steel budget is exhausted.
+        worst = {"column": 0.0, "beam": 0.0}
+        for action in actions:
+            column_dcr, beam_dcr, _ = _governing_dcrs(cfg, member_actions=action["members"])
+            worst["column"] = max(worst["column"], column_dcr)
+            worst["beam"] = max(worst["beam"], beam_dcr)
     return worst, elf_used, actions, joint_scwb
 
 
@@ -1407,12 +1482,20 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
     wider_beam = _next_wider_beam_index(beams, beam_index)
     stronger_beam = _next_stronger_index(beams, beam_index)
 
+    # The dimension a beam step pulls on (depth for drift, width for the shear section and the bar
+    # threading) is held as a floor: the ladder is proxy-ordered, so a wider, shallower rung can sit
+    # above the step and the index alone would not keep the lever (2026-09-27, four width variants).
+    floors = {"depth": 0.0, "width": 0.0}
+
     def grow_beam(prefer_width=False):
         nonlocal next_beam, next_column
         order = ([wider_beam, deeper_beam] if prefer_width else [deeper_beam, wider_beam]) + [stronger_beam]
         step = next((candidate for candidate in order if candidate is not None), None)
         if step is not None:
             next_beam = max(next_beam, step)
+            floors["depth"] = max(floors["depth"], beams[step][1])
+            if step != deeper_beam:
+                floors["width"] = max(floors["width"], beams[step][0])
         elif larger_column is not None:
             next_column = max(next_column, larger_column)
         elif stronger_column is not None:
@@ -1430,6 +1513,18 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
     if not flags["beam_section_adequate"] or not flags["beam_hoops_selected"]:
         reasons.append("beam_capacity_shear")
         grow_beam(prefer_width=True)
+    if not flags.get("beam_bars_thread", True):
+        # The beam bars do not pass between the installed column bars in one layer.
+        reasons.append("beam_bar_threading")
+        if flags.get("column_cage_can_thread", False):
+            # Cages that admit the bars exist at this column (the column cage rule offered them) but
+            # strength or the strong-column rule needed more steel than they hold: a larger column
+            # keeps the lanes and needs less steel, so the column is the lever.
+            reasons.append("column_cage_threading")
+            grow_column()
+        else:
+            # No cage at this column admits the bars: the beam band is too narrow, width is the lever.
+            grow_beam(prefer_width=True)
     if flags["joint_scwb_failed"]:
         reasons.append("joint_scwb")
         grow_column()
@@ -1442,6 +1537,11 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
         ratio = flags.get("joint_shear_ratio")
         if ratio is not None and ratio > 1.0:
             next_column = max(next_column, _column_index_for_joint_shear(columns, column_index, ratio))
+    if floors["depth"] or floors["width"]:
+        held = next((i for i in range(next_beam, len(beams))
+                     if beams[i][1] >= floors["depth"] and beams[i][0] >= floors["width"]), None)
+        if held is not None:
+            next_beam = held
     unmet = (reasons or not flags["scwb_ok"] or not flags["capacity_accepted"]
              or not flags["drift_ok"])
     if unmet:
@@ -1451,9 +1551,9 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
 
 
 # Which member a step reason moves; drift moves the beam first and falls to the column.
-BEAM_STEP_REASONS = ("beam_strength", "drift", "beam_capacity_shear")
+BEAM_STEP_REASONS = ("beam_strength", "drift", "beam_capacity_shear", "beam_bar_threading")
 COLUMN_STEP_REASONS = ("column_strength", "scwb_screen", "joint_scwb", "column_capacity_shear",
-                       "joint_shear_or_anchorage", "drift")
+                       "joint_shear_or_anchorage", "drift", "column_cage_threading")
 STOP_REASONS = ("candidate_screen_passed", "iteration_budget_exhausted", "no_candidate_under_strategy",
                 "candidate_set_exhausted", "repeated_candidate_after_substitution")
 
@@ -1742,6 +1842,9 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
             "column_at_ladder_floor": column_index == 0,
             "requested_beam_section": list(beams[requested_beam]),
             "substitutions_before_evaluation": substitutions,
+            # The column cage rule (2026-09-27): whether cages that admit the beam bars exist at this
+            # column, and whether the installed one does; the planner's lever when threading fails.
+            "column_cage_rule": _column_cage_rule_summary(cfg, capacity),
         }
         history.append(entry)
         if verbose:
@@ -1811,6 +1914,8 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
              "capacity_accepted": capacity["accepted"],
              "beam_section_adequate": capacity["beams"]["section_adequate"],
              "beam_hoops_selected": capacity["transverse"]["beam"] is not None,
+             "beam_bars_thread": (capacity.get("bar_threading") or {}).get("passes", True),
+             "column_cage_can_thread": entry["column_cage_rule"]["threading_cages_available"],
              "column_section_adequate": capacity["columns"]["section_adequate"],
              "column_hoops_selected": capacity["transverse"]["column"] is not None,
              "joints_all_pass": capacity["joints"]["all_pass"],
@@ -1984,7 +2089,9 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
             "interpretation": ("the stop reason describes how this bounded search ended; none of them is evidence "
                                "that no code-compliant frame exists for the geometry"),
         },
-        "detailing": {**_transverse_geometry(cfg), "joint_continuity": _joint_continuity_declaration()},
+        "detailing": {**_transverse_geometry(cfg), "joint_continuity": _joint_continuity_declaration(),
+                      # The column cage rule's state at the selected candidate (design basis 2026-09-27).
+                      "column_cage_rule": best["entry"].get("column_cage_rule")},
     }
     # The selected frame's forces are now copied into the artifact. Release
     # that scratch domain before entering the independent floor diagnostic.
@@ -2114,6 +2221,38 @@ def apply_design(record):
         if strength["inputs"]["slab"]["thickness_in"] != sp.SLAB_THICKNESS_IN:
             raise ValueError("Cached slab reinforcement belongs to a different slab thickness.")
     sp.SLAB_REINFORCEMENT = strength
+    # The saved joint-shear categories (gamma, Aj, Vn per level/kind/axis) feed the joint springs
+    # of the nonlinear frame (Model/Joint_Springs); a record without them gets the framing fallback.
+    sp.JOINT_SHEAR_CATEGORIES = ((record.get("capacity_design") or {}).get("joints") or {}).get("joints")
+    # Orthogonal beam bar stacking: a record from before the rule keeps the single elevation it was
+    # designed with; a record that carries the rule must reproduce its offsets under the live slab.
+    stacking = rebar.get("beam_bar_stacking")
+    sp.BEAM_BAR_STACKING = stacking["mode"] if stacking else "none"
+    if stacking:
+        # The layer limit and layer order the record was designed under (one layer, blocked, before
+        # the same day's later decisions).
+        sp.BEAM_BAR_MAX_LAYERS = int(stacking.get("max_layers", 1))
+        sp.BEAM_BAR_LAYER_ORDER = stacking.get("layer_order", "blocked")
+        expected = sp.beam_bar_stacking_offsets_in()
+        recorded = stacking.get("offsets_in") or {}
+        if (stacking.get("convention") != sp.beam_bar_stacking_convention()
+                or any(not math.isclose(expected[axis][face], float((recorded.get(axis) or {}).get(face, float("nan"))),
+                                        abs_tol=1e-9)
+                       for axis in ("x", "y") for face in ("top", "bottom"))):
+            raise ValueError("Cached beam bar stacking does not reproduce.")
+        # The actual rows (2026-09-27): a record that carries them must reproduce them, row by row,
+        # and they must be well formed (Design.SMRF_Beam_Slab_Strength.validate_bar_rows).
+        recorded_rows = stacking.get("layers")
+        if recorded_rows is not None:
+            from Design.SMRF_Beam_Slab_Strength import validate_bar_rows
+            live_rows = sp.beam_bar_layers()
+            for axis in ("x", "y"):
+                for face, count in (("top", sp.BEAM_TOP_BARS), ("bottom", sp.BEAM_BOT_BARS)):
+                    saved = validate_bar_rows(recorded_rows[axis][face], count, f"{axis} {face} bars", sp.H_BEAM)
+                    live = [(n, o) for n, o in zip(live_rows[axis][face]["per_layer"], live_rows[axis][face]["offsets_in"])]
+                    if len(saved) != len(live) or any(n != m or not math.isclose(a, b, abs_tol=1e-9)
+                                                     for (n, a), (m, b) in zip(saved, live)):
+                        raise ValueError("Cached beam bar rows do not reproduce.")
     return record
 
 
@@ -2146,8 +2285,11 @@ def design_request_identity(cfg=None):
     return {"sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(), **json.loads(canonical)}
 
 
-def load_or_create_design(design_path, cfg=None, verbose=True):
+def load_or_create_design(design_path, cfg=None, verbose=True, max_section_iter=None):
     """Read a cached design artifact, or run the design and write it.
+
+    ``max_section_iter`` overrides the search's section-iteration budget (the driver's default when
+    None); a run that asks for a larger bound records it in its plan (Design/Verify_Designs).
 
     Returns (record, created). The artifact is written atomically so a
     concurrent generation worker never reads a half-written design.
@@ -2178,7 +2320,7 @@ def load_or_create_design(design_path, cfg=None, verbose=True):
                 raise RuntimeError("Another writer created a different design; existing artifact preserved.")
             apply_design(record)
             return record, False
-        record = design_structure(cfg=cfg, verbose=verbose)
+        record = design_structure(cfg=cfg, verbose=verbose, **({} if max_section_iter is None else {"max_section_iter": int(max_section_iter)}))
         record["request_identity"] = identity
         temporary.write_text(json.dumps(record, indent=2, allow_nan=False) + "\n", encoding="utf-8")
         # No-clobber rename on Windows; writers in this workflow share the lock.

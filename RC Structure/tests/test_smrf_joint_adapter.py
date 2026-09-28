@@ -253,5 +253,68 @@ class LocalForceConventionTests(unittest.TestCase):
             ops.wipe()
 
 
+
+class StaggeredElevationTests(unittest.TestCase):
+    """The joint's beam capacities use the staggered bar elevations the record carries (2026-09-27), so the
+    beam and joint checks price the same section."""
+
+    def staggered(self):
+        data = record()
+        data["sections"]["fc_beam_ksi"] = 5.
+        data["reinforcement"]["beam_bar_size"] = 8
+        data["reinforcement"]["beam_side_bars"] = 0      # the strength module prices top and bottom bars only
+        data["reinforcement"]["beam_bar_stacking"] = {
+            "convention": "y_over_x", "max_layers": 2, "layer_order": "interleaved",
+            "layers": {"x": {"top": {"layers": 1, "per_layer": [4], "offsets_in": [5.07], "centroid_in": 5.07},
+                             "bottom": {"layers": 1, "per_layer": [3], "offsets_in": [2.25], "centroid_in": 2.25}},
+                       "y": {"top": {"layers": 1, "per_layer": [4], "offsets_in": [2.25], "centroid_in": 2.25},
+                             "bottom": {"layers": 1, "per_layer": [3], "offsets_in": [5.07], "centroid_in": 5.07}}}}
+        return data
+
+    def test_the_lower_direction_loses_hogging_and_the_nominal_record_does_not(self):
+        data = self.staggered()
+        x_neg = record_section_capacity(data, "beam", "x", "negative", 0)["mn_kip_in"]
+        y_neg = record_section_capacity(data, "beam", "y", "negative", 0)["mn_kip_in"]
+        self.assertLess(x_neg, y_neg, "x top bars sit a layer lower at the joint")
+        nominal = record()
+        nominal["reinforcement"]["beam_side_bars"] = 0
+        self.assertAlmostEqual(record_section_capacity(nominal, "beam", "x", "negative", 0)["mn_kip_in"],
+                               record_section_capacity(nominal, "beam", "y", "negative", 0)["mn_kip_in"])
+        # y keeps its top bars at the nominal elevation; only its bottom (compression) bars moved a layer
+        self.assertAlmostEqual(y_neg / record_section_capacity(nominal, "beam", "y", "negative", 0)["mn_kip_in"], 1.0, delta=0.03)
+        bars = section_bar_coordinates(data, "beam", "x")
+        self.assertEqual(sorted(round(z, 2) for _, _, z in bars if z > 0), [24. / 2 - 5.07] * 4)
+
+    def test_joint_adapter_agrees_with_the_record_strength_module(self):
+        from Design.SMRF_Beam_Slab_Strength import composite_beam_strengths
+        data = self.staggered()
+        beam = {"b_in": 16., "h_in": 24., "fc_ksi": 5., "fy_ksi": 60., "bar_size": 8, "top_bars": 4, "bot_bars": 3,
+                "centroid_offset_in": {"top": 5.07, "bottom": 2.25}}
+        family = composite_beam_strengths(beam, {"thickness_in": 0.}, None, {"bay_x_in": 240., "bay_y_in": 240., "h_col_in": 30., "b_col_in": 24.}, "x", "interior")
+        for sign in ("negative", "positive"):
+            adapter = record_section_capacity(data, "beam", "x", sign, 0)["mn_kip_in"]
+            module = family["rectangular"][sign]["mn_kip_in"]
+            self.assertAlmostEqual(adapter / module, 1.0, delta=0.02, msg=f"{sign}: adapter {adapter:.0f} vs module {module:.0f}")
+
+    def test_layers_must_add_up(self):
+        data = self.staggered()
+        data["reinforcement"]["beam_bar_stacking"]["layers"]["x"]["top"]["per_layer"] = [3]
+        with self.assertRaisesRegex(ValueError, "not the 4"):
+            section_bar_coordinates(data, "beam", "x")
+
+    def test_unequal_row_arrays_are_rejected_not_truncated(self):
+        """Codex item 3: [3, 1] bars with one elevation must not quietly become three bars."""
+        data = self.staggered()
+        rows = data["reinforcement"]["beam_bar_stacking"]["layers"]["x"]["top"]
+        rows["layers"], rows["per_layer"], rows["offsets_in"], rows["centroid_in"] = 2, [3, 1], [5.07], 5.07
+        with self.assertRaisesRegex(ValueError, "must match"):
+            section_bar_coordinates(data, "beam", "x")
+        rows["offsets_in"] = [5.07, 7.89]
+        with self.assertRaisesRegex(ValueError, "centroid"):
+            section_bar_coordinates(data, "beam", "x")
+        rows["centroid_in"] = (3 * 5.07 + 1 * 7.89) / 4
+        self.assertEqual(len([z for _, _, z in section_bar_coordinates(data, "beam", "x") if z > 0]), 4)
+
+
 if __name__ == "__main__":
     unittest.main()

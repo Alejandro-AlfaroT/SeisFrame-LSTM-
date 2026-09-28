@@ -99,6 +99,39 @@ def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, 
             "beta1": b1, "steel_forces_kip": [(y, f) for y, f in forces]}
 
 
+def validate_bar_rows(face_rows, count, name="beam bars", depth_in=None):
+    """The actual bar rows of one face as [(bars, elevation_from_that_face_in), ...], checked.
+
+    ``face_rows`` is one face of Structure_Parameters.beam_bar_layers (per_layer, offsets_in and,
+    when present, layers and centroid_in). Rejected (2026-09-27, Codex item 3): per_layer and
+    offsets_in of different lengths (a zip would silently drop bars), a declared layer count that
+    does not match, counts that do not add up to ``count``, non-positive or non-increasing
+    elevations, an elevation outside the section, or a declared centroid the rows do not give.
+    """
+    try:
+        per = list(face_rows["per_layer"])
+        offs = [float(o) for o in face_rows["offsets_in"]]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"{name}: rows need per_layer and offsets_in ({exc})") from exc
+    if not per or len(per) != len(offs):
+        raise ValueError(f"{name}: per_layer has {len(per)} entries and offsets_in {len(offs)}; they must match")
+    if any(type(n) is not int or n < 1 for n in per):
+        raise ValueError(f"{name}: every layer must hold a positive integer number of bars")
+    if "layers" in face_rows and int(face_rows["layers"]) != len(per):
+        raise ValueError(f"{name}: declared {face_rows['layers']} layers but {len(per)} rows")
+    if sum(per) != int(count):
+        raise ValueError(f"{name}: rows add up to {sum(per)} bars, not the {count} of the face")
+    if any(not math.isfinite(o) or o <= 0.0 for o in offs) or any(b <= a for a, b in zip(offs, offs[1:])):
+        raise ValueError(f"{name}: elevations must be positive and strictly increasing from the face")
+    if depth_in is not None and offs[-1] >= float(depth_in) / 2.0:
+        raise ValueError(f"{name}: an elevation of {offs[-1]:g} in reaches past mid-depth of a {depth_in:g} in section")
+    if "centroid_in" in face_rows:
+        centroid = sum(n * o for n, o in zip(per, offs)) / sum(per)
+        if not math.isclose(centroid, float(face_rows["centroid_in"]), abs_tol=1e-6):
+            raise ValueError(f"{name}: declared centroid {face_rows['centroid_in']} does not follow from the rows ({centroid:.4f})")
+    return list(zip(per, offs))
+
+
 def _slab_layers_from_top(slab_h, layout, axis, flange_width):
     """Slab mats parallel to the beam inside the flange: (depth from slab top, area)."""
     result = []
@@ -113,14 +146,39 @@ def _slab_layers_from_top(slab_h, layout, axis, flange_width):
 def composite_beam_strengths(beam, slab, layout, geometry, axis, position):
     """Rectangular and beam-plus-slab Mn for one beam family.
 
-    beam: b_in, h_in, fc_ksi, fy_ksi, bar_size, top_bars, bot_bars, centroid_offset_in.
+    beam: b_in, h_in, fc_ksi, fy_ksi, bar_size, top_bars, bot_bars, centroid_offset_in and,
+    when the bars sit in more than one row, ``layers`` = {"top": rows, "bottom": rows} (one
+    direction of Structure_Parameters.beam_bar_layers): every row is then its own steel layer
+    (Codex item 1, 2026-09-27), so a second row of the compression face that lies below the
+    neutral axis is counted in tension where it belongs. Without ``layers`` each face is one
+    row at its centroid offset (a number, or {"top", "bottom"} for the stacked orthogonal cages).
     slab: thickness_in. layout: the slab reinforcement layout record.
     geometry: bay_x_in, bay_y_in, h_col_in, b_col_in. axis 'x'/'y';
     position 'edge' or 'interior'.
     """
     bw, h, fc, fy = beam["b_in"], beam["h_in"], beam["fc_ksi"], beam["fy_ksi"]
     ab = _BAR_AREA[beam["bar_size"]]
-    offset = beam["centroid_offset_in"]
+    rows = beam.get("layers")
+    if rows:
+        top_rows = validate_bar_rows(rows["top"], beam["top_bars"], "top bars", h)
+        bot_rows = validate_bar_rows(rows["bottom"], beam["bot_bars"], "bottom bars", h)
+    else:
+        # One offset for both faces, or {"top": .., "bottom": ..} when the orthogonal cages stack at
+        # the joints (Structure_Parameters.beam_bar_stacking_offsets_in).
+        offset = beam["centroid_offset_in"]
+        if isinstance(offset, dict):
+            off_top, off_bot = float(offset["top"]), float(offset["bottom"])
+        else:
+            off_top = off_bot = float(offset)
+        top_rows, bot_rows = [(beam["top_bars"], off_top)], [(beam["bot_bars"], off_bot)]
+    off_top = sum(n * o for n, o in top_rows) / max(1, sum(n for n, _ in top_rows))
+    off_bot = sum(n * o for n, o in bot_rows) / max(1, sum(n for n, _ in bot_rows))
+
+    def web_layers(sign):
+        """(depth from the compression face, area) of every beam bar row for one sign of bending."""
+        near, far = (bot_rows, top_rows) if sign == "negative" else (top_rows, bot_rows)
+        return [(o, n * ab) for n, o in near] + [(h - o, n * ab) for n, o in far]
+
     t = slab["thickness_in"]
     if axis == "x":
         clear_span, clear_web = geometry["bay_x_in"] - geometry["h_col_in"], geometry["bay_y_in"] - bw
@@ -131,22 +189,25 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position):
     top_area, bot_area = beam["top_bars"] * ab, beam["bot_bars"] * ab
     slab_layers = _slab_layers_from_top(t, layout, axis, bf) if layout is not None else []
     slab_area = sum(area for _, area, _ in slab_layers)
-    # Rectangular beam only.
-    rect_neg = section_moment([(offset, bot_area), (h - offset, top_area)], fc, fy, h, bw)
-    rect_pos = section_moment([(offset, top_area), (h - offset, bot_area)], fc, fy, h, bw)
+    # Rectangular beam only. Layers are (depth from the compression face, area), one per bar row.
+    rect_neg = section_moment(web_layers("negative"), fc, fy, h, bw)
+    rect_pos = section_moment(web_layers("positive"), fc, fy, h, bw)
     # Composite. Negative: compression face is the beam bottom.
-    neg_layers = [(offset, bot_area), (h - offset, top_area)] + [(h - y, a) for y, a, _ in slab_layers]
+    neg_layers = web_layers("negative") + [(h - y, a) for y, a, _ in slab_layers]
     comp_neg = section_moment(neg_layers, fc, fy, h, bw)
-    pos_layers = [(offset, top_area), (h - offset, bot_area)] + [(y, a) for y, a, _ in slab_layers]
+    pos_layers = web_layers("positive") + [(y, a) for y, a, _ in slab_layers]
     comp_pos = section_moment(pos_layers, fc, fy, h, bw, flange_width=bf, flange_depth=t)
     # Where the slab bars are not developed (an exterior end whose hook does
     # not fit the perimeter beam) neither mat is counted in either sign: the
     # bottom mat would otherwise add tension steel to sagging. The flange
     # concrete stays in compression under sagging; it needs no development.
-    undeveloped_pos = section_moment([(offset, top_area), (h - offset, bot_area)], fc, fy, h, bw,
-                                     flange_width=bf, flange_depth=t)
+    undeveloped_pos = section_moment(web_layers("positive"), fc, fy, h, bw, flange_width=bf, flange_depth=t)
     return {
         "axis": axis, "position": position, "slab_sides": sides,
+        "centroid_offsets_in": {"top": off_top, "bottom": off_bot},
+        "bar_rows": {"top": [{"bars": n, "elevation_from_face_in": o} for n, o in top_rows],
+                     "bottom": [{"bars": n, "elevation_from_face_in": o} for n, o in bot_rows]},
+        "steel_area_in2": {"top": top_area, "bottom": bot_area},
         "effective_flange_width_in": bf, "flange_overhang_in": overhang,
         "clear_span_in": clear_span, "clear_to_adjacent_web_in": clear_web,
         "slab_steel_in_flange_in2": slab_area,
@@ -269,10 +330,18 @@ def beam_slab_strengths(record):
     slab = {"thickness_in": record["slab"]["thickness_in"]}
     geom = {"bay_x_in": geometry["bay_x_in"], "bay_y_in": geometry["bay_y_in"],
             "h_col_in": sections["h_col_in"], "b_col_in": sections["b_col_in"]}
+    # Stacked orthogonal layers (reinforcement.beam_bar_stacking) give each direction its own
+    # top and bottom offsets and, since 2026-09-27, its actual rows; older records carry the
+    # single nominal offset.
+    stacking_record = rebar.get("beam_bar_stacking") or {}
+    stacking = stacking_record.get("offsets_in") or {}
+    rows_by_axis = stacking_record.get("layers") or {}
     families = {}
     for axis in ("x", "y"):
+        beam_axis = {**beam, "centroid_offset_in": stacking.get(axis, beam["centroid_offset_in"]),
+                     "layers": rows_by_axis.get(axis)}
         for position in ("edge", "interior"):
-            families[f"{axis}_{position}"] = composite_beam_strengths(beam, slab, layout, geom, axis, position)
+            families[f"{axis}_{position}"] = composite_beam_strengths(beam_axis, slab, layout, geom, axis, position)
     # Where the slab ends at the perimeter its bars are credited only if the
     # hook into the perimeter beam develops them (ACI 318-19 25.4.3.1).
     anchorage = {axis: perimeter_slab_bar_anchorage(layout, axis, sections["b_beam_in"], rebar["beam_clear_cover_in"],

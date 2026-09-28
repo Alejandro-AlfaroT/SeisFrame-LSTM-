@@ -4,7 +4,7 @@ import openseespy.opensees as ops
 
 import Structure_Parameters as sp
 from Model.IMK_Calibration import (
-    BOND_SLIP_INDICATOR,
+    bond_slip_indicator,
     backbone_for_member,
     column_axial_domain,
     column_gravity_axial,
@@ -110,7 +110,10 @@ def beam_yield_moments(member_type, n_i, n_j):
     layout = (sp.SLAB_REINFORCEMENT or {}).get("layout")
     beam = {"b_in": sp.B_BEAM, "h_in": sp.H_BEAM, "fc_ksi": sp.FC_BEAM_KSI, "fy_ksi": sp.FY_KSI,
             "bar_size": sp.BEAM_BAR_SIZE, "top_bars": sp.BEAM_TOP_BARS, "bot_bars": sp.BEAM_BOT_BARS,
-            "centroid_offset_in": sp.longitudinal_cover_in("beam")}
+            # This direction's top/bottom offsets and actual bar rows: the orthogonal cages stack at
+            # the joints and the column lanes may force a second row (2026-09-27).
+            "centroid_offset_in": sp.beam_bar_stacking_offsets_in()[axis],
+            "layers": sp.beam_bar_layers()[axis]}
     # The chosen slab thickness enters whether or not a reinforcement layout
     # is established: with no layout composite_beam_strengths counts no slab
     # mats (hogging is the bare rectangle) but keeps the flange concrete in
@@ -392,8 +395,14 @@ def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone
                     "status": sp.IMK_CYCLIC_CALIBRATION_STATUS,
                     "deterioration_source": deterioration_source,
                     "backbone_source": (backbone or {}).get("source", "fixed"),
-                    "deformation_scope": "member_end_spring; joint_slip_partition_not_validated",
-                    "bond_slip_indicator": BOND_SLIP_INDICATOR}
+                    # The partition of bar slip between member and joint is a declared modelling
+                    # choice (2026-09-27), not an experimentally validated one, in either scope.
+                    "deformation_scope": ("member_end_spring; bar slip carried by the joint spring; "
+                                          "joint_slip_partition_declared_not_validated"
+                                          if bond_slip_indicator() == 0.0
+                                          else "member_end_spring; bar slip inside the member hinge; "
+                                               "joint_slip_partition_not_validated"),
+                    "bond_slip_indicator": bond_slip_indicator()}
     if by_mode is not None:
         provenance["deterioration"] = {key: backbone[key] for key in backbone
                                        if key.startswith("deterioration_") or key.startswith("lambda_")
@@ -509,7 +518,17 @@ def _canonical_member_reversed(n_i, n_j, member_type):
     return delta[axis] < 0
 
 
-def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, _verification_calibrations=None):
+def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes=None,
+                      _verification_calibrations=None):
+    """One IMK member between end nodes n_i and n_j.
+
+    ``joint_nodes`` names the physical joints the member belongs to when the
+    end nodes are not the joints themselves (a beam framing into the joint's
+    beam core under the scissors joint model, Model/Joint_Springs). Grid
+    position, beam family and strengths are read at the joints; the hinges
+    tie to the end nodes.
+    """
+    joint_i, joint_j = (int(joint_nodes[0]), int(joint_nodes[1])) if joint_nodes is not None else (n_i, n_j)
     # Validate all four profiles before mutating the OpenSees domain. Normal
     # builders never pass the private synthetic-fixture argument.
     energy_profiles = _member_energy_profiles(ele_tag, _verification_calibrations)
@@ -520,14 +539,14 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, _verificati
     # properties are fixed. Beams carry no meaningful axial force.
     axial_kip = 0.0
     if member_type == "column":
-        story_index, grid_i, grid_j = column_grid_position(n_j if reverse_connectivity else n_i)
+        story_index, grid_i, grid_j = column_grid_position(joint_j if reverse_connectivity else joint_i)
         axial_kip = column_gravity_axial(story_index, grid_i, grid_j)
 
-    family = beam_line_family(member_type, n_i) if member_type in ("beam_x", "beam_y") else None
+    family = beam_line_family(member_type, joint_i) if member_type in ("beam_x", "beam_y") else None
     props = _member_properties(member_type, axial_kip=axial_kip, family=family)
     strength_basis = None
     if member_type in ("beam_x", "beam_y"):
-        hogging, sagging, strength_basis = beam_yield_moments(member_type, n_i, n_j)
+        hogging, sagging, strength_basis = beam_yield_moments(member_type, joint_i, joint_j)
         props.update(my_hogging=hogging, my_sagging=sagging, my=max(hogging, sagging),
                      my_hogging_i=strength_basis.get("hogging_i_kip_in", hogging),
                      my_hogging_j=strength_basis.get("hogging_j_kip_in", hogging),
@@ -560,9 +579,12 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, _verificati
         "installed_materials": {"i": materials_i, "j": materials_j},
         # The element spans the two hinge nodes, so ops.eleNodes reports those
         # rather than the structural joints. Anything assembling forces at
-        # joints needs the physical end nodes recorded here.
-        "node_i": int(n_i),
-        "node_j": int(n_j),
+        # joints needs the physical joints recorded here; the end nodes the
+        # hinges tie to differ only under the scissors joint model.
+        "node_i": joint_i,
+        "node_j": joint_j,
+        "end_node_i": int(n_i),
+        "end_node_j": int(n_j),
         "length_in": length,
         "yield_moment_y_kip_in": props["my"],
         "yield_moment_y_hogging_kip_in": props.get("my_hogging", props["my"]),

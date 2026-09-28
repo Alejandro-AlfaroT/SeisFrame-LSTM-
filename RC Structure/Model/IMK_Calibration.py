@@ -46,8 +46,20 @@ NU_MIN, NU_MAX = 0.0, 0.70
 RHO_SH_MIN, RHO_SH_MAX = 0.002, 0.020
 
 # a_sl = 1 where bar slip from the joint is possible, which is the normal
-# condition for a cast-in-place frame.
+# condition for a cast-in-place frame and the value Haselton's regression
+# carries for the member. Since 2026-09-27 the frame can carry slip in the
+# joint spring instead (JOINT_DEFORMATION_SCOPE = "joint_shear_and_slip"),
+# in which case the members drop the term so slip is counted once.
 BOND_SLIP_INDICATOR = 1.0
+
+
+def bond_slip_indicator():
+    """Haselton's a_sl for the member hinges under the current joint model and deformation scope."""
+    joint_model = getattr(sp, "JOINT_MODEL", "rigid_centerline")
+    scope = getattr(sp, "JOINT_DEFORMATION_SCOPE", "joint_shear_only")
+    if joint_model == "imk_pinching_scissors" and scope == "joint_shear_and_slip":
+        return 0.0
+    return BOND_SLIP_INDICATOR
 
 THETA_P_FLOOR = 0.005
 THETA_PC_FLOOR = 0.010
@@ -269,7 +281,7 @@ def haselton_theta_p(member_type, nu):
 
     theta_p = (
         0.12
-        * (1.0 + 0.55 * BOND_SLIP_INDICATOR)
+        * (1.0 + 0.55 * bond_slip_indicator())
         * (0.16 ** nu)
         * ((0.02 + 40.0 * rho_sh) ** 0.43)
         * (0.54 ** (0.01 * fc_mpa))

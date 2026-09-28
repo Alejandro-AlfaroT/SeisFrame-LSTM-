@@ -42,7 +42,7 @@ from pathlib import Path
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
-from Analysis.Constraints import apply_analysis_constraints
+from Model.Build_Model import apply_analysis_constraints, floor_master_node, node_tag
 from Loads.Ground_Motion import (
     GroundMotionRecord,
     define_path_time_series,
@@ -50,8 +50,6 @@ from Loads.Ground_Motion import (
     summarize_record,
 )
 from Model.IMK_Hinges import hinge_registry
-from Model.diaphragms import floor_master_node
-from Model.nodes import node_tag
 
 
 # ================================================================
@@ -88,6 +86,18 @@ def _physical_element_tags():
     n_beam_x = sp.NUM_FLOOR * sp.NUM_BAY_X       * (sp.NUM_BAY_Y + 1)
     n_beam_y = sp.NUM_FLOOR * (sp.NUM_BAY_X + 1) * sp.NUM_BAY_Y
     return list(range(1, n_col + n_beam_x + n_beam_y + 1))
+
+
+def _joint_spring_element_tags():
+    """The scissors joint springs (Model/Joint_Springs), which sit between the members and the hinges."""
+    base = getattr(sp, "JOINT_ELEMENT_TAG_BASE", None)
+    if base is None:
+        return []
+    try:
+        all_tags = ops.getEleTags()
+    except Exception:
+        return []
+    return sorted(t for t in all_tags if base <= t < sp.IMK_HINGE_ELEMENT_TAG_BASE)
 
 
 def _imk_hinge_element_tags():
@@ -603,6 +613,7 @@ def _run_ntha_impl(
     # ------------------------------------------------------------------
     phys_ele_tags  = _physical_element_tags()
     hinge_ele_tags = _imk_hinge_element_tags()
+    joint_ele_tags = _joint_spring_element_tags()
     non_base_nodes = _all_non_base_node_tags()
 
     # ------------------------------------------------------------------
@@ -651,6 +662,7 @@ def _run_ntha_impl(
     hinge_history_steps     = []
     hinge_stride = max(1, int(getattr(sp, "NTHA_HINGE_HISTORY_STRIDE", 8)))
     hinge_tag_order = list(hinge_ele_tags)
+    joint_rotation_envelope = {}          # joint springs: (Rx, Ry) per joint element, peaks every step
 
     convergence_log = []
     failed          = False
@@ -734,6 +746,8 @@ def _run_ntha_impl(
                 hinge_rotation_history.append(
                     [value for tag in hinge_tag_order for value in rotations.get(tag, (0.0, 0.0))]
                 )
+        if joint_ele_tags:
+            _update_rotation_envelope(joint_rotation_envelope, _query_hinge_rotations(joint_ele_tags))
 
         # Node displacement envelopes
         _update_node_envelope(node_envelope, _query_node_displacements(non_base_nodes))
@@ -784,6 +798,7 @@ def _run_ntha_impl(
         "element_envelope":   element_envelope,
         "hinge_envelope":     hinge_envelope,   # IMK spring forces
         "hinge_rotation_envelope": hinge_rotation_envelope,
+        "joint_rotation_envelope": joint_rotation_envelope,
         "hinge_rotation_history":  hinge_rotation_history,
         "hinge_rotation_steps":    hinge_history_steps,
         "hinge_tag_order":         hinge_tag_order,

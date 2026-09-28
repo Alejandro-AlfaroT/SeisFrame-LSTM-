@@ -132,8 +132,16 @@ def physical_joint_inventory(geometry):
             "basis": "all grid lines, fixed bases, no fictitious roof column"}
 
 
-def section_bar_coordinates(record, member):
-    """Actual (area, local_y, local_z) perimeter bars; corners counted once."""
+def section_bar_coordinates(record, member, axis=None):
+    """Actual (area, local_y, local_z) perimeter bars; corners counted once.
+
+    A beam whose record carries the staggered bar elevations
+    (reinforcement.beam_bar_stacking.layers, 2026-09-27: the orthogonal cages
+    stacked at the joints and, where the column lanes force it, a second layer)
+    places that direction's rows at those elevations when ``axis`` is given, so
+    the joint's beam capacities agree with the record's own strengths; a record
+    from before the rule, or a call without an axis, keeps the nominal row.
+    """
     if member not in ("column", "beam"):
         raise ValueError("member must be column or beam.")
     prefix = "col" if member == "column" else "beam"
@@ -150,8 +158,22 @@ def section_bar_coordinates(record, member):
     nb = _integer(rebar.get(f"{prefix}_bot_bars"), "bottom bar count", 2)
     ns = _integer(rebar.get(f"{prefix}_side_bars"), "side bar count", 0)
     y, z = b / 2 - cover, h / 2 - cover
-    bars = [(area, -y + 2 * y * n / (count - 1), level)
-            for count, level in ((nt, z), (nb, -z)) for n in range(count)]
+
+    def spread(count, level):
+        if count == 1:
+            return [(area, 0.0, level)]
+        return [(area, -y + 2 * y * n / (count - 1), level) for n in range(count)]
+
+    staggered = ((rebar.get("beam_bar_stacking") or {}).get("layers") or {}).get(axis) if member == "beam" else None
+    if staggered:
+        from Design.SMRF_Beam_Slab_Strength import validate_bar_rows
+        bars = []
+        for face, sign, count in (("top", 1, nt), ("bottom", -1, nb)):
+            # validated row by row: lengths, counts, declared layers and centroid, elevations inside the section
+            for n, elevation in validate_bar_rows(staggered[face], count, f"{face} bars", h):
+                bars += spread(n, sign * (h / 2 - elevation))
+    else:
+        bars = [bar for count, level in ((nt, z), (nb, -z)) for bar in spread(count, level)]
     bars += [(area, side, -z + 2 * z * n / (ns + 1))
              for side in (-y, y) for n in range(1, ns + 1)]
     return bars
@@ -253,7 +275,7 @@ def record_section_capacity(record, member, axis, sign, axial_kip):
     prefix = "col" if member == "column" else "beam"
     sections, materials = record["sections"], record["materials"]
     b, h = sections[f"b_{prefix}_in"], sections[f"h_{prefix}_in"]
-    bars = section_bar_coordinates(record, member)
+    bars = section_bar_coordinates(record, member, axis if member == "beam" else None)
     if member == "column" and axis == "y":
         width, depth, coordinates = h, b, [(area, y) for area, y, _ in bars]
     else:

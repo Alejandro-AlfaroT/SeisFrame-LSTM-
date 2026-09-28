@@ -270,21 +270,27 @@ def check_beam_flexure(Mu_pos, Mu_neg):
     return dcr_pos, dcr_neg, phi_Mn_pos, phi_Mn_neg, max(dcr_pos, dcr_neg) <= 1.0
 
 
-def check_shear(Vu, Nu, bw, d, fc, Av, s, lambda_=1.0):
+def check_shear(Vu, Nu, bw, d, fc, Av, s, lambda_=1.0, h=None):
     """
-    ACI 318-19 §22.5 – simplified shear strength.
-    Vc = 2λ√f'c · bw · d  +  Nu/(6·Ag)  (compression boost)
-    Vs = Av · fy · d / s
+    ACI 318-19 §22.5 – one-way shear strength of a member with Av ≥ Av,min.
+    Vc  = [2λ√f'c + Nu/(6·Ag)] · bw · d   Table 22.5.5.1 (a), Nu/(6·Ag) in psi, ≤ 0.05 f'c (22.5.5.1.1)
+          Vc ≤ 5λ√f'c · bw · d            22.5.5.1.2
+    Vs  = Av · fy · d / s ≤ 8√f'c · bw · d  22.5.8.5.3 / 22.5.1.2
     φVn = 0.75(Vc + Vs)
 
-    Nu : axial compression, kips (positive = compression); 0 for beams.
+    Nu : axial force, kips, positive = compression (tension reduces Vc, floored at 0); 0 for beams.
+    h  : section depth for Ag = bw·h; without it the legacy bw·d/0.9 estimate is used.
     Returns  (phi_Vn, dcr, ok)
-    """
-    Ag = bw * (d / 0.9)
-    Vc = (2.0 * lambda_ * math.sqrt(fc * 1000.0) * bw * d) / 1000.0
-    Vc += max(0.0, Nu) / (6.0 * Ag)
 
-    Vs     = Av * sp.FY_KSI * d / s
+    Until 2026-09-26 the axial term was added as Nu/(6·Ag) in ksi straight to a force in kip.
+    """
+    fc_psi = fc * 1000.0
+    Ag     = bw * h if h else bw * (d / 0.9)
+    nu_psi = min(Nu * 1000.0 / (6.0 * Ag), 0.05 * fc_psi)
+    Vc     = max(0.0, (2.0 * lambda_ * math.sqrt(fc_psi) + nu_psi) * bw * d / 1000.0)
+    Vc     = min(Vc, 5.0 * lambda_ * math.sqrt(fc_psi) * bw * d / 1000.0)
+
+    Vs     = min(Av * sp.FY_KSI * d / s, 8.0 * math.sqrt(fc_psi) * bw * d / 1000.0)
     phi_Vn = PHI_SHEAR * (Vc + Vs)
 
     dcr = Vu / phi_Vn if phi_Vn > 1e-6 else 999.0
@@ -393,6 +399,7 @@ def run_checks(col_tags, beam_tags, col_diagram=None):
             fc=sp.FC_COL_KSI,
             Av=_stirrup_area(sp.COL_STIRRUP_BAR_SIZE, sp.COL_STIRRUP_LEGS),
             s=sp.COL_STIRRUP_SPACING,
+            h=sp.H_COL,
         )
         results[tag] = {
             'type': 'column', 'Pu': P, 'Mu': Mu, 'phi_Mn_cap': phi_Mn,

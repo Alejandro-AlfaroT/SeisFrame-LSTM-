@@ -75,8 +75,24 @@ OUTPUT_IDENTITY_KEYS = (
     "imk_cyclic_calibration_id",
     "imk_cyclic_calibration_status",
     "imk_cyclic_parameters",
+    # A change of deterioration mode (direct constants vs Haselton Eq. 3.20 x theta_y) or of the
+    # backbone source alters every spring while leaving imk_cyclic_parameters unchanged, so both
+    # are identity keys, together with the installed policy and the member yield rotations it scales.
+    "imk_deterioration_mode",
+    "imk_use_calibrated_backbone",
+    "imk_installed_deterioration",
+    "imk_beam_theta_y",
+    "imk_column_theta_y",
     "imk_hinge_stiffness_mode",
     "imk_hinge_stiffness_factor",
+    # Joint springs (2026-09-27): their presence, what their rotation stands for, their calibration
+    # basis and the member slip term they take over all change every response.
+    "joint_model",
+    "joint_deformation_scope",
+    "joint_calibration_basis",
+    "joint_stiffness_modifier",
+    "joint_kappa",
+    "imk_bond_slip_indicator",
     "floor_loads",
     "reinforcement_geometry",
 )
@@ -189,6 +205,37 @@ def _time_history_rows(results):
     return rows
 
 
+def _joint_spring_rows(results):
+    """One row per joint spring plane: its calibration and the rotation it reached (empty without joints)."""
+    from Model.Joint_Springs import joint_registry
+    envelope = results.get("joint_rotation_envelope") or {}
+    rows = []
+    for joint, entry in sorted(joint_registry().items()):
+        peaks = envelope.get(entry["element"]) or envelope.get(str(entry["element"]))
+        for axis, plane in sorted(entry["planes"].items()):
+            slot = 0 if plane["direction"] == 4 else 1
+            rot_max = peaks["max"][slot] if peaks else 0.0
+            rot_min = peaks["min"][slot] if peaks else 0.0
+            rot_abs = peaks["abs_max"][slot] if peaks else 0.0
+            theta_y = plane["theta_y_rad"]
+            rows.append({
+                "joint_node": joint, "beam_core": entry["beam_core"], "joint_ele_tag": entry["element"],
+                "floor": entry["floor"], "grid_i": entry["grid_i"], "grid_j": entry["grid_j"],
+                "kind": entry["kind"], "level": entry["level"], "axis": axis, "direction": plane["direction"],
+                "joint_class": plane["joint_class"], "strength_source": plane["source"],
+                "gamma": plane["gamma"], "aj_in2": plane["aj_in2"], "vn_kip": plane["vn_kip"],
+                "mn_kip_in": plane["mn_kip_in"], "ke_kip_in_per_rad": plane["ke_kip_in_per_rad"],
+                "theta_y": theta_y, "a_rad": plane["a_rad"], "b_rad": plane["b_rad"], "c_residual": plane["c_residual"],
+                "axial_ratio": plane["axial_ratio"], "shear_ratio_design": plane["shear_ratio"],
+                "kappa_f": plane["kappa_f"], "kappa_d": plane["kappa_d"],
+                "rot_max": rot_max, "rot_min": rot_min, "rot_abs_max": rot_abs,
+                "plastic_rotation": max(0.0, rot_abs - theta_y),
+                "yielded": 1 if rot_abs > theta_y else 0,
+                "past_capping": 1 if rot_abs - theta_y >= plane["a_rad"] else 0,
+            })
+    return rows
+
+
 def _hinge_backbone_rows(results):
     """One row per IMK spring: its calibrated backbone and rotation envelope.
 
@@ -224,12 +271,23 @@ def _hinge_backbone_rows(results):
             backbone.get("theta_y_spring_z") or 0.0,
         ) or theta_y
         plastic = max(0.0, rotation - spring_theta_y)
+        # The strong-axis material this end was actually given: its type and the deterioration
+        # capacities installed (under haselton_2008 these are lambda*theta_y for S and C and the
+        # 1e12 suppression for A and K, not the IMK_LAMBDA_* constants).
+        installed = ((backbone.get("installed_materials") or {}).get("i" if end_id == 1 else "j") or {}).get("y") or {}
+        cyclic = installed.get("cyclic") or {}
         rows.append(
             {
                 "hinge_ele_tag": int(hinge_tag),
                 "ele_tag": ele_tag,
                 "end_id": end_id,
                 "member_type": backbone.get("member_type", ""),
+                "material_type": backbone.get("material_type", ""),
+                "deterioration_source": (installed.get("provenance") or {}).get("deterioration_source", ""),
+                "lamda_s_installed": cyclic.get("lamda_s", ""),
+                "lamda_c_installed": cyclic.get("lamda_c", ""),
+                "lamda_a_installed": cyclic.get("lamda_a", ""),
+                "lamda_k_installed": cyclic.get("lamda_k", ""),
                 "axial_kip": backbone.get("axial_kip", 0.0),
                 "axial_ratio": backbone.get("axial_ratio", 0.0),
                 "yield_moment_kip_in": backbone.get("yield_moment_y_kip_in", 0.0),
@@ -376,6 +434,9 @@ def save_ntha_outputs(output_dir, results, gravity_results, modal_results):
     time_rows = _time_history_rows(results)
     node_env_rows = _node_envelope_rows(results)
     hinge_rows = _hinge_backbone_rows(results)
+    joint_rows = _joint_spring_rows(results)
+    if joint_rows:
+        _write_csv(output_dir / "joint_springs.csv", list(joint_rows[0].keys()), joint_rows)
 
     _write_json(output_dir / "status.json", results["status"])
     _write_json(output_dir / "record_summary_x.json", results["record_summary_x"])

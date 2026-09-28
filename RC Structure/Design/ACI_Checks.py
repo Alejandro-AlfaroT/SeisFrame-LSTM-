@@ -74,7 +74,15 @@ def _col_d(cfg: DesignConfig) -> float:
     return cfg.sections.h_col_in - cfg.rebar.centroid_cover_in("column")
 
 
-def _beam_d(cfg: DesignConfig) -> float:
+def _beam_d(cfg: DesignConfig, axis: Optional[str] = None, face: Optional[str] = None) -> float:
+    """Effective depth of the beam bars.
+
+    With ``axis`` ('x' or 'y') and ``face`` ('top' for hogging, 'bottom' for sagging) the depth
+    follows the stacked orthogonal layers at the joints (Structure_Parameters
+    .beam_bar_stacking_offsets_in); otherwise the nominal single offset.
+    """
+    if axis is not None and sp.SLAB_THICKNESS_IN is not None:
+        return cfg.sections.h_beam_in - sp.beam_centroid_offset_in(axis, face or "top")
     return cfg.sections.h_beam_in - cfg.rebar.centroid_cover_in("beam")
 
 
@@ -321,17 +329,19 @@ def check_column_pm(
 def check_beam_flexure_pos(
     Mu_pos: float,
     cfg: DesignConfig,
+    axis: Optional[str] = None,
 ) -> LimitStateResult:
     """
     ACI 318-19 §22.3 — positive (sagging) beam flexure.
-    Capacity governed by BEAM_BOT_BARS.
+    Capacity governed by BEAM_BOT_BARS; ``axis`` picks that direction's bottom-bar depth
+    once the orthogonal layers stack at the joints.
 
     min_controlled: True when As_bot ≤ As_min × 1.01.
     """
     fc  = cfg.materials.fc_beam_ksi if isinstance(cfg.materials.fc_beam_ksi, float) else sp.FC_BEAM_KSI
     fy  = cfg.materials.fy_ksi      if isinstance(cfg.materials.fy_ksi,      float) else sp.FY_KSI
     b   = cfg.sections.b_beam_in
-    d   = _beam_d(cfg)
+    d   = _beam_d(cfg, axis, "bottom")
 
     As_bot = sp.BEAM_BOT_BARS * sp.BEAM_BAR_AREA
     a      = As_bot * fy / (0.85 * fc * b)
@@ -353,17 +363,19 @@ def check_beam_flexure_pos(
 def check_beam_flexure_neg(
     Mu_neg: float,
     cfg: DesignConfig,
+    axis: Optional[str] = None,
 ) -> LimitStateResult:
     """
     ACI 318-19 §22.3 — negative (hogging) beam flexure.
-    Capacity governed by BEAM_TOP_BARS.
+    Capacity governed by BEAM_TOP_BARS; ``axis`` picks that direction's top-bar depth
+    once the orthogonal layers stack at the joints.
 
     min_controlled: True when As_top ≤ As_min × 1.01.
     """
     fc  = cfg.materials.fc_beam_ksi if isinstance(cfg.materials.fc_beam_ksi, float) else sp.FC_BEAM_KSI
     fy  = cfg.materials.fy_ksi      if isinstance(cfg.materials.fy_ksi,      float) else sp.FY_KSI
     b   = cfg.sections.b_beam_in
-    d   = _beam_d(cfg)
+    d   = _beam_d(cfg, axis, "top")
 
     As_top = sp.BEAM_TOP_BARS * sp.BEAM_BAR_AREA
     a      = As_top * fy / (0.85 * fc * b)
@@ -392,23 +404,33 @@ def check_shear(
     s: float,
     fy_ksi: float,
     lambda_: float = 1.0,
+    h: Optional[float] = None,
 ) -> LimitStateResult:
     """
-    ACI 318-19 §22.5 — simplified shear strength.
+    ACI 318-19 §22.5 — one-way shear strength of a member with Av ≥ Av,min.
 
-    Vc = 2λ√f'c · bw · d  +  Nu / (6·Ag)   (compression boost for columns)
-    Vs = Av · fy · d / s
-    φVn = 0.75(Vc + Vs)
+    Vc  = [2λ√f'c + Nu/(6·Ag)] · bw · d        Table 22.5.5.1 (a), Nu/(6·Ag) in psi
+          Nu/(6·Ag) ≤ 0.05 f'c                  §22.5.5.1.1
+          Vc ≤ 5λ√f'c · bw · d                  §22.5.5.1.2
+    Vs  = Av · fy · d / s ≤ 8√f'c · bw · d      §22.5.8.5.3, cross-section limit §22.5.1.2
+    φVn = 0.75 (Vc + Vs)
 
-    Nu   : axial compression, kip (positive = compression); 0 for beams.
+    Nu   : axial force, kip, positive = compression. Tension (negative) reduces
+           Vc per the same table; Vc is floored at zero. 0 for beams.
+    Ag   : bw · h when h is given; otherwise the legacy bw · d/0.9 estimate.
     Av   : total shear-steel area across all stirrup legs (in²).
     s    : stirrup spacing (in).
+
+    Until 2026-09-26 the axial term was added as Nu/(6·Ag) in ksi straight to a
+    force in kip (no bw·d, no psi scaling), i.e. effectively no axial credit.
     """
-    Ag     = bw * (d / 0.9)
-    Vc     = (2.0 * lambda_ * math.sqrt(fc_ksi * 1000.0) * bw * d) / 1000.0
-    Vc    += max(0.0, Nu) / (6.0 * Ag)
-    Vs     = Av * fy_ksi * d / s
-    phi_Vn = PHI_SHEAR * (Vc + Vs)
+    fc_psi   = fc_ksi * 1000.0
+    Ag       = bw * h if h else bw * (d / 0.9)
+    nu_psi   = min(Nu * 1000.0 / (6.0 * Ag), 0.05 * fc_psi)          # signed: tension reduces Vc
+    Vc       = max(0.0, (2.0 * lambda_ * math.sqrt(fc_psi) + nu_psi) * bw * d / 1000.0)
+    Vc       = min(Vc, 5.0 * lambda_ * math.sqrt(fc_psi) * bw * d / 1000.0)
+    Vs       = min(Av * fy_ksi * d / s, 8.0 * math.sqrt(fc_psi) * bw * d / 1000.0)
+    phi_Vn   = PHI_SHEAR * (Vc + Vs)
 
     cap = max(phi_Vn, 1e-9)
     dcr = Vu / cap
@@ -589,6 +611,7 @@ def run_checks_phase1(
                     if isinstance(cfg.materials.fc_col_ksi, float)
                     else sp.FC_COL_KSI),
             Av=Av_col, s=cfg.rebar.stirrup_spacing_col_in, fy_ksi=fy,
+            h=cfg.sections.h_col_in,
         )
         ls_slend = check_slenderness(
             "column",
@@ -644,6 +667,7 @@ def run_checks_phase1(
         span_actions = current_beam_bending(beam_tags)
     else:
         span_actions = {tag: _captured(tag)["span_bending"] for tag in beam_tags}
+    beam_x_set = set(get_element_tags()[1])      # the direction decides the stacked bar depths
     for tag in beam_tags:
         captured = _captured(tag)
         P, Vy, Vz, My, Mz, My_i, My_j, _Mz_i, _Mz_j = _extract_forces(
@@ -653,12 +677,13 @@ def run_checks_phase1(
         envelope = span_actions[tag]["full_span"]
         Mu_pos, Mu_neg = envelope["mu_positive_kip_in"], envelope["mu_negative_kip_in"]
         Vu     = math.sqrt(Vy**2 + Vz**2)
+        axis   = "x" if tag in beam_x_set else "y"
 
-        ls_flex_pos = check_beam_flexure_pos(Mu_pos, cfg)
-        ls_flex_neg = check_beam_flexure_neg(Mu_neg, cfg)
+        ls_flex_pos = check_beam_flexure_pos(Mu_pos, cfg, axis)
+        ls_flex_neg = check_beam_flexure_neg(Mu_neg, cfg, axis)
         ls_shear    = check_shear(
             Vu, 0.0,
-            bw=cfg.sections.b_beam_in, d=_beam_d(cfg),
+            bw=cfg.sections.b_beam_in, d=min(_beam_d(cfg, axis, "top"), _beam_d(cfg, axis, "bottom")),
             fc_ksi=(cfg.materials.fc_beam_ksi
                     if isinstance(cfg.materials.fc_beam_ksi, float)
                     else sp.FC_BEAM_KSI),

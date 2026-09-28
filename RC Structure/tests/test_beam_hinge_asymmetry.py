@@ -117,6 +117,9 @@ class BeamYieldMomentSourceTests(unittest.TestCase):
                                "effective_depth_in": 4.0 if axis == "x" else 3.5}
             for axis in ("x", "y") for face in ("top", "bottom")}}
         values = {"NUM_BAY_X": 3, "NUM_BAY_Y": 3, "BAY_X": 120.0, "BAY_Y": 120.0,
+                  # corner bars only: the two #7 beam bars pass in one layer (the two-layer rule of
+                  # 2026-09-27 would otherwise stack them and shift the x hinge's depth)
+                  "COL_TOP_BARS": 2, "COL_SIDE_BARS": 0,
                   "B_COL": 18.0, "H_COL": 18.0, "B_BEAM": 10.0, "H_BEAM": 18.0, "FC_BEAM_KSI": 4.0,
                   "FY_KSI": 60.0, "BEAM_BAR_SIZE": 7, "BEAM_TOP_BARS": 2, "BEAM_BOT_BARS": 2,
                   "BEAM_BAR_AREA": 0.60, "SLAB_THICKNESS_IN": 5.0,
@@ -132,8 +135,10 @@ class BeamYieldMomentSourceTests(unittest.TestCase):
             ops.node(4, 120.0, 0.0, 0.0)
             hog_int, sag_int, basis_int = IMK_Hinges.beam_yield_moments("beam_x", 1, 2)
             hog_edge, sag_edge, basis_edge = IMK_Hinges.beam_yield_moments("beam_x", 3, 4)
+            # The x direction's own top/bottom offsets: the orthogonal layers stack at the joints
+            # (2026-09-27), and the hinge prices the family with this direction's depths.
             beam = {"b_in": 10.0, "h_in": 18.0, "fc_ksi": 4.0, "fy_ksi": 60.0, "bar_size": 7,
-                    "top_bars": 2, "bot_bars": 2, "centroid_offset_in": sp.longitudinal_cover_in("beam")}
+                    "top_bars": 2, "bot_bars": 2, "centroid_offset_in": sp.beam_bar_stacking_offsets_in()["x"]}
             geometry = {"bay_x_in": 120.0, "bay_y_in": 120.0, "h_col_in": 18.0, "b_col_in": 18.0}
             expected = composite_beam_strengths(beam, {"thickness_in": 5.0}, layout, geometry, "x", "interior")
             ops.wipe()
@@ -142,7 +147,9 @@ class BeamYieldMomentSourceTests(unittest.TestCase):
         self.assertAlmostEqual(hog_int, expected["mn_negative_kip_in"])
         self.assertAlmostEqual(sag_int, expected["mn_positive_kip_in"])
         self.assertGreater(hog_int, hog_edge)          # wider flange, more slab steel
-        self.assertGreater(hog_int, 1.5 * sag_int)     # the slab makes hogging much stronger
+        # The slab makes hogging much stronger (1.6x at one elevation); x is the lower direction under
+        # the stacking convention here, so its top bars sit a layer lower and the ratio is about 1.4x.
+        self.assertGreater(hog_int, 1.3 * sag_int)
 
 
 if __name__ == "__main__":

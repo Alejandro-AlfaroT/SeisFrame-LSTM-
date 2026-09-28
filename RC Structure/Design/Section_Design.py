@@ -30,8 +30,12 @@ import math
 
 # ACI 318-19 18.7.2.1: special moment frame columns, least dimension >= 12 in
 # and least/perpendicular dimension ratio >= 0.4. Square columns satisfy the
-# ratio automatically and keep biaxial capacity symmetric.
-COLUMN_SIZES_IN = (14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 36.0)
+# ratio automatically and keep biaxial capacity symmetric. The ladder was
+# capped at 36 in until 2026-09-27; the user raised the cap to 42 in (with a
+# 40-in rung) after the joint-assembly rules showed that at 36 in a cage
+# strong enough for the strong-column check leaves the beam bars only three
+# lanes per layer on the faces the y beams meet.
+COLUMN_SIZES_IN = (14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 36.0, 40.0, 42.0)
 
 # ACI 318-19 18.6.2.1(b) uses min(0.3h, 10 in). The ladder's
 # max(0.3h, 10 in) is a stricter PRACTICAL sizing preference, not that rule.
@@ -42,12 +46,21 @@ CONCRETE_STRENGTHS_KSI = (4.0, 5.0, 6.0, 8.0)
 COLUMN_MIN_DIMENSION_IN = 12.0
 BEAM_MIN_WIDTH_IN = 10.0
 BEAM_MIN_WIDTH_RATIO = 0.30
-# Each depth is offered at its paired width and one wider variant: the
-# capacity-design shear section (22.5.1.2 with the 18.6.5.1 Ve) and short
-# clear spans (18.6.2.1(a) ln >= 4d caps the depth) answer to width, not
-# depth. 18.6.2.1(c) (projection beyond the column) is checked per rung
-# against the columns in SMRF_Detailing.
+# Each depth is offered at its paired width and wider variants in 4 in
+# steps: the capacity-design shear section (22.5.1.2 with the 18.6.5.1 Ve),
+# short clear spans (18.6.2.1(a) ln >= 4d caps the depth) and, since
+# 2026-09-27, the threading of the beam bars between the column bars in one
+# layer (SMRF_Capacity_Design.design_bar_threading) answer to width, not
+# depth. Four variants reach three quarters of a 32 in column at the
+# common depths, where the transverse beams also confine the joint (15.2.8).
+# 18.6.2.1(c) (projection beyond the column) is checked per rung against
+# the columns in SMRF_Detailing.
 BEAM_WIDTH_STEP_IN = 4.0
+BEAM_WIDTH_VARIANTS = 4
+# A stated proportioning preference (not a code rule; 18.6.2.1(b) allows
+# up to 3h): no offered variant is wider than it is deep, so the ladder does
+# not fill with band beams that outrank deeper rungs on the capacity proxy.
+BEAM_MAX_WIDTH_DEPTH_RATIO = 1.0
 
 # Proportioning limits that keep generated frames buildable.
 #
@@ -63,6 +76,13 @@ def beam_width_for_depth(depth_in):
     raw = max(depth_in / 2.0, BEAM_MIN_WIDTH_RATIO * depth_in, BEAM_MIN_WIDTH_IN)
     snapped = 2.0 * math.ceil(raw / 2.0)
     return max(snapped, BEAM_MIN_WIDTH_IN)
+
+
+def beam_widths_for_depth(depth_in):
+    """The widths offered at a depth: the paired width and the 4-in wider variants, no wider than deep."""
+    base = beam_width_for_depth(depth_in)
+    widths = [base + k * BEAM_WIDTH_STEP_IN for k in range(BEAM_WIDTH_VARIANTS)]
+    return [w for w in widths if w <= max(base, BEAM_MAX_WIDTH_DEPTH_RATIO * depth_in)]
 
 
 def column_ladder():
@@ -91,8 +111,7 @@ def beam_ladder(span_in=None, story_height_in=None):
         if story_height_in is not None:
             if depth > BEAM_MAX_DEPTH_FRACTION_OF_STORY * story_height_in:
                 continue
-        base = beam_width_for_depth(depth)
-        for width in (base, base + BEAM_WIDTH_STEP_IN):
+        for width in beam_widths_for_depth(depth):
             for fc in CONCRETE_STRENGTHS_KSI:
                 rungs.append((width, depth, fc))
 

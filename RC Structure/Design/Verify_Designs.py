@@ -171,17 +171,18 @@ def search_summary(record):
             "torsional_irregularity": torsion.get("torsional_irregularity")}
 
 
-def run_worker(case, out_dir, probe, probe_date=None, attempt_id=None):
+def run_worker(case, out_dir, probe, probe_date=None, attempt_id=None, max_section_iter=None):
     with exclusive_lease(Path(out_dir) / ".worker.lease"):
-        return _run_worker(case, out_dir, probe, probe_date, attempt_id)
+        return _run_worker(case, out_dir, probe, probe_date, attempt_id, max_section_iter)
 
 
-def _run_worker(case, out_dir, probe, probe_date=None, attempt_id=None):
+def _run_worker(case, out_dir, probe, probe_date=None, attempt_id=None, max_section_iter=None):
     """Design one case in this interpreter; write result.json; never raise."""
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     result = {"case": case, "status": "started", "attempt_id": attempt_id,
               "probe_assertions": probe, "probe_date": probe_date if probe else None,
+              "max_section_iter": max_section_iter,
               "host": socket.gethostname(), "started": time.strftime("%Y-%m-%d %H:%M:%S")}
     log = io.StringIO()
     t0 = time.perf_counter()
@@ -197,7 +198,8 @@ def _run_worker(case, out_dir, probe, probe_date=None, attempt_id=None):
             go.apply_geometry_overrides(overrides, variant_name=case["geometry_name"], emit=True)
             sp.apply_seismic_site(case["seismic_site"])
             cfg = probe_config(probe_date) if probe else DesignConfig.from_structure_parameters()
-            record, created = load_or_create_design(out_dir / "design.json", cfg=cfg, verbose=True)
+            record, created = load_or_create_design(out_dir / "design.json", cfg=cfg, verbose=True,
+                                                    max_section_iter=max_section_iter)
         q = record["qualification"]
         by_status = {}
         for c in q["checks"]:
@@ -260,7 +262,7 @@ def validate_saved(case, out_dir, probe, probe_date):
     return checked_result(case, out_dir, saved, expected_identity(case, cfg), probe, probe_date)
 
 
-def _launch(python_exe, case, out_dir, probe, probe_date=None, log=print):
+def _launch(python_exe, case, out_dir, probe, probe_date=None, log=print, max_section_iter=None):
     out_dir = Path(out_dir)
     with exclusive_lease(out_dir / ".worker.lease"):
         saved = saved_result(out_dir)
@@ -274,6 +276,8 @@ def _launch(python_exe, case, out_dir, probe, probe_date=None, log=print):
         command.append("--probe-assertions")
         if probe_date:
             command += ["--probe-date", probe_date]
+    if max_section_iter is not None:
+        command += ["--max-section-iter", str(int(max_section_iter))]
     # Same child environment the generation scheduler gives its workers.
     env = dict(os.environ)
     env.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -431,12 +435,16 @@ def load_or_write_plan(root, cases, args):
         plan = {"seed": args.seed, "geometry_offset": args.geometry_offset, "count": args.count, "plan_sha256": sha,
                 "probe_assertions": args.probe_assertions,
                 "probe_date": args.probe_date if args.probe_assertions else None,
+                "max_section_iter": args.max_section_iter,
                 "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_on": socket.gethostname(),
                 "cases": cases, "launches": []}
     if plan_sha256(plan["cases"]) != sha:
         raise SystemExit("Stored plan cases do not match its digest; files preserved.")
     if args.probe_date and args.probe_date != plan.get("probe_date"):
         raise SystemExit("PROBE date differs from the stored plan; use one shared date.")
+    if args.max_section_iter is not None and args.max_section_iter != plan.get("max_section_iter"):
+        raise SystemExit(f"{path} was created with max_section_iter={plan.get('max_section_iter')}; this launch asks for "
+                         f"{args.max_section_iter}. Use one budget per root.")
     if args.probe_assertions:
         probe_config(plan.get("probe_date"))
     if bool(plan.get("probe_assertions")) != bool(args.probe_assertions):
@@ -455,6 +463,8 @@ def main(argv=None):
     parser.add_argument("--worker", nargs=2, metavar=("CASE_JSON", "OUT_DIR"), help=argparse.SUPPRESS)
     parser.add_argument("--probe-date", default=None, help="Shared YYYY-MM-DD assertion date; required for a new PROBE root.")
     parser.add_argument("--attempt-id", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--max-section-iter", type=int, default=None,
+                        help="Section-iteration budget of the design search (default: the driver's 10); recorded in the plan, one value per root.")
     parser.add_argument("--count", type=int, default=150, help="Number of plan cases, from the first (default 150).")
     parser.add_argument("--geometry-offset", type=int, default=0, help="Skip this many plan geometries first.")
     parser.add_argument("--seed", type=int, default=SEED, help="Plan seed (default: the generation plan's).")
@@ -477,7 +487,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.worker:
         case = json.loads(args.worker[0])
-        result = run_worker(case, args.worker[1], args.probe_assertions, args.probe_date, args.attempt_id)
+        result = run_worker(case, args.worker[1], args.probe_assertions, args.probe_date, args.attempt_id, args.max_section_iter)
         print(json.dumps({k: result.get(k) for k in ("status", "elapsed_s", "accepted", "counts", "error")}, default=str))
         return 0
     if args.workers <= 0 or args.sites == [] or args.case_ids == []:
@@ -556,7 +566,8 @@ def _run_plan(args, cases, root):
             return {"case": case, "status": "missing", "host": socket.gethostname()}
         t0 = time.perf_counter()
         try:
-            result, cached = _launch(args.python_exe, case, root / case["case_id"], args.probe_assertions, probe_date, log=log)
+            result, cached = _launch(args.python_exe, case, root / case["case_id"], args.probe_assertions, probe_date, log=log,
+                                     max_section_iter=plan.get("max_section_iter"))
         except Exception as exc:                          # noqa: BLE001 -- one case must not take the launcher down
             result, cached = {"case": case, "status": "error", "host": socket.gethostname(),
                               "error": f"launcher: {type(exc).__name__}: {exc}", "traceback": traceback.format_exc()}, False

@@ -218,6 +218,43 @@ def _run_command(command, cwd, log_path, stop_path=None, poll_interval_sec=1.0):
     }
 
 
+def parse_run_pair(text):
+    """'<result_id>:<scale>' -> (int, float): one run exactly as the plan asked for it."""
+    try:
+        result_id, scale = str(text).split(":", 1)
+        return int(result_id), float(scale)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"--run-pair expects RESULT_ID:SCALE, got {text!r}") from exc
+
+
+def expand_runs(selected, scale_levels, run_pairs=None):
+    """The (key, result_id, npts, scale) runs to execute, and the pair ids that could not run.
+
+    With explicit run pairs (the parent scheduler's plan) exactly those pairs
+    run, in plan order; a pair whose record is not among ``selected`` is
+    reported rather than silently replaced. Without pairs every selected
+    record runs at every scale level. That cross product only matches a plan
+    when each case has one record or one intensity: under a calibration every
+    record carries its own target-matched factor, and the cross product ran
+    pairings the plan never asked for (fixed 2026-09-26).
+    """
+    if run_pairs:
+        by_id = {result_id: (key, result_id, npts) for key, result_id, npts in selected}
+        runs, missing = [], []
+        for result_id, scale in run_pairs:
+            if result_id in by_id:
+                key, _, npts = by_id[result_id]
+                runs.append((key, result_id, npts, scale))
+            else:
+                missing.append(result_id)
+        return runs, missing
+    return [
+        (key, result_id, npts, scale)
+        for key, result_id, npts in selected
+        for scale in scale_levels
+    ], []
+
+
 def run_ntha_batch(args, checkpoint=None):
     rc_dir = _repo_root()
     ntha_root = Path(args.ntha_root)
@@ -254,13 +291,16 @@ def run_ntha_batch(args, checkpoint=None):
 
     # One record pair run at several intensities becomes several runs. The
     # scale factor is part of the run directory name, so the intensities of a
-    # record coexist under one case without colliding.
+    # record coexist under one case without colliding. A parent scheduler
+    # names each run explicitly with --run-pair; only a direct call without
+    # pairs falls back to the records x scales cross product.
     scale_levels = list(args.scale_factor) if args.scale_factor else [None]
-    expanded = [
-        (key, result_id, npts, scale)
-        for key, result_id, npts in selected
-        for scale in scale_levels
-    ]
+    expanded, missing_pairs = expand_runs(selected, scale_levels, getattr(args, "run_pair", None))
+    if missing_pairs:
+        print(
+            "Skipping run pair(s) whose record is not selectable in this set "
+            f"(max_npts={max_npts}): {sorted(set(missing_pairs))}"
+        )
 
     summaries = []
     stop_path = Path(args._stop_path)
@@ -408,6 +448,18 @@ def parse_args():
         help=(
             "Ground-motion scale factor. Repeat to run one record pair at "
             "several intensities; each becomes its own run directory."
+        ),
+    )
+    parser.add_argument(
+        "--run-pair",
+        type=parse_run_pair,
+        action="append",
+        default=None,
+        metavar="RESULT_ID:SCALE",
+        help=(
+            "One (record pair, scale factor) run exactly as the plan asked for "
+            "it; repeat per run. When given, --scale-factor is ignored and no "
+            "records x scales cross product is formed."
         ),
     )
     parser.add_argument("--damping-ratio", type=float, default=0.05)

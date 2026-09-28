@@ -26,16 +26,41 @@ scientific validity or production acceptance.
   signatures. The historical `_define_imk_peak_material` function name is
   retained for compatibility. Installed inputs are stored per end and axis
   under the hinge registry's `installed_materials` field.
-- The default frame remains the Bilin baseline. The fixed-design diagnostic
-  runner accepts `--member-material IMKPeakOriented`. This selects Lamda_A
-  = 10 and c_A = 1, approved on 2026-09-22 as provisional diagnostic inputs.
-  Existing S/C/K values are also defaults, not experimental calibration.
-- IMKPinching is available in the material adapter and the separate finite
-  3D joint subassembly in `Joint_Panel.py`; see `JOINT_PANEL.md`. It is not
-  installed in the frame builder yet. The subassembly verifies mechanics
-  with synthetic shear-only inputs. Applicable calibration, the member/joint
-  slip partition, and frame integration remain separate engineering work.
-  Fixture kappaF = kappaD = 0.5 must not become a joint default.
+- The production frame material is IMKPeakOriented with Haselton Eq. 3.20
+  deterioration (S and C per member; A and K suppressed) since 2026-09-24;
+  IMKBilin remains selectable for legacy reproduction. The fixed-design
+  diagnostic runner defaults to the production material and accepts
+  `--member-material IMKBilin`. Under the direct deterioration convention
+  only, its PeakOriented profile selects Lamda_A = 10 and c_A = 1, approved
+  on 2026-09-22 as provisional diagnostic inputs. The S/C/K/A constants are
+  defaults, not experimental calibration. Since 2026-09-26 the deterioration
+  mode, the backbone source and the installed policy are output identity keys.
+- Measured OpenSees 3.8 reloading rules, pinned by
+  `tests/test_imk_peak_oriented_verification.py`: after a full reversal
+  IMKPeakOriented reloads on a straight line from the zero-force crossing to
+  the previous peak (deteriorated), whereas IMKBilin reloads at Ke until it
+  meets the backbone. IMKPinching first heads to a break point at rotation
+  (1 - kappaD) x the permanent rotation left after unloading from the previous
+  peak (its zero-moment crossing), at kappaF times the force of that straight
+  line there, then continues to the peak (measured 2026-09-27 with springs whose
+  yield rotation is 0.5 % to 50 % of the peak; the two definitions coincide only
+  for a stiff spring).
+- IMKPinching carries joint shear and slip in the frame since 2026-09-27
+  (user decision): `Model/Joint_Springs.py` installs, at every elevated joint,
+  a beam core coincident with the joint node and one zeroLength with
+  IMKPinching in the two vertical shear planes (the centreline variant of the
+  `Joint_Panel.py` scissors topology; `JOINT_MODEL`, `JOINT_DEFORMATION_SCOPE`
+  in Structure_Parameters). Strength from ACI 318-19 Table 18.8.4.3 (the
+  design record's joint-shear category), deformation from ASCE/SEI 41-17
+  Table 10-11 (conforming rows, verified 2026-09-27 against the Elwood et al. 2007 PEER update that
+  produced them), Mn = Vn h_b and K = G Aj h_b, no cyclic
+  deterioration, kappaF = kappaD = 0.25 (Ibarra, Medina & Krawinkler 2005, a
+  representative level, not an RC joint fit). Under the shear-and-slip scope
+  the member hinges drop Haselton's bond-slip term (a_sl = 0) so slip is
+  counted once. Status: provisional, not experimentally calibrated. The
+  finite-size `Joint_Panel.py` subassembly stays a diagnostic prototype; the
+  2026-09-23 review's shared-core torsion benchmark is still owed. Fixture
+  kappaF = kappaD = 0.5 is not a joint value.
 - For PeakOriented/Pinching, the hysteresis diagnostic uses virgin-envelope
   exceedance to identify yielded loops. This may miss degraded reversal
   yielding below the original envelope. Accumulated plastic rotation is

@@ -79,11 +79,18 @@ class RebarConfig:
     section_round_increment_in
         Snap section dimensions to this increment (0 = no snapping).
     """
+    # No. 14 joined the column ladder on 2026-09-27 with the column cage rule
+    # (fewer, larger bars per face keep the beam-bar lanes open); it cannot be
+    # lap spliced (ACI 318-19 25.5.1.1), so its splices are Type 2 mechanical
+    # (SMRF_Capacity_Design.design_splices). No. 18 is not offered.
     bar_sizes_col: List[int] = field(
-        default_factory=lambda: [5, 6, 7, 8, 9, 10, 11]
+        default_factory=lambda: [5, 6, 7, 8, 9, 10, 11, 14]
     )
+    # No. 11 joined the beam ladder on 2026-09-27 with the fewest-layers
+    # preference (larger bars in one layer); 18.8.2.3 (20 db through the
+    # joint) still screens it per column in Redesign._beam_candidates.
     bar_sizes_beam: List[int] = field(
-        default_factory=lambda: [4, 5, 6, 7, 8, 9, 10]
+        default_factory=lambda: [4, 5, 6, 7, 8, 9, 10, 11]
     )
 
     col_n_top_range: Tuple[int, int] = (2, 6)     # inclusive; n_bot = n_top
@@ -92,6 +99,19 @@ class RebarConfig:
     )
     beam_n_range: Tuple[int, int] = (2, 7)         # inclusive, per layer
     beam_symmetric: bool = True                  # same bar size and count on both faces
+    # 2026-09-27 (user decision, "the larger bars per layer option"): among
+    # beam cages whose estimated DCR is within the ceiling, the pick takes the
+    # fewest layers first (larger bars in one layer keep the depth the second
+    # layer would cost), then the DCR objective and the least steel as before.
+    beam_prefer_fewest_layers: bool = True
+    # 2026-09-27 (user decision, "wire the column-side one-layer preference"):
+    # among column cages that keep the estimated DCR within the ceiling, the
+    # strength pick and the strong-column escalation take the cages the
+    # current beam bars pass in the fewest layers first (fewer, larger bars
+    # per face open the lanes), then the objective and the least steel. A
+    # tie-break among cages that pass; strength and the joint rule still
+    # decide. Ordinary joint coordination in practice.
+    col_prefer_fewest_beam_layers: bool = True
 
     rho_col_min: float = 0.01
     rho_col_max: float = 0.06
@@ -223,8 +243,9 @@ class LoadConfig:
     strong_column_weak_beam
         When True and mode == "gravity_lateral", enforce ACI 318-19 §18.7.3:
         ΣφMnc / ΣφMnb ≥ scwb_ratio_min at every beam-column joint.
-        TODO: joint-level capacity ratio check is scaffolded in
-        Design/Phase2/AcceptanceCriteria.py.
+        TODO: the joint-level capacity ratio check for this legacy mode is
+        not implemented; the SMRF path applies its own column-strength and
+        joint checks (Design/SMRF_Capacity_Design.py, Design/SMRF_Joints.py).
     """
     mode: str = "gravity"
 
@@ -472,17 +493,20 @@ class CapacityPolicy:
     """Capacity-design method selection (ACI 318-19 Chapter 18), part of the request identity.
 
     ``column_shear_method`` names the 18.7.6.1.1 Ve rule
-    (Design.SMRF_Capacity_Design.COLUMN_SHEAR_METHODS): the default
-    ``beam_joint_delivery_limited_v2`` is the rule every saved design was
-    produced with; ``column_own_probable_envelope_v3`` is the column-own
-    probable-strength alternative prepared for review on 2026-09-20 and is
-    not selected for production. ``column_clear_height_convention`` applies
-    to that alternative only: ``uniform_face_to_face`` (story_h - h_beam at
-    every story, the engineering note's conservative convention) or
-    ``physical_base`` (the base story's base-to-soffit height).
+    (Design.SMRF_Capacity_Design.COLUMN_SHEAR_METHODS):
+    ``beam_joint_delivery_limited_v2`` is the rule every design saved before
+    2026-09-27 was produced with (records without the key are read as it,
+    never relabelled); ``column_own_probable_envelope_v3`` is the column-own
+    probable-strength rule prepared for review on 2026-09-20 and selected as
+    the design basis on 2026-09-27 (Codex repair review: the joint-limited
+    rule rested on an unsupported 50/50 sharing reduction, and the existing
+    cage was inadequate under column-own demands). ``column_clear_height_convention``
+    applies to the column-own rule: ``uniform_face_to_face`` (story_h - h_beam
+    at every story, the engineering note's conservative convention) or
+    ``physical_base`` (the base story's base-to-soffit height), selected with it.
     """
-    column_shear_method: str = "beam_joint_delivery_limited_v2"
-    column_clear_height_convention: str = "uniform_face_to_face"
+    column_shear_method: str = "column_own_probable_envelope_v3"
+    column_clear_height_convention: str = "physical_base"
 
 
 # ---------------------------------------------------------------------------

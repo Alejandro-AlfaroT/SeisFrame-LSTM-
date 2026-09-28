@@ -220,6 +220,10 @@ class IntegrationTests(unittest.TestCase):
         """Reviewer reproductions: stale summaries and altered hoops must fail, whatever is asserted."""
         sp.NUM_BAY_X = sp.NUM_BAY_Y = sp.NUM_FLOOR = 1
         sp.NUM_MODES = 3
+        # The toy 10-in beam meets an 18-in column with four #8 per face: one bar passes per layer, so its
+        # two bars take two layers (allowed since 2026-09-27) and the layered depth leaves a one-iteration
+        # search no capacity-shear section; start at the 18-in variant, where the bars pass in one layer.
+        sp.B_BEAM = 18.0
         try:
             record = driver.design_structure(max_section_iter=1, max_steel_iter=1, verbose=False)
         finally:
@@ -310,6 +314,10 @@ class IntegrationTests(unittest.TestCase):
         # Bounded design-only smoke check. No plan, case files or GM analysis.
         sp.NUM_BAY_X = sp.NUM_BAY_Y = sp.NUM_FLOOR = 1
         sp.NUM_MODES = 3
+        # The toy 10-in beam meets an 18-in column with four #8 per face: one bar passes per layer, so its
+        # two bars take two layers (allowed since 2026-09-27) and the layered depth leaves a one-iteration
+        # search no capacity-shear section; start at the 18-in variant, where the bars pass in one layer.
+        sp.B_BEAM = 18.0
         try:
             result = driver.design_structure(max_section_iter=1, max_steel_iter=1, verbose=False)
             self.assertEqual(result["schema_version"], driver.DESIGN_SCHEMA_VERSION)
