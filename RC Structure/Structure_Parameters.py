@@ -534,11 +534,12 @@ IMK_D_NEG = 1.0
 #                            planes. Centreline geometry is kept. IMK formulation only; the
 #                            elastic design model is unchanged. See Model/Joint_Springs.py.
 JOINT_MODEL = "imk_pinching_scissors"
-# What the joint spring's rotation stands for. "joint_shear_and_slip" removes Haselton's bond-slip
-# term from the member hinges (a_sl = 0, IMK_Calibration.bond_slip_indicator) and reads the joint
-# spring as carrying bar slip as well as panel shear; "joint_shear_only" keeps a_sl = 1 in the
-# members. Either way slip is counted once.
-JOINT_DEFORMATION_SCOPE = "joint_shear_and_slip"
+# What the joint spring's rotation stands for: panel shear only. Bar slip is owned per member end
+# (Model/Deformation_Ownership): the member hinge keeps Haselton's a_sl = 1 unless a face slip
+# interface is registered for that end. The 2026-09-27 value "joint_shear_and_slip" (which set
+# a_sl = 0 in every hinge, column bases included, with nothing replacing it) is retired and refused
+# at build time; outputs written under it carry that value in their identity and are not comparable.
+JOINT_DEFORMATION_SCOPE = "joint_shear_only"
 # Strength from ACI 318-19 Table 18.8.4.3 (gamma, Aj from the design record's joint-shear category
 # when it has one), deformation from ASCE/SEI 41-17 Table 10-11 for conforming joints, scissors
 # conjugacy Mn = Vn h_b and K = G Aj h_b. Transcribed, not experimentally calibrated.

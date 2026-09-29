@@ -1,0 +1,2255 @@
+{
+ "version": 2,
+ "date": "2026-09-29",
+ "source": "Park, R. and Dai Ruitong (1988). A comparison of the behaviour of reinforced concrete beam-column joints designed for ductility and limited ductility. Bulletin NZNSEE 21(4), 255-278. Fig. 16(a) (p. 267), Table 4 (p. 264), section 4.1 (pp. 267-268), Table 5.1 of PEER 2003/10 (p. 51) for the tabulated observations.",
+ "supersedes": "unit1_observed_digitized.json (version 1, manual reading of a 300 dpi render, 2026-09-27)",
+ "reason": "Codex Unit 1 review 2026-09-28: branch-specific redigitization with pixel coordinates and the axis transformation; the v1 residual targets (35 and 42 mm) and the single unsigned pinching target (28 kN) are not accepted; run labels audited; the +-3 kN / +-3 mm reading bounds are estimated resolution, not statistical confidence",
+ "image": {
+  "image": "C:\\Users\\andro\\Documents\\GitHub\\StructGNN-OpenSeesPy-Integrated\\RC Structure\\outputs\\diag_park_ruitong_unit1_cases_20260929\\observation_audit\\fig16a_unit1_400dpi_crop.png",
+  "render": "pdftoppm 400 dpi of the bulletin's scanned page 267, cropped to the Unit 1 panel",
+  "ink_threshold": "gray < 128",
+  "curve_ink": "connected components at least 40 px long in one direction, excluding thin horizontal dashes (the V1/V2 lines) and thin short marks (ticks); drops the printed run numbers and axis labels before any curve analysis"
+ },
+ "axes": {
+  "delta_axis": {
+   "row_seed": 654,
+   "x_start": 465,
+   "x_end": 885,
+   "fit_y_of_x": [
+    659.9191554881291,
+    -0.00871270164455046
+   ],
+   "n_pixels": 248,
+   "rms_px": 0.7309491104532183
+  },
+  "v_axis": {
+   "col_seed": 700,
+   "y_start": 90,
+   "y_end": 1003,
+   "fit_x_of_y": [
+    696.2843136876235,
+    0.0076470230103694884
+   ],
+   "n_pixels": 377,
+   "rms_px": 0.481446347980461
+  },
+  "origin_px": [
+   701.2840067451251,
+   653.809077169264
+  ],
+  "skew": {
+   "delta_axis_slope_px_per_px": -0.00871270164455046,
+   "v_axis_slope_px_per_px": 0.0076470230103694884
+  }
+ },
+ "ticks": {
+  "delta_axis": {
+   "candidates_px": [
+    234.5,
+    437.0,
+    445.5,
+    472.5,
+    521.5,
+    619.0,
+    653.5,
+    659.0,
+    664.5,
+    738.0,
+    753.0,
+    757.5,
+    785.4,
+    817.0,
+    832.5,
+    864.5,
+    903.2,
+    943.5,
+    1050.5,
+    1167.6,
+    1243.3333333333333,
+    1249.0,
+    1257.0,
+    1263.0,
+    1267.0,
+    1275.0,
+    1291.0,
+    1329.5
+   ],
+   "found": {
+    "-120": 234.5,
+    "-60": 472.5,
+    "30": 817.0,
+    "90": 1050.5,
+    "120": 1167.6
+   },
+   "px_per_mm": 3.8857142857142857,
+   "offset_px": 700.7857142857142
+  },
+  "v_axis": {
+   "candidates_px": [
+    107.0,
+    127.0,
+    133.0,
+    137.0,
+    151.0,
+    167.0,
+    181.0,
+    299.5,
+    358.0,
+    468.5,
+    510.0,
+    592.25,
+    606.5,
+    714.0,
+    728.375,
+    764.5,
+    788.5,
+    798.0,
+    946.0,
+    1001.5
+   ],
+   "found": {
+    "-90": 1001.5,
+    "-30": 764.5,
+    "90": 299.5
+   },
+   "px_per_kN": -3.9,
+   "offset_px": 650.5
+  },
+  "expected": {
+   "delta": [
+    -120,
+    -90,
+    -60,
+    -30,
+    30,
+    60,
+    90,
+    120
+   ],
+   "v": [
+    -90,
+    -60,
+    -30,
+    30,
+    60,
+    90
+   ]
+  },
+  "method": "short isolated ink segments touching the axis, assigned to the printed values by the regular spacing that explains the most of them; the V scale is searched within 10 % of the Delta scale (equal tick spacing on the figure, verified on the overlay)",
+  "missing": {
+   "delta": [
+    -90,
+    -30,
+    60
+   ],
+   "v": [
+    -60,
+    30,
+    60
+   ]
+  }
+ },
+ "transformation": {
+  "affine_pixel_to_physical": [
+   [
+    0.25779094970895783,
+    -0.0019371938576001058,
+    -179.6029699832812
+   ],
+   [
+    -0.002100042643359137,
+    -0.25691752912127924,
+    169.0818690533202
+   ]
+  ],
+  "form": "[Delta; V] = M @ [x; y; 1]",
+  "fit_points": 9,
+  "residuals": {
+   "delta_rms_mm": 0.3597133973141769,
+   "delta_max_mm": 0.9328373654485631,
+   "v_rms_kN": 0.5531045322538448,
+   "v_max_kN": 1.1939141270647156
+  },
+  "mm_per_px": 0.257798228217124,
+  "kN_per_px": 0.2569261118471365
+ },
+ "digitization": {
+  "uncertainty_kN": 3.0,
+  "uncertainty_mm": 3.0,
+  "crossing_uncertainty_mm": 6.0,
+  "crossing_uncertainty_kN": 6.0,
+  "interpretation": "estimated reading bounds; an obscured reversal carries an explicit interval on top of the band",
+  "method": "digitize_fig16a.py: ink threshold, connected-component curve mask, axis-line fits, tick consensus, loop-tip detection, heading-based branch tracing, independent axis-crossing detection; overlay fig16a_audit_overlay.png"
+ },
+ "theoretical_loads_kN": {
+  "V1_first_hinge": 54.2,
+  "V2_both_hinges": 72.6,
+  "source": "Table 4, Unit 1"
+ },
+ "maximum_load_kN": {
+  "value": 80.3,
+  "source": "section 4.1 text and PEER Table 5.1; Vmax / V2 = 1.11"
+ },
+ "yield_displacement_mm": {
+  "value": 15.0,
+  "basis": "inferred: mu = 2 falls at about 30 mm and mu = 7 at about 105 mm on Fig. 16(a); the paper text does not print Delta_y for Unit 1 (Ref. 8 report); the OpenSees example's peakpts (30, 45, 60, 75, 90, 105) imply the same 15 mm",
+  "uncertainty_mm": 1.0,
+  "status": "inferred, provisional; the model never rescales the history by it"
+ },
+ "load_controlled_first_cycle": {
+  "target_kN": 54.45,
+  "basis": "0.75 x V2 in both directions (section 3.2, Fig. 15)",
+  "run_1": {
+   "delta_mm": 13.698056533514375,
+   "V_kN_at_tip": 59.3382571828122,
+   "V_interval_kN": [
+    59.3382571828122,
+    63.448937648752675
+   ],
+   "pixel": {
+    "x": 753.0,
+    "y": 421.0
+   },
+   "status": "pixel_tip_obscured_interval"
+  },
+  "run_2": {
+   "delta_mm": -16.338927508954697,
+   "V_kN_at_tip": -60.6618416272469,
+   "V_interval_kN": [
+    -60.918759156368196,
+    -60.6618416272469
+   ],
+   "pixel": {
+    "x": 640.0,
+    "y": 889.0
+   },
+   "status": "pixel_tip"
+  },
+  "note": "the displacement reached at the load target is the initial-compliance observable; the tip force read from the figure differs from 54.45 kN by the reading/obscuration interval and is not the target"
+ },
+ "peaks": [
+  {
+   "run": 1,
+   "mu": 0.75,
+   "cycle": null,
+   "direction": "+",
+   "load_control": true,
+   "v1_reading": {
+    "delta_mm": 12,
+    "V_kN": 54.5
+   },
+   "delta_mm": 13.698056533514375,
+   "V_kN": 59.3382571828122,
+   "V_interval_kN": [
+    59.3382571828122,
+    63.448937648752675
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 753.0,
+    "y": 421.0
+   },
+   "far_edge_pixel": [
+    753.0,
+    405.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": null,
+   "v1_within_interval_or_band": false,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 2,
+   "mu": -0.75,
+   "cycle": null,
+   "direction": "-",
+   "load_control": true,
+   "v1_reading": {
+    "delta_mm": -12,
+    "V_kN": -54.5
+   },
+   "delta_mm": -16.338927508954697,
+   "V_kN": -60.6618416272469,
+   "V_interval_kN": [
+    -60.918759156368196,
+    -60.6618416272469
+   ],
+   "obscured": false,
+   "pixel": {
+    "x": 640.0,
+    "y": 889.0
+   },
+   "far_edge_pixel": [
+    640.0,
+    890.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": null,
+   "v1_within_interval_or_band": false,
+   "status": "pixel_tip"
+  },
+  {
+   "run": 3,
+   "mu": 2,
+   "cycle": 1,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 30,
+    "V_kN": 72
+   },
+   "delta_mm": 29.224597928708647,
+   "V_kN": 67.04823926240967,
+   "V_interval_kN": [
+    67.04823926240967,
+    72.31504860939589
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 813.0,
+    "y": 390.5
+   },
+   "far_edge_pixel": [
+    813.0,
+    370.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 4,
+   "mu": -2,
+   "cycle": 1,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -30,
+    "V_kN": -70
+   },
+   "delta_mm": -28.997804758700028,
+   "V_kN": -64.15578494542021,
+   "V_interval_kN": [
+    -74.94632116851395,
+    -64.15578494542021
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 591.0,
+    "y": 903.0
+   },
+   "far_edge_pixel": [
+    591.0,
+    945.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 5,
+   "mu": 2,
+   "cycle": 2,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 30,
+    "V_kN": 70
+   },
+   "delta_mm": 29.224597928708647,
+   "V_kN": 67.04823926240967,
+   "V_interval_kN": [
+    67.04823926240967,
+    72.31504860939589
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 813.0,
+    "y": 390.5
+   },
+   "far_edge_pixel": [
+    813.0,
+    370.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 6,
+   "mu": -2,
+   "cycle": 2,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -30,
+    "V_kN": -69
+   },
+   "delta_mm": -28.997804758700028,
+   "V_kN": -64.15578494542021,
+   "V_interval_kN": [
+    -74.94632116851395,
+    -64.15578494542021
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 591.0,
+    "y": 903.0
+   },
+   "far_edge_pixel": [
+    591.0,
+    945.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 7,
+   "mu": 3,
+   "cycle": 1,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 45,
+    "V_kN": 75
+   },
+   "delta_mm": 44.22199706748182,
+   "V_kN": 72.9639987234449,
+   "V_interval_kN": [
+    72.9639987234449,
+    73.73475131080873
+   ],
+   "obscured": false,
+   "pixel": {
+    "x": 871.0,
+    "y": 367.0
+   },
+   "far_edge_pixel": [
+    871.0,
+    364.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip"
+  },
+  {
+   "run": 8,
+   "mu": -3,
+   "cycle": 1,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -45,
+    "V_kN": -73
+   },
+   "delta_mm": -47.15455988513909,
+   "V_kN": -78.78153988485863,
+   "V_interval_kN": [
+    -81.22225641151078,
+    -78.78153988485863
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 521.0,
+    "y": 960.5
+   },
+   "far_edge_pixel": [
+    521.0,
+    970.0
+   ],
+   "chains_in_window": 2,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": false,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 9,
+   "mu": 3,
+   "cycle": 2,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 45,
+    "V_kN": 74
+   },
+   "delta_mm": 44.22199706748182,
+   "V_kN": 72.9639987234449,
+   "V_interval_kN": [
+    72.9639987234449,
+    73.73475131080873
+   ],
+   "obscured": false,
+   "pixel": {
+    "x": 871.0,
+    "y": 367.0
+   },
+   "far_edge_pixel": [
+    871.0,
+    364.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip"
+  },
+  {
+   "run": 10,
+   "mu": -3,
+   "cycle": 2,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -45,
+    "V_kN": -72
+   },
+   "delta_mm": -47.15455988513909,
+   "V_kN": -78.78153988485863,
+   "V_interval_kN": [
+    -81.22225641151078,
+    -78.78153988485863
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 521.0,
+    "y": 960.5
+   },
+   "far_edge_pixel": [
+    521.0,
+    970.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": false,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 11,
+   "mu": 4,
+   "cycle": 1,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 60,
+    "V_kN": 77
+   },
+   "delta_mm": 58.89961505310279,
+   "V_kN": 70.66049729524256,
+   "V_interval_kN": [
+    70.66049729524256,
+    75.6703891131075
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 928.0,
+    "y": 375.5
+   },
+   "far_edge_pixel": [
+    928.0,
+    356.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 12,
+   "mu": -4,
+   "cycle": 1,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -60,
+    "V_kN": -75
+   },
+   "delta_mm": -59.18646658865451,
+   "V_kN": -67.50692536384511,
+   "V_interval_kN": [
+    -79.06821417430268,
+    -67.50692536384511
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 474.0,
+    "y": 917.0
+   },
+   "far_edge_pixel": [
+    474.0,
+    962.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 13,
+   "mu": 4,
+   "cycle": 2,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 60,
+    "V_kN": 76
+   },
+   "delta_mm": 58.89961505310279,
+   "V_kN": 70.66049729524256,
+   "V_interval_kN": [
+    70.66049729524256,
+    75.6703891131075
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 928.0,
+    "y": 375.5
+   },
+   "far_edge_pixel": [
+    928.0,
+    356.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 14,
+   "mu": -4,
+   "cycle": 2,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -60,
+    "V_kN": -74
+   },
+   "delta_mm": -59.18646658865451,
+   "V_kN": -67.50692536384511,
+   "V_interval_kN": [
+    -79.06821417430268,
+    -67.50692536384511
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 474.0,
+    "y": 917.0
+   },
+   "far_edge_pixel": [
+    474.0,
+    962.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 15,
+   "mu": 5,
+   "cycle": 1,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 75,
+    "V_kN": 79
+   },
+   "delta_mm": 74.40291012200586,
+   "V_kN": 75.28746902538467,
+   "V_interval_kN": [
+    75.28746902538467,
+    79.14123196220386
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 988.0,
+    "y": 357.0
+   },
+   "far_edge_pixel": [
+    988.0,
+    342.0
+   ],
+   "chains_in_window": 3,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 16,
+   "mu": -5,
+   "cycle": 1,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -75,
+    "V_kN": -77
+   },
+   "delta_mm": -74.41647315698782,
+   "V_kN": -70.08065690366033,
+   "V_interval_kN": [
+    -80.22889930395087,
+    -70.08065690366033
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 415.0,
+    "y": 927.5
+   },
+   "far_edge_pixel": [
+    415.0,
+    967.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 17,
+   "mu": 5,
+   "cycle": 2,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 75,
+    "V_kN": 79
+   },
+   "delta_mm": 74.40291012200586,
+   "V_kN": 75.28746902538467,
+   "V_interval_kN": [
+    75.28746902538467,
+    79.14123196220386
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 988.0,
+    "y": 357.0
+   },
+   "far_edge_pixel": [
+    988.0,
+    342.0
+   ],
+   "chains_in_window": 3,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 18,
+   "mu": -5,
+   "cycle": 2,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -75,
+    "V_kN": -76
+   },
+   "delta_mm": -74.41647315698782,
+   "V_kN": -70.08065690366033,
+   "V_interval_kN": [
+    -80.22889930395087,
+    -70.08065690366033
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 415.0,
+    "y": 927.5
+   },
+   "far_edge_pixel": [
+    415.0,
+    967.0
+   ],
+   "chains_in_window": 1,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 19,
+   "mu": 6,
+   "cycle": 1,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 90,
+    "V_kN": 80
+   },
+   "delta_mm": 88.87697858593069,
+   "V_kN": 80.17975845522152,
+   "V_interval_kN": [
+    80.17975845522152,
+    81.59280486538854
+   ],
+   "obscured": false,
+   "pixel": {
+    "x": 1044.0,
+    "y": 337.5
+   },
+   "far_edge_pixel": [
+    1044.0,
+    332.0
+   ],
+   "chains_in_window": 2,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip"
+  },
+  {
+   "run": 20,
+   "mu": -6,
+   "cycle": 1,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -90,
+    "V_kN": -78
+   },
+   "delta_mm": -89.67553763318513,
+   "V_kN": -76.50815138029478,
+   "V_interval_kN": [
+    -80.36191431711396,
+    -76.50815138029478
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 356.0,
+    "y": 953.0
+   },
+   "far_edge_pixel": [
+    356.0,
+    968.0
+   ],
+   "chains_in_window": 3,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 21,
+   "mu": 6,
+   "cycle": 2,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 90,
+    "V_kN": 79
+   },
+   "delta_mm": 88.87697858593069,
+   "V_kN": 80.17975845522152,
+   "V_interval_kN": [
+    80.17975845522152,
+    81.59280486538854
+   ],
+   "obscured": false,
+   "pixel": {
+    "x": 1044.0,
+    "y": 337.5
+   },
+   "far_edge_pixel": [
+    1044.0,
+    332.0
+   ],
+   "chains_in_window": 3,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip"
+  },
+  {
+   "run": 22,
+   "mu": -6,
+   "cycle": 2,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -90,
+    "V_kN": -77
+   },
+   "delta_mm": -89.67553763318513,
+   "V_kN": -76.50815138029478,
+   "V_interval_kN": [
+    -80.36191431711396,
+    -76.50815138029478
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 356.0,
+    "y": 953.0
+   },
+   "far_edge_pixel": [
+    356.0,
+    968.0
+   ],
+   "chains_in_window": 3,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 23,
+   "mu": 7,
+   "cycle": 1,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 105,
+    "V_kN": 78
+   },
+   "delta_mm": 104.34734135925461,
+   "V_kN": 80.43913219030188,
+   "V_interval_kN": [
+    80.43913219030188,
+    80.69604971942316
+   ],
+   "obscured": false,
+   "pixel": {
+    "x": 1104.0,
+    "y": 336.0
+   },
+   "far_edge_pixel": [
+    1104.0,
+    335.0
+   ],
+   "chains_in_window": 2,
+   "cycles_separable": true,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip"
+  },
+  {
+   "run": 24,
+   "mu": -7,
+   "cycle": 1,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -105,
+    "V_kN": -78
+   },
+   "delta_mm": -103.86275723953702,
+   "V_kN": -77.54877791595578,
+   "V_interval_kN": [
+    -80.76024702997177,
+    -77.54877791595578
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 301.0,
+    "y": 957.5
+   },
+   "far_edge_pixel": [
+    301.0,
+    970.0
+   ],
+   "chains_in_window": 2,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  },
+  {
+   "run": 25,
+   "mu": 7,
+   "cycle": 2,
+   "direction": "+",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": 105,
+    "V_kN": 68
+   },
+   "delta_mm": 104.0033452828824,
+   "V_kN": 69.0084021870483,
+   "V_interval_kN": [
+    69.0084021870483,
+    69.39377848073023
+   ],
+   "obscured": false,
+   "pixel": {
+    "x": 1103.0,
+    "y": 380.5
+   },
+   "far_edge_pixel": [
+    1103.0,
+    379.0
+   ],
+   "chains_in_window": 3,
+   "cycles_separable": true,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip"
+  },
+  {
+   "run": 26,
+   "mu": -7,
+   "cycle": 2,
+   "direction": "-",
+   "load_control": false,
+   "v1_reading": {
+    "delta_mm": -105,
+    "V_kN": -75
+   },
+   "delta_mm": -103.86275723953702,
+   "V_kN": -77.54877791595578,
+   "V_interval_kN": [
+    -80.76024702997177,
+    -77.54877791595578
+   ],
+   "obscured": true,
+   "pixel": {
+    "x": 301.0,
+    "y": 957.5
+   },
+   "far_edge_pixel": [
+    301.0,
+    970.0
+   ],
+   "chains_in_window": 2,
+   "cycles_separable": false,
+   "v1_within_interval_or_band": true,
+   "status": "pixel_tip_obscured_interval"
+  }
+ ],
+ "branches": [
+  {
+   "run": 1,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 39,
+   "identity": "trace_crossed_to_the_wrong_side",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": null,
+   "rejected_crossing": {
+    "delta_mm": -3.7324317218704244,
+    "V_kN": 0.0,
+    "x_px": 687.1248152243594,
+    "y_px": 652.5007391025623,
+    "reason": "crossing on the wrong side of the origin: the walker left the unloading branch"
+   },
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 2,
+   "direction": "-",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 35,
+   "identity": "trace_crossed_to_the_wrong_side",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": null,
+   "rejected_crossing": {
+    "delta_mm": 2.5817103846666543,
+    "V_kN": 0.0,
+    "x_px": 711.6165760720716,
+    "y_px": 652.3005435675707,
+    "reason": "crossing on the wrong side of the origin: the walker left the unloading branch"
+   },
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 3,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 59,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": 13.459169284397413,
+    "pixel": {
+     "x": 753.80886720331,
+     "y": 651.9556639834502
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": 12.275629283613767,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -30.219879546820444,
+    "pixel": {
+     "x": 702.486295419162,
+     "y": 770.0
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 40.2289435574458,
+    "dU_mm": 9.933232989124985,
+    "k_kN_per_mm": 4.049934558213716,
+    "k_low": 2.1482735852044788,
+    "k_high": 11.753421087757689,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 28.792426295544928,
+     "V_kN": 53.638591409927734,
+     "x_px": 811.7158560372549,
+     "y_px": 442.7048637764711
+    },
+    "level_20": {
+     "delta_mm": 18.859193306419943,
+     "V_kN": 13.409647852481934,
+     "x_px": 774.3626840023218,
+     "y_px": 599.5932899941955
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 4,
+   "direction": "-",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 54,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": -12.651238332461428,
+    "pixel": {
+     "x": 652.5298892838364,
+     "y": 652.7835178602726
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": -11.759426214705684,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": 31.600057831608265,
+    "pixel": {
+     "x": 700.6782323909802,
+     "y": 529.3930605654119
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 38.49347096725213,
+    "dU_mm": 9.449394486683683,
+    "k_kN_per_mm": 4.073644191857802,
+    "k_low": 2.103219708400822,
+    "k_high": 12.89892215547345,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -26.579111333654552,
+     "V_kN": -51.32462795633617,
+     "x_px": 600.0065307051394,
+     "y_px": 852.9836732371515
+    },
+    "level_20": {
+     "delta_mm": -17.12971684697087,
+     "V_kN": -12.831156989084043,
+     "x_px": 635.5337120110967,
+     "y_px": 702.8651519556132
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 5,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 59,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": 13.459169284397413,
+    "pixel": {
+     "x": 753.80886720331,
+     "y": 651.9556639834502
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": 12.275629283613767,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -30.219879546820444,
+    "pixel": {
+     "x": 702.486295419162,
+     "y": 770.0
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 40.2289435574458,
+    "dU_mm": 9.933232989124985,
+    "k_kN_per_mm": 4.049934558213716,
+    "k_low": 2.1482735852044788,
+    "k_high": 11.753421087757689,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 28.792426295544928,
+     "V_kN": 53.638591409927734,
+     "x_px": 811.7158560372549,
+     "y_px": 442.7048637764711
+    },
+    "level_20": {
+     "delta_mm": 18.859193306419943,
+     "V_kN": 13.409647852481934,
+     "x_px": 774.3626840023218,
+     "y_px": 599.5932899941955
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 6,
+   "direction": "-",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 54,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": -12.651238332461428,
+    "pixel": {
+     "x": 652.5298892838364,
+     "y": 652.7835178602726
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": -11.759426214705684,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": 31.600057831608265,
+    "pixel": {
+     "x": 700.6782323909802,
+     "y": 529.3930605654119
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 38.49347096725213,
+    "dU_mm": 9.449394486683683,
+    "k_kN_per_mm": 4.073644191857802,
+    "k_low": 2.103219708400822,
+    "k_high": 12.89892215547345,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -26.579111333654552,
+     "V_kN": -51.32462795633617,
+     "x_px": 600.0065307051394,
+     "y_px": 852.9836732371515
+    },
+    "level_20": {
+     "delta_mm": -17.12971684697087,
+     "V_kN": -12.831156989084043,
+     "x_px": 635.5337120110967,
+     "y_px": 702.8651519556132
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 7,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 64,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": 23.205074213171894,
+    "pixel": {
+     "x": 791.6120032006708,
+     "y": 651.6466613322153
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": 21.88449532638353,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -28.573872512926492,
+    "pixel": {
+     "x": 702.4381542435426,
+     "y": 763.5936409594095
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 43.778399234066946,
+    "dU_mm": 10.419759426755707,
+    "k_kN_per_mm": 4.2014788865137715,
+    "k_low": 2.300788839360686,
+    "k_high": 11.262694284382448,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 40.16215996698161,
+     "V_kN": 58.37119897875593,
+     "x_px": 855.6792031724616,
+     "y_px": 423.9247809652305
+    },
+    "level_20": {
+     "delta_mm": 29.742400540225905,
+     "V_kN": 14.592799744688982,
+     "x_px": 816.5426682598284,
+     "y_px": 594.6433293504291
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 8,
+   "direction": "-",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 59,
+   "identity": "trace_crossed_to_the_wrong_side",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": null,
+   "rejected_crossing": {
+    "delta_mm": 21.78797788392796,
+    "V_kN": 0.0,
+    "x_px": 786.1152652735848,
+    "y_px": 651.6915916415085,
+    "reason": "crossing on the wrong side of the origin: the walker left the unloading branch"
+   },
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 9,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 64,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": 23.205074213171894,
+    "pixel": {
+     "x": 791.6120032006708,
+     "y": 651.6466613322153
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": 21.88449532638353,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -28.573872512926492,
+    "pixel": {
+     "x": 702.4381542435426,
+     "y": 763.5936409594095
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 43.778399234066946,
+    "dU_mm": 10.419759426755707,
+    "k_kN_per_mm": 4.2014788865137715,
+    "k_low": 2.300788839360686,
+    "k_high": 11.262694284382448,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 40.16215996698161,
+     "V_kN": 58.37119897875593,
+     "x_px": 855.6792031724616,
+     "y_px": 423.9247809652305
+    },
+    "level_20": {
+     "delta_mm": 29.742400540225905,
+     "V_kN": 14.592799744688982,
+     "x_px": 816.5426682598284,
+     "y_px": 594.6433293504291
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 10,
+   "direction": "-",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 59,
+   "identity": "trace_crossed_to_the_wrong_side",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": null,
+   "rejected_crossing": {
+    "delta_mm": 21.78797788392796,
+    "V_kN": 0.0,
+    "x_px": 786.1152652735848,
+    "y_px": 651.6915916415085,
+    "reason": "crossing on the wrong side of the origin: the walker left the unloading branch"
+   },
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 11,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 69,
+   "identity": "traced_but_no_independent_crossing_within_3mm",
+   "zero_force_crossing": {
+    "delta_mm": 29.2674854383729,
+    "pixel": {
+     "x": 815.1273317097309,
+     "y": 651.4544471504485
+    },
+    "matches_independent_crossing": false,
+    "nearest_independent_mm": 33.74365540983263,
+    "status": "traced_unconfirmed"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -30.219879546820444,
+    "pixel": {
+     "x": 702.486295419162,
+     "y": 770.0
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 42.39629837714554,
+    "dU_mm": 11.803930450768611,
+    "k_kN_per_mm": 3.591710282771525,
+    "k_low": 2.044284461669209,
+    "k_high": 8.3385386485354,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 55.272835801388474,
+     "V_kN": 56.52839783619405,
+     "x_px": 914.3455057322113,
+     "y_px": 430.6179770711546
+    },
+    "level_20": {
+     "delta_mm": 43.46890535061986,
+     "V_kN": 14.132099459048513,
+     "x_px": 869.7995233524522,
+     "y_px": 596.0011916188697
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 12,
+   "direction": "-",
+   "trace_status": "lost_curve",
+   "ambiguous_steps": 46,
+   "identity": "trace_lost_curve",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": {
+    "dF_kN": 40.50415521830707,
+    "dU_mm": 16.416717982034854,
+    "k_kN_per_mm": 2.467250473732422,
+    "k_low": 1.5392152966352746,
+    "k_high": 4.464376908207581,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -56.14278523843793,
+     "V_kN": -54.005540291076095,
+     "x_px": 485.41117771219774,
+     "y_px": 864.355289151209
+    },
+    "level_20": {
+     "delta_mm": -39.72606725640308,
+     "V_kN": -13.501385072769024,
+     "x_px": 547.9049211087338,
+     "y_px": 706.1901577825324
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 13,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 69,
+   "identity": "traced_but_no_independent_crossing_within_3mm",
+   "zero_force_crossing": {
+    "delta_mm": 29.2674854383729,
+    "pixel": {
+     "x": 815.1273317097309,
+     "y": 651.4544471504485
+    },
+    "matches_independent_crossing": false,
+    "nearest_independent_mm": 33.74365540983263,
+    "status": "traced_unconfirmed"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -30.219879546820444,
+    "pixel": {
+     "x": 702.486295419162,
+     "y": 770.0
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 42.39629837714554,
+    "dU_mm": 11.803930450768611,
+    "k_kN_per_mm": 3.591710282771525,
+    "k_low": 2.044284461669209,
+    "k_high": 8.3385386485354,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 55.272835801388474,
+     "V_kN": 56.52839783619405,
+     "x_px": 914.3455057322113,
+     "y_px": 430.6179770711546
+    },
+    "level_20": {
+     "delta_mm": 43.46890535061986,
+     "V_kN": 14.132099459048513,
+     "x_px": 869.7995233524522,
+     "y_px": 596.0011916188697
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 14,
+   "direction": "-",
+   "trace_status": "lost_curve",
+   "ambiguous_steps": 46,
+   "identity": "trace_lost_curve",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": {
+    "dF_kN": 40.50415521830707,
+    "dU_mm": 16.416717982034854,
+    "k_kN_per_mm": 2.467250473732422,
+    "k_low": 1.5392152966352746,
+    "k_high": 4.464376908207581,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -56.14278523843793,
+     "V_kN": -54.005540291076095,
+     "x_px": 485.41117771219774,
+     "y_px": 864.355289151209
+    },
+    "level_20": {
+     "delta_mm": -39.72606725640308,
+     "V_kN": -13.501385072769024,
+     "x_px": 547.9049211087338,
+     "y_px": 706.1901577825324
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 15,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 77,
+   "identity": "traced_but_no_independent_crossing_within_3mm",
+   "zero_force_crossing": {
+    "delta_mm": 44.293974799982266,
+    "pixel": {
+     "x": 873.4131886979997,
+     "y": 650.9780188366672
+    },
+    "matches_independent_crossing": false,
+    "nearest_independent_mm": 48.43870160019341,
+    "status": "traced_unconfirmed"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -45.95245647522041,
+    "pixel": {
+     "x": 702.9464299952963,
+     "y": 831.2321420028222
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 45.172481415230806,
+    "dU_mm": 15.572708736732665,
+    "k_kN_per_mm": 2.9007465675305837,
+    "k_low": 1.815835085583404,
+    "k_high": 5.345663680215228,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 70.82715508611963,
+     "V_kN": 60.229975220307736,
+     "x_px": 974.5704874676406,
+     "y_px": 415.7180501294372
+    },
+    "level_20": {
+     "delta_mm": 55.25444634938697,
+     "V_kN": 15.057493805076934,
+     "x_px": 915.4870851744571,
+     "y_px": 592.0258296510858
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 16,
+   "direction": "-",
+   "trace_status": "lost_curve",
+   "ambiguous_steps": 48,
+   "identity": "trace_lost_curve",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": {
+    "dF_kN": 42.0483941421962,
+    "dU_mm": 16.850160429122795,
+    "k_kN_per_mm": 2.495429899262105,
+    "k_low": 1.5775991706496775,
+    "k_high": 4.428357945125866,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -71.59472433364147,
+     "V_kN": -56.064525522928264,
+     "x_px": 425.53527451931404,
+     "y_px": 872.8589019227438
+    },
+    "level_20": {
+     "delta_mm": -54.74456390451867,
+     "V_kN": -14.016131380732066,
+     "x_px": 489.6651217608396,
+     "y_px": 708.6697564783208
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 17,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 77,
+   "identity": "traced_but_no_independent_crossing_within_3mm",
+   "zero_force_crossing": {
+    "delta_mm": 44.293974799982266,
+    "pixel": {
+     "x": 873.4131886979997,
+     "y": 650.9780188366672
+    },
+    "matches_independent_crossing": false,
+    "nearest_independent_mm": 48.43870160019341,
+    "status": "traced_unconfirmed"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -45.95245647522041,
+    "pixel": {
+     "x": 702.9464299952963,
+     "y": 831.2321420028222
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 45.172481415230806,
+    "dU_mm": 15.572708736732665,
+    "k_kN_per_mm": 2.9007465675305837,
+    "k_low": 1.815835085583404,
+    "k_high": 5.345663680215228,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 70.82715508611963,
+     "V_kN": 60.229975220307736,
+     "x_px": 974.5704874676406,
+     "y_px": 415.7180501294372
+    },
+    "level_20": {
+     "delta_mm": 55.25444634938697,
+     "V_kN": 15.057493805076934,
+     "x_px": 915.4870851744571,
+     "y_px": 592.0258296510858
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 18,
+   "direction": "-",
+   "trace_status": "lost_curve",
+   "ambiguous_steps": 48,
+   "identity": "trace_lost_curve",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": {
+    "dF_kN": 42.0483941421962,
+    "dU_mm": 16.850160429122795,
+    "k_kN_per_mm": 2.495429899262105,
+    "k_low": 1.5775991706496775,
+    "k_high": 4.428357945125866,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -71.59472433364147,
+     "V_kN": -56.064525522928264,
+     "x_px": 425.53527451931404,
+     "y_px": 872.8589019227438
+    },
+    "level_20": {
+     "delta_mm": -54.74456390451867,
+     "V_kN": -14.016131380732066,
+     "x_px": 489.6651217608396,
+     "y_px": 708.6697564783208
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 19,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 81,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": 50.77090986964144,
+    "pixel": {
+     "x": 898.5364029170811,
+     "y": 650.7726618048649
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": 48.43870160019341,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -46.61573658590023,
+    "pixel": {
+     "x": 702.9658291130617,
+     "y": 833.8136683547754
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 48.10785507313291,
+    "dU_mm": 19.545196520965987,
+    "k_kN_per_mm": 2.4613646131174978,
+    "k_low": 1.6483668480911184,
+    "k_high": 3.9946157288587028,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 85.33850859955943,
+     "V_kN": 64.14380676417721,
+     "x_px": 1030.743728672323,
+     "y_px": 400.0250853107083
+    },
+    "level_20": {
+     "delta_mm": 65.79331207859344,
+     "V_kN": 16.035951691044303,
+     "x_px": 956.3373989026951,
+     "y_px": 587.8834681297399
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 20,
+   "direction": "-",
+   "trace_status": "lost_curve",
+   "ambiguous_steps": 51,
+   "identity": "trace_lost_curve",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": {
+    "dF_kN": 45.90489082817687,
+    "dU_mm": 18.336761713399795,
+    "k_kN_per_mm": 2.503434987358283,
+    "k_low": 1.639695999743683,
+    "k_high": 4.207335120350054,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -86.94074240966046,
+     "V_kN": -61.206521104235826,
+     "x_px": 366.16039516804625,
+     "y_px": 893.3584193278149
+    },
+    "level_20": {
+     "delta_mm": -68.60398069626066,
+     "V_kN": -15.301630276058956,
+     "x_px": 435.9437893765243,
+     "y_px": 714.1124212469514
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 21,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 81,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": 50.77090986964144,
+    "pixel": {
+     "x": 898.5364029170811,
+     "y": 650.7726618048649
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": 48.43870160019341,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -46.61573658590023,
+    "pixel": {
+     "x": 702.9658291130617,
+     "y": 833.8136683547754
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 48.10785507313291,
+    "dU_mm": 19.545196520965987,
+    "k_kN_per_mm": 2.4613646131174978,
+    "k_low": 1.6483668480911184,
+    "k_high": 3.9946157288587028,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 85.33850859955943,
+     "V_kN": 64.14380676417721,
+     "x_px": 1030.743728672323,
+     "y_px": 400.0250853107083
+    },
+    "level_20": {
+     "delta_mm": 65.79331207859344,
+     "V_kN": 16.035951691044303,
+     "x_px": 956.3373989026951,
+     "y_px": 587.8834681297399
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 22,
+   "direction": "-",
+   "trace_status": "lost_curve",
+   "ambiguous_steps": 51,
+   "identity": "trace_lost_curve",
+   "zero_force_crossing": null,
+   "zero_displacement_crossing": null,
+   "unloading_chord_80_20": {
+    "dF_kN": 45.90489082817687,
+    "dU_mm": 18.336761713399795,
+    "k_kN_per_mm": 2.503434987358283,
+    "k_low": 1.639695999743683,
+    "k_high": 4.207335120350054,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -86.94074240966046,
+     "V_kN": -61.206521104235826,
+     "x_px": 366.16039516804625,
+     "y_px": 893.3584193278149
+    },
+    "level_20": {
+     "delta_mm": -68.60398069626066,
+     "V_kN": -15.301630276058956,
+     "x_px": 435.9437893765243,
+     "y_px": 714.1124212469514
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": "the unloading branch could not be followed to zero force: it merges with the reloading branches of the opposite loops (the pinched region); marked unavailable, not estimated"
+  },
+  {
+   "run": 23,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 105,
+   "identity": "traced_but_no_independent_crossing_within_3mm",
+   "zero_force_crossing": {
+    "delta_mm": 65.38287538679259,
+    "pixel": {
+     "x": 955.2143741953286,
+     "y": 650.309376341119
+    },
+    "matches_independent_crossing": false,
+    "nearest_independent_mm": 59.91114994179088,
+    "status": "traced_unconfirmed"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -46.61573658590023,
+    "pixel": {
+     "x": 702.9658291130617,
+     "y": 833.8136683547754
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 48.263479314181126,
+    "dU_mm": 20.4607172733848,
+    "k_kN_per_mm": 2.358836138015651,
+    "k_low": 1.597215936269851,
+    "k_high": 3.7524749490852707,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 100.56939715323298,
+     "V_kN": 64.3513057522415,
+     "x_px": 1089.8163555720355,
+     "y_px": 398.73457771185764
+    },
+    "level_20": {
+     "delta_mm": 80.10867987984818,
+     "V_kN": 16.087826438060375,
+     "x_px": 1011.8633878563676,
+     "y_px": 587.227686906054
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 24,
+   "direction": "-",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 76,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": -69.78871740825375,
+    "pixel": {
+     "x": 430.90081452534264,
+     "y": 654.5951128479442
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": -66.93030138553397,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": 48.39247846656327,
+    "pixel": {
+     "x": 700.1871003033193,
+     "y": 464.03594268381755
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 46.52926674957347,
+    "dU_mm": 20.796210684585972,
+    "k_kN_per_mm": 2.237391583268614,
+    "k_low": 1.5124999286890661,
+    "k_high": 3.550183751052971,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -100.2667784805212,
+     "V_kN": -62.03902233276463,
+     "x_px": 314.49473039132215,
+     "y_px": 897.0210784347115
+    },
+    "level_20": {
+     "delta_mm": -79.47056779593522,
+     "V_kN": -15.509755583191158,
+     "x_px": 393.79975567891034,
+     "y_px": 715.2669924281196
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 25,
+   "direction": "+",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 94,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": 59.683172525492516,
+    "pixel": {
+     "x": 933.105945682537,
+     "y": 650.490090529105
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": 59.91114994179088,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": -46.61573658590023,
+    "pixel": {
+     "x": 702.9658291130617,
+     "y": 833.8136683547754
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 41.40504131222899,
+    "dU_mm": 23.007854763672086,
+    "k_kN_per_mm": 1.799604601885999,
+    "k_low": 1.2205329074030116,
+    "k_high": 2.787244009954962,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": 99.73804919390126,
+     "V_kN": 55.206721749638646,
+     "x_px": 1086.859115607633,
+     "y_px": 434.3522109809176
+    },
+    "level_20": {
+     "delta_mm": 76.73019443022918,
+     "V_kN": 13.801680437409662,
+     "x_px": 998.8255323940064,
+     "y_px": 596.2326234746582
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  },
+  {
+   "run": 26,
+   "direction": "-",
+   "trace_status": "reached_zero_displacement",
+   "ambiguous_steps": 76,
+   "identity": "traced_from_reversal_and_matches_independent_crossing",
+   "zero_force_crossing": {
+    "delta_mm": -69.78871740825375,
+    "pixel": {
+     "x": 430.90081452534264,
+     "y": 654.5951128479442
+    },
+    "matches_independent_crossing": true,
+    "nearest_independent_mm": -66.93030138553397,
+    "status": "resolved"
+   },
+   "zero_displacement_crossing": {
+    "V_kN": 48.39247846656327,
+    "pixel": {
+     "x": 700.1871003033193,
+     "y": 464.03594268381755
+    },
+    "status": "traced_unconfirmed: the reloading branches bundle near the V axis; per-cycle identity unresolved"
+   },
+   "unloading_chord_80_20": {
+    "dF_kN": 46.52926674957347,
+    "dU_mm": 20.796210684585972,
+    "k_kN_per_mm": 2.237391583268614,
+    "k_low": 1.5124999286890661,
+    "k_high": 3.550183751052971,
+    "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm",
+    "level_80": {
+     "delta_mm": -100.2667784805212,
+     "V_kN": -62.03902233276463,
+     "x_px": 314.49473039132215,
+     "y_px": 897.0210784347115
+    },
+    "level_20": {
+     "delta_mm": -79.47056779593522,
+     "V_kN": -15.509755583191158,
+     "x_px": 393.79975567891034,
+     "y_px": 715.2669924281196
+    }
+   },
+   "rejected_crossing": null,
+   "unavailable_reason": null
+  }
+ ],
+ "independent_crossings": {
+  "zero_force_delta_mm": [
+   {
+    "delta_mm": -66.93030138553397,
+    "delta_range_mm": [
+     -70.28180314824783,
+     -63.5787996228201
+    ],
+    "strands": 2,
+    "pixel": {
+     "x": 442.0,
+     "y": 656.0681413612378
+    }
+   },
+   {
+    "delta_mm": -11.759426214705684,
+    "delta_range_mm": [
+     -14.853120149518475,
+     -8.665732279892865
+    ],
+    "strands": 2,
+    "pixel": {
+     "x": 656.0,
+     "y": 654.203623209304
+    }
+   },
+   {
+    "delta_mm": 12.275629283613767,
+    "delta_range_mm": [
+     7.833968705775391,
+     17.11505051021379
+    ],
+    "strands": 2,
+    "pixel": {
+     "x": 749.2285714285714,
+     "y": 653.3913504816992
+    }
+   },
+   {
+    "delta_mm": 21.88449532638353,
+    "delta_range_mm": [
+     19.435320961323413,
+     24.333669691443674
+    ],
+    "strands": 2,
+    "pixel": {
+     "x": 786.5,
+     "y": 653.0666156446902
+    }
+   },
+   {
+    "delta_mm": 33.74365540983263,
+    "delta_range_mm": [
+     30.26324973316821,
+     37.22406108649702
+    ],
+    "strands": 3,
+    "pixel": {
+     "x": 832.5,
+     "y": 652.6658313690409
+    }
+   },
+   {
+    "delta_mm": 38.77090805390341,
+    "delta_range_mm": [
+     38.513100226002365,
+     39.02871588180446
+    ],
+    "strands": 0,
+    "pixel": {
+     "x": 852.0,
+     "y": 652.4959336869722
+    }
+   },
+   {
+    "delta_mm": 48.43870160019341,
+    "delta_range_mm": [
+     40.05994719340876,
+     56.81745600697806
+    ],
+    "strands": 4,
+    "pixel": {
+     "x": 889.5,
+     "y": 652.1692073753015
+    }
+   },
+   {
+    "delta_mm": 59.91114994179088,
+    "delta_range_mm": [
+     57.848687318582364,
+     61.9736125649994
+    ],
+    "strands": 2,
+    "pixel": {
+     "x": 934.0,
+     "y": 651.781492152119
+    }
+   }
+  ],
+  "zero_displacement_V_kN": [
+   {
+    "V_kN": 34.27111002910803,
+    "V_range_kN": [
+     49.43019173265408,
+     19.112028325561965
+    ],
+    "strands": 11,
+    "pixel": {
+     "x": 700.2531186300052,
+     "y": 519.0
+    }
+   },
+   {
+    "V_kN": 14.48722373803946,
+    "V_range_kN": [
+     15.514958090822233,
+     13.45948938525666
+    ],
+    "strands": 1,
+    "pixel": {
+     "x": 700.8419394018036,
+     "y": 596.0
+    }
+   },
+   {
+    "V_kN": -15.4455392867591,
+    "V_range_kN": [
+     -12.747736610704294,
+     -18.143341962813906
+    ],
+    "strands": 2,
+    "pixel": {
+     "x": 701.7328175825118,
+     "y": 712.5
+    }
+   },
+   {
+    "V_kN": -34.84402519553413,
+    "V_range_kN": [
+     -22.76814655033644,
+     -46.91990384073185
+    ],
+    "strands": 8,
+    "pixel": {
+     "x": 702.3101678197946,
+     "y": 788.0
+    }
+   }
+  ],
+  "note": "columns/rows where ink crosses an axis; a bundle of n strands holds n unresolved branches"
+ },
+ "amplitude_audit": {
+  "reconstructed_amplitudes_mm": [
+   30,
+   45,
+   60,
+   75,
+   90,
+   105
+  ],
+  "pixel_tip_delta_by_amplitude": {
+   "30": [
+    29.0,
+    29.2
+   ],
+   "45": [
+    44.2,
+    47.2
+   ],
+   "60": [
+    58.9,
+    59.2
+   ],
+   "75": [
+    74.4
+   ],
+   "90": [
+    88.9,
+    89.7
+   ],
+   "105": [
+    103.9,
+    104.0,
+    104.3
+   ]
+  },
+  "status": "the pixel tips lie within about 1.5 mm of mu x 15 mm on both sides; the reconstruction stands with the +-3 mm coherent shift as its sensitivity"
+ },
+ "superseded_v1_targets": {
+  "residual_displacement_at_zero_load_mm": {
+   "mu_6": 35,
+   "mu_7": 42,
+   "uncertainty": 6,
+   "basis": "unloading branches from +90 and +105 mm reach V = 0 at about 35 and 42 mm",
+   "status": "NOT ACCEPTED (Codex 2026-09-28): the outer positive unloading branches cross zero force at 45-66 mm (branches above)"
+  },
+  "load_at_zero_displacement_kN": {
+   "value": 28,
+   "uncertainty": 6,
+   "basis": "the reloading branches at mu >= 4 cross delta = 0 at about +-25 to 30 kN on Fig. 16(a)",
+   "status": "NOT ACCEPTED: no per-cycle identity; replaced by the signed bundles in independent_crossings"
+  },
+  "qualitative": "pinching not significant (PEER Table 5.1); the paper: strength, stiffness and energy dissipation maintained well"
+ },
+ "run_label_audit": {
+  "run_25": "the second cycle at +105 mm reverses visibly lower than run 23 (pixel tips above); retained as printed, not removed",
+  "cycle_pairs": "where cycles_separable is false the two cycles at that amplitude and direction share one tip interval at the scan's resolution",
+  "printed_numbers": "run numbers 1-26 as printed on the figure; identity of each numbered reversal taken from its printed position"
+ },
+ "strength_retention": {
+  "final_cycle_over_theoretical": "about 100 % (PEER Table 5.1); the paper: strength degradation of Unit 1 at the end of testing was small",
+  "no_substantial_loss_up_to_mu": 7
+ },
+ "damage_observations": {
+  "max_beam_crack_mm_at_mu_2": 1.8,
+  "max_joint_crack_mm_at_mu_2": 0.2,
+  "max_joint_crack_mm_during_test": 0.6,
+  "first_beam_cover_spalling_at_mu": 3,
+  "joint_core_share_of_tip_displacement_at_high_ductility": "9 to 14 % (section 4.2; PEER Table 5.1)",
+  "joint_hoop_strain": "did not exceed about twice the yield strain (1.4e-3) (section 4.2, Fig. 17a)",
+  "beam_bar_strains": "yielding penetrated into the joint core; bar stress below yield in the middle quarter of the joint; top bars yielded in tension only; bottom bars yielded in tension and compression in the beam but only in tension inside the joint (section 4.2 text, Fig. 20a)",
+  "failure_mode": "beam plastic hinges at the column faces (negative moment) and near the gravity load point (positive moment); columns elastic; joint diagonal tension cracking well controlled"
+ },
+ "protocol": {
+  "source": "section 3.2 and Fig. 15",
+  "sequence": "load-controlled cycle to +-0.75 V2, then displacement-controlled cycles, two at each of mu = 2, 3, 4, 5, 6, 7",
+  "yield_definition": "Delta_y = (4/3) x 0.5 x (Delta_y1 + Delta_y2), the displacements at +-0.75 V2",
+  "column_axial_load_kN": 0.0,
+  "beam_gravity_point_loads_kN": 55.0,
+  "gravity_load_position_mm_from_column_centreline": 848
+ }
+}

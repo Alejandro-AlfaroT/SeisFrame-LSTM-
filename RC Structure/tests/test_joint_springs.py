@@ -1,7 +1,7 @@
 """Scissors joint springs in the nonlinear frame (Model/Joint_Springs, 2026-09-27).
 
 Covers the calibration arithmetic against a hand calculation, the transcribed ASCE 41 rows and their
-interpolation, the slip partition switch on the member hinges, the frame topology under the joint
+interpolation, the per-end slip ownership seen from the joint side, the frame topology under the joint
 model (and its absence under the legacy model), static equilibrium and modal softening with joints,
 and the output identity keys.
 """
@@ -113,18 +113,19 @@ class CalibrationArithmetic(unittest.TestCase):
 
 
 class SlipPartition(unittest.TestCase):
-    def test_member_hinges_drop_slip_only_under_joint_springs_with_slip_scope(self):
-        with mock.patch.multiple(sp, JOINT_MODEL="rigid_centerline", JOINT_DEFORMATION_SCOPE="joint_shear_and_slip"):
-            self.assertEqual(IMK_Calibration.bond_slip_indicator(), 1.0)
-        with mock.patch.multiple(sp, JOINT_MODEL="imk_pinching_scissors", JOINT_DEFORMATION_SCOPE="joint_shear_only"):
-            self.assertEqual(IMK_Calibration.bond_slip_indicator(), 1.0)
+    def test_joint_model_and_declared_scope_never_remove_member_slip(self):
+        """Since 2026-09-27 (evening) bar slip is owned per member end (tests/test_deformation_ownership.py);
+        neither the joint model nor a declared joint scope changes Haselton's a_sl in the hinges."""
+        for joint_model in ("rigid_centerline", "imk_pinching_scissors"):
+            for scope in ("joint_shear_only", "joint_shear_and_slip"):
+                with mock.patch.multiple(sp, JOINT_MODEL=joint_model, JOINT_DEFORMATION_SCOPE=scope):
+                    self.assertEqual(IMK_Calibration.bond_slip_indicator(), 1.0)
+                    self.assertEqual(IMK_Calibration.haselton_theta_p("beam_x", 0.0),
+                                     IMK_Calibration.haselton_theta_p("beam_x", 0.0, None))
         with mock.patch.multiple(sp, JOINT_MODEL="imk_pinching_scissors", JOINT_DEFORMATION_SCOPE="joint_shear_and_slip"):
-            self.assertEqual(IMK_Calibration.bond_slip_indicator(), 0.0)
-            without = IMK_Calibration.haselton_theta_p("beam_x", 0.0)
-        with mock.patch.multiple(sp, JOINT_MODEL="rigid_centerline"):
-            with_slip = IMK_Calibration.haselton_theta_p("beam_x", 0.0)
-        if with_slip > IMK_Calibration.THETA_P_FLOOR and without > IMK_Calibration.THETA_P_FLOOR:
-            self.assertAlmostEqual(without / with_slip, 1.0 / 1.55, places=9)
+            from Model.Deformation_Ownership import validate_joint_scope
+            with self.assertRaisesRegex(ValueError, "retired"):
+                validate_joint_scope()
 
 
 def build_small(joint_model):
@@ -163,7 +164,8 @@ class FrameTopology(unittest.TestCase):
             else:
                 self.assertEqual(member["end_node_i"], joints[member["node_i"]]["beam_core"])
                 self.assertEqual(member["end_node_j"], joints[member["node_j"]]["beam_core"])
-                self.assertEqual(member["installed_materials"]["i"]["y"]["provenance"]["bond_slip_indicator"], 0.0)
+                self.assertEqual(member["installed_materials"]["i"]["y"]["provenance"]["bond_slip_indicator"], 1.0)
+                self.assertEqual(member["deformation_ownership"]["i"]["panel_shear"], "joint_spring")
         self.assertGreater(period, 0.0)
 
     def test_legacy_model_has_no_cores_and_is_stiffer(self):
@@ -209,7 +211,7 @@ class FrameTopology(unittest.TestCase):
 class Identity(unittest.TestCase):
     def test_joint_keys_are_part_of_the_output_identity(self):
         for key in ("joint_model", "joint_deformation_scope", "joint_calibration_basis", "joint_kappa",
-                    "imk_bond_slip_indicator"):
+                    "imk_bond_slip_indicator", "slip_ownership_policy"):
             self.assertIn(key, OUTPUT_IDENTITY_KEYS)
         with tempfile.TemporaryDirectory() as temp_dir:
             (Path(temp_dir) / "global_parameters.json").write_text(json.dumps(collect_global_parameters()),

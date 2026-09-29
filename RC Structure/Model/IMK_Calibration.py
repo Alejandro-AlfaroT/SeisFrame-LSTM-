@@ -47,19 +47,23 @@ RHO_SH_MIN, RHO_SH_MAX = 0.002, 0.020
 
 # a_sl = 1 where bar slip from the joint is possible, which is the normal
 # condition for a cast-in-place frame and the value Haselton's regression
-# carries for the member. Since 2026-09-27 the frame can carry slip in the
-# joint spring instead (JOINT_DEFORMATION_SCOPE = "joint_shear_and_slip"),
-# in which case the members drop the term so slip is counted once.
+# carries for the member. Since 2026-09-27 (evening) the term is owned per
+# member end (Model/Deformation_Ownership): a member hinge keeps it unless a
+# face slip interface is registered for that end. A declared joint scope
+# never removes it, and a column base never loses it without a replacement.
 BOND_SLIP_INDICATOR = 1.0
 
 
-def bond_slip_indicator():
-    """Haselton's a_sl for the member hinges under the current joint model and deformation scope."""
-    joint_model = getattr(sp, "JOINT_MODEL", "rigid_centerline")
-    scope = getattr(sp, "JOINT_DEFORMATION_SCOPE", "joint_shear_only")
-    if joint_model == "imk_pinching_scissors" and scope == "joint_shear_and_slip":
-        return 0.0
-    return BOND_SLIP_INDICATOR
+def bond_slip_indicator(end=None, *, member_scope=None):
+    """Haselton's a_sl for one member end (Model/Deformation_Ownership.member_end descriptor).
+
+    Without an end the policy's member default is returned (no interface can be registered without
+    an end), which is what the output identity and legacy callers report.
+    """
+    from Model import Deformation_Ownership as ownership
+    if end is None:
+        return ownership.DEFAULT_MEMBER_INDICATOR
+    return ownership.bond_slip_indicator_for_end(end, member_scope=member_scope)
 
 THETA_P_FLOOR = 0.005
 THETA_PC_FLOOR = 0.010
@@ -263,7 +267,7 @@ def _stability_index(member_type):
     return (spacing / bar_diameter) * math.sqrt(sp.FY_KSI * KSI_TO_MPA / 100.0)
 
 
-def haselton_theta_p(member_type, nu):
+def haselton_theta_p(member_type, nu, end=None, *, member_scope=None):
     """Plastic rotation capacity to the capping point.
 
     Haselton et al. (2008), PEER 2007/03, equation 3.10 (full form):
@@ -281,7 +285,7 @@ def haselton_theta_p(member_type, nu):
 
     theta_p = (
         0.12
-        * (1.0 + 0.55 * bond_slip_indicator())
+        * (1.0 + 0.55 * bond_slip_indicator(end, member_scope=member_scope))
         * (0.16 ** nu)
         * ((0.02 + 40.0 * rho_sh) ** 0.43)
         * (0.54 ** (0.01 * fc_mpa))
@@ -348,17 +352,26 @@ def deterioration_for_member(member_type, nu):
             "deterioration_beam_extrapolation": member_type != "column"}
 
 
-def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None):
-    """Full per-member IMK backbone.
+def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *, member_scope=None):
+    """Full per-member IMK backbone, for one member END when ``end`` is given.
 
     Returns yield moment, plastic and post-capping rotations, ultimate
     rotation, and the axial ratio that produced them. The axial ratio is
     carried through so it can be exported as a node/element feature: it is
     the single number that explains why two otherwise identical columns
-    behave differently.
+    behave differently. ``end`` (Model/Deformation_Ownership.member_end)
+    decides whether the plastic rotation keeps Haselton's bar-slip share
+    (member hinge owns slip) or excludes it (a registered face interface
+    owns it); the ownership record travels with the backbone.
     """
+    from Model import Deformation_Ownership as ownership
     use_calibration = getattr(sp, "IMK_USE_CALIBRATED_BACKBONE", True)
     nu = axial_load_ratio(axial_kip, member_type)
+    indicator = bond_slip_indicator(end, member_scope=member_scope)
+    slip = {"bond_slip_indicator": indicator,
+            "slip_owner": (ownership.ownership(end, member_scope=member_scope)["bar_slip"] if end is not None
+                           else "member_hinge"),
+            "end_location": None if end is None else end["location"]}
 
     if not use_calibration:
         return {
@@ -371,12 +384,14 @@ def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None):
             "theta_p_neg": sp.IMK_THETA_P_NEG,
             "theta_pc_neg": sp.IMK_THETA_PC_NEG,
             "theta_u_neg": sp.IMK_THETA_U_NEG,
+            **slip,
             **deterioration_for_member(member_type, nu),
         }
 
-    theta_p = haselton_theta_p(member_type, nu)
+    theta_p = haselton_theta_p(member_type, nu, end, member_scope=member_scope)
     theta_pc = haselton_theta_pc(member_type, nu)
     return {
+        **slip,
         "axial_kip": axial_kip,
         "axial_ratio": nu,
         "theta_p": theta_p,

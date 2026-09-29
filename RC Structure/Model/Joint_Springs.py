@@ -28,9 +28,10 @@ Calibration per joint and plane (Structure_Parameters.JOINT_CALIBRATION_BASIS):
                unloading from the previous peak (its zero-moment crossing), at kappaF times the moment
                the peak-oriented straight line would have there, then continues to the previous peak.
 
-JOINT_DEFORMATION_SCOPE says whether the member hinges keep Haselton's bond-slip term
-(IMK_Calibration.bond_slip_indicator): with "joint_shear_and_slip" the members drop it and the joint
-spring is read as carrying slip as well as panel shear. Nothing here is experimentally calibrated
+JOINT_DEFORMATION_SCOPE is "joint_shear_only": the spring owns panel shear and nothing else. Bar slip is
+owned per member end (Model/Deformation_Ownership); the retired "joint_shear_and_slip" value, under which
+the members dropped Haselton's term and the spring was read as carrying slip as well as panel shear, is
+refused at install. Nothing here is experimentally calibrated
 (JOINT_CALIBRATION_STATUS); the ASCE 41 rows were verified on 2026-09-27 against the PEER report that
 produced them (see ASCE41_JOINT_ROWS).
 """
@@ -258,6 +259,8 @@ def install_joint_springs(node_tag):
     """Add a beam core and a two-plane pinching spring at every elevated joint. Returns the registry."""
     if not joints_enabled():
         return {}
+    from Model.Deformation_Ownership import validate_joint_scope
+    validate_joint_scope()          # the spring owns panel shear only; a declared slip scope is refused
     if sp.ELEMENT_FORMULATION != "imk":
         raise ValueError("JOINT_MODEL 'imk_pinching_scissors' requires ELEMENT_FORMULATION 'imk': the joint cores "
                          "add equalDOF chains that only the penalty handler of the IMK frame carries")

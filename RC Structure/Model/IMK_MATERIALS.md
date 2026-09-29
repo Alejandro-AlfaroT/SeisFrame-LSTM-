@@ -55,9 +55,15 @@ scientific validity or production acceptance.
   Table 10-11 (conforming rows, verified 2026-09-27 against the Elwood et al. 2007 PEER update that
   produced them), Mn = Vn h_b and K = G Aj h_b, no cyclic
   deterioration, kappaF = kappaD = 0.25 (Ibarra, Medina & Krawinkler 2005, a
-  representative level, not an RC joint fit). Under the shear-and-slip scope
-  the member hinges drop Haselton's bond-slip term (a_sl = 0) so slip is
-  counted once. Status: provisional, not experimentally calibrated. The
+  representative level, not an RC joint fit). The spring owns panel shear
+  only: since 2026-09-27 (evening, Codex's slip resolution) bar slip is owned
+  per member end (`Model/Deformation_Ownership`), the member hinges keep
+  Haselton's a_sl = 1 unless a face interface is registered for that end,
+  column bases never lose it without a replacement, and the retired
+  `joint_shear_and_slip` scope is refused at build time. The invariant-Ke,
+  full-branch, mapped-energy interface lives only in the diagnostic
+  `Analysis/Joint_Slip_Subassembly.py` (provisional, verification-only
+  energies). Status: provisional, not experimentally calibrated. The
   finite-size `Joint_Panel.py` subassembly stays a diagnostic prototype; the
   2026-09-23 review's shared-core torsion benchmark is still owed. Fixture
   kappaF = kappaD = 0.5 is not a joint value.

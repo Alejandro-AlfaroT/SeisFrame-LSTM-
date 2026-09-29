@@ -391,18 +391,28 @@ def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone
         lamda_a=lamda.get("A"), c_a=sp.IMK_C_A if "A" in modes else None,
         energy_convention=sp.IMK_ENERGY_CONVENTION,
     )
+    # Bar slip is owned per member end (Model/Deformation_Ownership): the backbone built for this
+    # end carries the owner and Haselton's a_sl. No end has been given a calibrated interface, so
+    # the decomposition is the legacy included scope unless a diagnostic registered one in-process.
+    indicator = (backbone or {}).get("bond_slip_indicator", bond_slip_indicator())
+    owner = (backbone or {}).get("slip_owner", "member_hinge")
+    if indicator == 0.0 and owner == "face_interface":
+        scope = ("member_end_spring; flexure only; bar slip owned by a registered face interface; "
+                 "decomposition_not_certified")
+    elif indicator == 0.0:
+        scope = ("member_end_spring; flexure only; bar slip removed without an owner "
+                 "(legacy 2026-09-27 state, diagnostic reproduction only)")
+    else:
+        scope = ("member_end_spring; flexure and bar slip inside the member hinge (legacy included scope); "
+                 "slip_partition_not_validated")
     provenance = {"calibration_id": calibration_id,
                     "status": sp.IMK_CYCLIC_CALIBRATION_STATUS,
                     "deterioration_source": deterioration_source,
                     "backbone_source": (backbone or {}).get("source", "fixed"),
-                    # The partition of bar slip between member and joint is a declared modelling
-                    # choice (2026-09-27), not an experimentally validated one, in either scope.
-                    "deformation_scope": ("member_end_spring; bar slip carried by the joint spring; "
-                                          "joint_slip_partition_declared_not_validated"
-                                          if bond_slip_indicator() == 0.0
-                                          else "member_end_spring; bar slip inside the member hinge; "
-                                               "joint_slip_partition_not_validated"),
-                    "bond_slip_indicator": bond_slip_indicator()}
+                    "deformation_scope": scope,
+                    "bond_slip_indicator": indicator,
+                    "slip_owner": owner,
+                    "end_location": (backbone or {}).get("end_location")}
     if by_mode is not None:
         provenance["deterioration"] = {key: backbone[key] for key in backbone
                                        if key.startswith("deterioration_") or key.startswith("lambda_")
@@ -519,7 +529,7 @@ def _canonical_member_reversed(n_i, n_j, member_type):
 
 
 def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes=None,
-                      _verification_calibrations=None):
+                      _verification_calibrations=None, _member_scope=None):
     """One IMK member between end nodes n_i and n_j.
 
     ``joint_nodes`` names the physical joints the member belongs to when the
@@ -552,17 +562,24 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
                      my_hogging_j=strength_basis.get("hogging_j_kip_in", hogging),
                      my_sagging_i=strength_basis.get("sagging_i_kip_in", sagging),
                      my_sagging_j=strength_basis.get("sagging_j_kip_in", sagging))
-    backbone = backbone_for_member(member_type, axial_kip=axial_kip)
+    # One backbone per END: the bar-slip share of the plastic rotation is owned per end
+    # (Model/Deformation_Ownership), so a first-story column's base end and joint end are
+    # calibrated separately even though they share the axial load.
+    from Model.Deformation_Ownership import member_end, ownership
+    ends = {"i": member_end(ele_tag, member_type, "i", joint_i), "j": member_end(ele_tag, member_type, "j", joint_j)}
+    backbones = {end: backbone_for_member(member_type, axial_kip=axial_kip, end=ends[end], member_scope=_member_scope)
+                 for end in ("i", "j")}
+    backbone = backbones["i"]
     length = _member_length(n_i, n_j)
     i_hinge_node = hinge_node_tag(ele_tag, 1)
     j_hinge_node = hinge_node_tag(ele_tag, 2)
 
     _create_hinge_node(n_i, i_hinge_node)
     _create_hinge_node(n_j, j_hinge_node)
-    materials_i = _create_end_hinge(ele_tag, 1, n_i, i_hinge_node, member_type, props, length, backbone,
+    materials_i = _create_end_hinge(ele_tag, 1, n_i, i_hinge_node, member_type, props, length, backbones["i"],
         energy_profiles=None if energy_profiles is None else energy_profiles["i"],
         reverse_physical=reverse_connectivity, verification_only=_verification_calibrations is not None)
-    materials_j = _create_end_hinge(ele_tag, 2, n_j, j_hinge_node, member_type, props, length, backbone,
+    materials_j = _create_end_hinge(ele_tag, 2, n_j, j_hinge_node, member_type, props, length, backbones["j"],
         energy_profiles=None if energy_profiles is None else energy_profiles["j"],
         reverse_physical=not reverse_connectivity, verification_only=_verification_calibrations is not None)
 
@@ -633,7 +650,12 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
             props["mz"] / ke_z if ke_z > 0 else 0.0
         ),
         "stiffness_modifier": props["stiffness_modifier"],
+        # Flat backbone keys are end i's; the two ends differ only where a face interface is
+        # registered at one end (none in production), and backbone_by_end keeps both.
         **backbone,
+        "backbone_by_end": backbones,
+        "ends_differ": any(backbones["i"].get(k) != backbones["j"].get(k) for k in ("theta_p", "theta_pc", "theta_u")),
+        "deformation_ownership": {end: ownership(ends[end], member_scope=_member_scope) for end in ("i", "j")},
     }
 
     inertia_factor = imk_elastic_inertia_factor()

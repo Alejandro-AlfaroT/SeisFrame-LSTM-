@@ -93,6 +93,7 @@ OUTPUT_IDENTITY_KEYS = (
     "joint_stiffness_modifier",
     "joint_kappa",
     "imk_bond_slip_indicator",
+    "slip_ownership_policy",
     "floor_loads",
     "reinforcement_geometry",
 )
@@ -419,6 +420,12 @@ def _result_summary(results, output_dir, elapsed_sec):
     }
 
 
+def _deformation_ownership_rows():
+    """One row per member end: who owns flexure, bar slip and panel shear there (Model/Deformation_Ownership)."""
+    from Model.Deformation_Ownership import end_inventory
+    return end_inventory(hinge_registry())
+
+
 def save_ntha_outputs(output_dir, results, gravity_results, modal_results):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -437,6 +444,9 @@ def save_ntha_outputs(output_dir, results, gravity_results, modal_results):
     joint_rows = _joint_spring_rows(results)
     if joint_rows:
         _write_csv(output_dir / "joint_springs.csv", list(joint_rows[0].keys()), joint_rows)
+    ownership_rows = _deformation_ownership_rows()
+    if ownership_rows:
+        _write_csv(output_dir / "deformation_ownership.csv", list(ownership_rows[0].keys()), ownership_rows)
 
     _write_json(output_dir / "status.json", results["status"])
     _write_json(output_dir / "record_summary_x.json", results["record_summary_x"])

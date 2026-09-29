@@ -552,6 +552,16 @@ def installed_deterioration_policy():
             "anchors": anchors}
 
 
+def _slip_ownership_policy():
+    from Model.Deformation_Ownership import POLICY_ID
+    return POLICY_ID
+
+
+def _slip_interfaces_registered():
+    from Model.Deformation_Ownership import slip_interfaces
+    return len(slip_interfaces())
+
+
 def collect_global_parameters():
     return {
         "num_bay_x": sp.NUM_BAY_X,
@@ -624,7 +634,11 @@ def collect_global_parameters():
         "joint_stiffness_modifier": getattr(sp, "JOINT_STIFFNESS_MODIFIER", None),
         "joint_kappa": {"f": getattr(sp, "JOINT_KAPPA_F", None), "d": getattr(sp, "JOINT_KAPPA_D", None)},
         "joint_lambda_suppression": getattr(sp, "JOINT_LAMBDA_SUPPRESSION", None),
+        # Bar slip ownership per member end (2026-09-27 evening): the member default a_sl and the
+        # policy that assigns it; interfaces registered in-process (diagnostics only) are counted.
         "imk_bond_slip_indicator": bond_slip_indicator(),
+        "slip_ownership_policy": _slip_ownership_policy(),
+        "slip_interfaces_registered": _slip_interfaces_registered(),
         "imk_beam_theta_y": sp.IMK_BEAM_THETA_Y,
         "imk_column_theta_y": sp.IMK_COLUMN_THETA_Y,
         "imk_theta_p_pos": sp.IMK_THETA_P_POS,

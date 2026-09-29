@@ -143,8 +143,10 @@ variant of the topology above (two coincident cores per elevated joint, no finit
 keep their centreline lengths, loads and masses), IMKPinching in directions 4 and 5, calibrated
 per joint from ACI 318-19 Table 18.8.4.3 strength (the design record's saved category) and
 ASCE/SEI 41-17 Table 10-11 deformation, with `Mn = Vn h_b`, `K = G Aj h_b`, no cyclic
-deterioration and kappaF = kappaD = 0.25. The deformation scope is `joint_shear_and_slip`: the
-member hinges drop Haselton's bond-slip term (`IMK_Calibration.bond_slip_indicator`). Items 1
+deterioration and kappaF = kappaD = 0.25. The deformation scope is `joint_shear_only` (the
+2026-09-27 daytime value `joint_shear_and_slip`, which dropped Haselton's bond-slip term from every
+member hinge, was retired the same evening: bar slip is owned per member end in
+`Model/Deformation_Ownership`, and the isolated slip diagnostic is `Model/JOINT_SLIP_SUBASSEMBLY.md`). Items 1
 and 2 of the list above are therefore answered by declared, provisional choices (transcribed
 table rows, a representative pinching level, slip attributed to the joint), not by experimental
 calibration (the ASCE 41 rows were verified on 2026-09-27 against Table 6-9 of the Elwood et al.

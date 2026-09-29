@@ -225,6 +225,11 @@ def build_model():
     # misreport what the current model actually contains.
     reset_hinge_registry()
     reset_joint_registry()
+    # The slip-interface registry is scoped to this domain: a registration left from a previous build
+    # would otherwise take bar slip away from a member hinge here while this build installs no
+    # replacement interface (Codex Unit 1 review, 2026-09-28, commit blocker 1).
+    from Model.Deformation_Ownership import begin_domain, validate_installed
+    begin_domain("Build_Model.build_model")
 
     create_nodes()
     fix_base_nodes()
@@ -232,5 +237,6 @@ def build_model():
     # Joint springs (beam cores) must exist before the beams that frame into them.
     install_joint_springs(node_tag)
     create_elements()
+    validate_installed(expect_none=True)      # this builder installs no face slip interfaces
     create_rigid_diaphragms()
     assign_nodal_masses()
