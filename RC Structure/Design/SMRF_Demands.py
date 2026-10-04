@@ -34,12 +34,16 @@ from datetime import date
 from collections.abc import Mapping
 
 from Design.SMRF_Common import assertion_provenance_valid, make_check, not_evaluated, summarize_checks
+# The risk tables have one home (Structure_Parameters); only the tables are read here, never the module state.
+from Structure_Parameters import (SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY as IMPORTANCE_FACTOR_BY_RISK_CATEGORY,
+                                  ALLOWABLE_STORY_DRIFT_RATIO_BY_RISK_CATEGORY, ASCE_SITE_CLASSES)
 
 
 CODE_EDITION = "ASCE 7-22"
 SUPPORTED_EDITIONS = ("ASCE 7-22", "ASCE 7-16")
-# Strength combinations carry rho = 1.3 without claiming the 12.3.4.2 (a)/(b)
-# demonstrations; drift forces use rho = 1.0 (12.3.4.1).
+# Strength combinations carry rho = 1.3 without claiming either condition of
+# 12.3.4.2 (conditions 1 and 2, with (a) to (c) inside condition 1 in the 2022
+# text); drift forces use rho = 1.0 (12.3.4.1).
 REDUNDANCY_FACTOR_STRENGTH = 1.3
 TIR_TYPE_1 = 1.2                  # Table 12.3-1 Type 1 threshold (story-drift ratio, 12.3.2.1.1)
 TIR_FORMER_TYPE_1B = 1.4          # 7-16 extreme (1b) threshold; in 7-22 only the 12.3.4.2.1 trigger, no prohibition
@@ -576,6 +580,8 @@ def strength_distribution_fraction(regularity, geometry=None, families=None):
     if not isinstance(applicability, dict) or applicability.get("status") not in STRENGTH_MODEL_STATUSES:
         return None, (f"the strength model carries no applicability status ({STRENGTH_MODEL_STATUSES}); complete line "
                       f"arithmetic does not establish scientific applicability (review item {STRENGTH_MODEL_REVIEW_ITEM})")
+    if isinstance(block.get("stories"), list):
+        return _story_strength_fraction(block, geometry, fraction)
     uniform = block.get("uniform_over_height")
     if not isinstance(uniform, dict) or uniform.get("claim") is not True or not isinstance(uniform.get("basis"), str) or not uniform["basis"].strip():
         return None, "story coverage is not established: no uniform_over_height claim with a basis"
@@ -633,6 +639,69 @@ def strength_distribution_fraction(regularity, geometry=None, families=None):
     return float(fraction), None
 
 
+def _story_strength_fraction(block, geometry, fraction):
+    """The story-by-story form of the line evidence (a grouped design): (fraction or None, reason).
+
+    A grouped design prices every story on the beams installed there
+    (Design.Grouped_Design.story_strength_distribution), so the block claims
+    no uniformity over height and carries ``stories``: one entry per story,
+    each with ``by_direction`` x and y listing every frame line at its grid
+    position with its story strength. Recomputed here: the story roster, the
+    line roster and positions against ``geometry``, each direction's story
+    strength and one-sided fraction, and the overall maximum. The line
+    strengths themselves are recomputed from the installed members and
+    compared by the grouped qualification (Design.Grouped_Record), which is
+    the only caller that can resolve them.
+    """
+    uniform = block.get("uniform_over_height")
+    if (not isinstance(uniform, dict) or uniform.get("claim") is not False
+            or not isinstance(uniform.get("basis"), str) or not uniform["basis"].strip()):
+        return None, "story-by-story line evidence must state that it claims no uniformity over height, with a basis"
+    if geometry is None:
+        return None, "the geometry needed to check the line roster is unknown"
+    try:
+        stories, num_floor = block["stories"], int(geometry["num_floor"])
+        if [entry.get("story") if isinstance(entry, dict) else None for entry in stories] != list(range(1, num_floor + 1)):
+            return None, f"the story roster does not list stories 1..{num_floor} in order"
+        recomputed = []
+        for entry in stories:
+            by_direction = entry.get("by_direction")
+            if not isinstance(by_direction, dict) or set(by_direction) != {"x", "y"}:
+                return None, f"story {entry['story']}: line evidence must cover exactly directions x and y"
+            for direction in ("x", "y"):
+                item = by_direction[direction]
+                if not isinstance(item, dict):
+                    return None, f"story {entry['story']} direction {direction}: line evidence is not a record"
+                if direction == "x":
+                    lines, spacing = int(geometry["num_bay_y"]) + 1, float(geometry["bay_y_in"])
+                else:
+                    lines, spacing = int(geometry["num_bay_x"]) + 1, float(geometry["bay_x_in"])
+                positions = [j * spacing for j in range(lines)]
+                saved_positions = item.get("line_positions_in") or []
+                strengths = item.get("line_story_strength_kip") or []
+                where = f"story {entry['story']} direction {direction}"
+                if len(saved_positions) != lines or len(strengths) != lines:
+                    return None, f"{where}: {len(saved_positions)} lines recorded, the geometry has {lines} frame lines"
+                if any(not _finite_close(a, b) for a, b in zip(saved_positions, positions)):
+                    return None, f"{where}: recorded line positions {saved_positions} != grid positions {positions}"
+                strengths = [_number(value, "line_story_strength_kip", minimum=0.0) for value in strengths]
+                if not _finite_close(item.get("story_strength_kip"), sum(strengths)):
+                    return None, f"{where}: story strength {item.get('story_strength_kip')!r} is not the sum of its lines"
+                if not _finite_close(item.get("center"), 0.5 * positions[-1]):
+                    return None, f"{where}: center {item.get('center')!r} is not the plan center {0.5 * positions[-1]}"
+                value, detail = one_sided_strength_fraction(positions, strengths, 0.5 * positions[-1])
+                if not _finite_close(item.get("one_side_fraction"), value):
+                    return None, f"{where}: stored fraction {item.get('one_side_fraction')!r} != recomputed {value}"
+                if item.get("lines_at_center") != detail["lines_at_center"]:
+                    return None, f"{where}: lines_at_center {item.get('lines_at_center')!r} != {detail['lines_at_center']}"
+                recomputed.append(value)
+    except (ValueError, TypeError, KeyError) as exc:
+        return None, f"line evidence invalid ({type(exc).__name__}: {exc})"
+    if not _finite_close(fraction, max(recomputed)):
+        return None, f"overall fraction {fraction} != the largest story and direction value {max(recomputed)}"
+    return float(fraction), None
+
+
 def redundancy_requirement(sdc, conditions_12_3_4_2_verified=False):
     """rho required by ASCE 7-22 12.3.4 for the strength combinations.
 
@@ -641,12 +710,13 @@ def redundancy_requirement(sdc, conditions_12_3_4_2_verified=False):
     SDC D, E and F unless (a) or (b) is demonstrated. Those demonstrations
     are not made for the archetype, so 1.3 is the requirement there;
     carrying 1.3 in every strength combination satisfies both cases
-    conservatively. 12.3.4.2.1 (Type 1 with TIR > 1.4, SDC D-F) was not
-    available in full text for this review and is flagged, not applied.
+    conservatively. 12.3.4.2.1 sets rho = 1.3 for the whole structure in both
+    directions where a Type 1 irregularity has TIR > 1.4 in both directions
+    (SDC D-F); 1.3 is carried in every case there, so it is met without a branch.
     """
     if sdc in ("D", "E", "F"):
         required = 1.0 if conditions_12_3_4_2_verified else REDUNDANCY_FACTOR_STRENGTH
-        basis = "ASCE 7-22 12.3.4.2: rho = 1.3 for SDC D-F unless condition (a) or (b) is demonstrated"
+        basis = "ASCE 7-22 12.3.4.2: rho = 1.3 for SDC D-F unless condition 1 or condition 2 is demonstrated"
     else:
         required = 1.0
         basis = "ASCE 7-22 12.3.4.1: rho = 1.0 for SDC B and C"
@@ -665,7 +735,8 @@ def _redundancy_factor_used(record, basis):
     return max(finite) if finite else None
 
 
-SITE_CLASSES = ("A", "B", "BC", "C", "CD", "D", "DE", "E", "F")
+SITE_CLASSES = ASCE_SITE_CLASSES              # ASCE 7-22 11.4.2, Table 20.2-1 (one source: Structure_Parameters)
+SITE_RESPONSE_ANALYSIS_CLASSES = ("F",)       # 11.4.7: site response analysis for Site Class F only (20.3.1 exemption aside)
 RISK_CATEGORIES = ("I", "II", "III", "IV")
 
 
@@ -721,6 +792,48 @@ def demand_policy_problems(policy):
     return problems
 
 
+def risk_basis_check(policy, seismic, drift, identity_inputs=None):
+    """demands.risk_basis: the saved category, importance factor and drift criterion agree with each
+    other and with ASCE 7-22 Tables 1.5-2 and 12.12-1. Reads the record only; no module state."""
+    clause = "ASCE 7-22 Table 1.5-2; Table 12.12-1; 12.12.1.1"
+    category, ie = seismic.get("risk_category"), seismic.get("importance_factor")
+    if category is None or ie is None:
+        return not_evaluated("demands.risk_basis", clause,
+                             "The record's seismic block carries no risk category and importance factor (designed before "
+                             "the explicit risk basis). Redesign it under the current schema; do not relabel it.")
+    problems = []
+    if policy.get("risk_category") != category:
+        problems.append(f"DemandPolicy declares {policy.get('risk_category')!r}, the design was made for {category!r}")
+    base = drift.get("base_drift_limit_ratio")
+    try:
+        table = story_drift_basis(category, ie, base)
+    except (ValueError, TypeError) as exc:
+        table = None
+        problems.append(str(exc))
+    if base is None:
+        problems.append("the drift assumptions carry no base drift limit")
+    if drift.get("risk_category") not in (None, category):
+        problems.append(f"the drift screen was evaluated for {drift.get('risk_category')!r}")
+    if drift.get("importance_factor") is not None and abs(float(drift["importance_factor"]) - float(ie)) > 1e-12:
+        problems.append(f"the drift screen used Ie = {drift['importance_factor']}")
+    if drift.get("low_rise_allowance_asserted"):
+        problems.append("the low-rise drift allowance is asserted; its conditions are not verified in this scope")
+    recorded = (identity_inputs or {}).get("ASCE_IE")
+    if recorded is not None and abs(float(recorded) - float(ie)) > 1e-12:
+        problems.append(f"the request identity carries ASCE_IE = {recorded}")
+    if (identity_inputs or {}).get("ASCE_RISK_CATEGORY") not in (None, category):
+        problems.append(f"the request identity carries risk category {identity_inputs.get('ASCE_RISK_CATEGORY')!r}")
+    return make_check("demands.risk_basis", clause, int(not problems), 1, "==",
+                      details={"risk_category": category, "importance_factor": ie,
+                               "table_importance_factor": IMPORTANCE_FACTOR_BY_RISK_CATEGORY.get(category),
+                               "base_drift_limit_ratio": base, "table_drift_limit_ratio": (table or {}).get("table_limit"),
+                               "effective_drift_limit_ratio": drift.get("effective_drift_limit_ratio"),
+                               "low_rise_allowance_asserted": bool(drift.get("low_rise_allowance_asserted")),
+                               "problems": problems,
+                               "basis": "category, Ie and the Table 12.12-1 row are one set; the limit is divided by rho for "
+                                        "moment frames in SDC D-F; the low-rise allowance is not asserted"})
+
+
 def evaluate_demand_basis(record, strength_families=None):
     """Evaluate the demand-scope items from the saved policy, loads and results.
 
@@ -757,15 +870,23 @@ def evaluate_demand_basis(record, strength_families=None):
         checks.append(declaration_missing("site_hazard", "ASCE 7-22 Chapters 11 and 21",
                                           "Site class and risk category are declarations"))
     else:
-        # ``declared`` guarantees the canonical spelling; no normalisation here.
-        site_specific = policy["site_class"] in ("D", "E", "F") and seismic["s1"] >= 0.2
-        checks.append(make_check("demands.site_hazard", "ASCE 7-22 11.4.8, 11.6, Tables 11.6-1/11.6-2",
+        # ``declared`` guarantees the canonical spelling; no normalisation here. ASCE 7-22 requires a site
+        # response analysis for Site Class F only (11.4.7); the 7-16 rule for Site Class D, E or F with
+        # S1 >= 0.2 (its 11.4.8) is not in this edition, whose geodatabase spectra carry the site effect.
+        site_specific = policy["site_class"] in SITE_RESPONSE_ANALYSIS_CLASSES
+        checks.append(make_check("demands.site_hazard", "ASCE 7-22 11.4.2, 11.4.7, 11.6, Tables 11.6-1/11.6-2, Table 20.2-1",
                                  int(label_sdc == sdc and not site_specific), 1, "==",
                                  details={"derived_sdc": sdc, "site_label": label, "label_sdc": label_sdc,
                                           "site_class": policy.get("site_class"), "risk_category": policy.get("risk_category"),
                                           "site_specific_ground_motion_required": site_specific,
-                                          "basis": "SDS/SD1/S1 are declared design values; 11.4.8 site-specific analysis "
-                                                   "is required for Site Class D/E/F with S1 >= 0.2 unless its exceptions apply"}))
+                                          "basis": "SDS/SD1/S1 are declared design values for the declared site class; ASCE 7-22 "
+                                                   "11.4.7 requires a site response analysis for Site Class F only (20.3.1 "
+                                                   "exemption aside); the edition has no 11.4.8 and no S1 rule for Site Class D or E"}))
+    # Risk basis (2026-10-01): the category, Ie and the drift criterion saved with the design must be
+    # one consistent set. A record without them predates the explicit basis: it cannot be shown to
+    # be a design of its declared category, and it is redesigned, never relabelled.
+    checks.append(risk_basis_check(policy, seismic, basis.get("drift") or {},
+                                   ((record.get("request_identity") or {}).get("inputs") or {})))
     # Analysis procedure permission (edition-explicit). The torsional
     # classification and its consequences are separate items below: 7-22
     # 12.6 permits ELF for any structure, so an irregularity no longer
@@ -781,6 +902,12 @@ def evaluate_demand_basis(record, strength_families=None):
     policy_ratio = policy.get("accidental_torsion_ratio") if declared else None
     assessment = validate_torsion_assessment(torsion, geometry.get("num_floor"), policy_ratio)
     families = strength_families
+    # A grouped design carries story-by-story line evidence, which needs no beam families (its line
+    # strengths are recomputed from the installed members by Design.Grouped_Record).
+    strength_block = regularity.get("lateral_strength_distribution")
+    story_form = isinstance(strength_block, dict) and isinstance(strength_block.get("stories"), list)
+    if story_form:
+        families = {}
     if families is None:
         try:
             from Design.SMRF_Beam_Slab_Strength import beam_slab_strengths
@@ -790,6 +917,8 @@ def evaluate_demand_basis(record, strength_families=None):
             family_problem = f"beam families cannot be rebuilt from the record ({type(exc).__name__}: {exc})"
     if families is None:
         strength_fraction, strength_problem = None, family_problem
+    elif story_form:
+        strength_fraction, strength_problem = strength_distribution_fraction(regularity, geometry)
     else:
         strength_fraction, strength_problem = strength_distribution_fraction(regularity, geometry, families)
     # Scientific applicability of the story-strength model (review item M1):
@@ -936,10 +1065,11 @@ def evaluate_demand_basis(record, strength_families=None):
                                  details={**requirement, "sdc": sdc, "rho_strength_combinations": rho_used,
                                           "rho_drift_forces": 1.0,
                                           "tir_exceeds_1_4": classification["tir_exceeds_1_4"] if classification else None,
-                                          "note_12_3_4_2_1": ("12.3.4.2.1 (Type 1 with TIR > 1.4, SDC D-F) is not applied; its text "
-                                                              "was not available to this review and such designs fail the project "
+                                          "note_12_3_4_2_1": ("12.3.4.2.1 requires rho = 1.3 in both directions where TIR > 1.4 "
+                                                              "in both directions (SDC D-F); rho = 1.3 is carried in every "
+                                                              "strength combination there, and such designs fail the project "
                                                               "TIR ceiling above"),
-                                          "basis": "rho = 1.3 in every seismic strength combination without claiming 12.3.4.2 (a)/(b); "
+                                          "basis": "rho = 1.3 in every seismic strength combination without claiming 12.3.4.2 condition 1 or 2; "
                                                    "drift forces at rho = 1.0 (12.3.4.1) with the D-F drift limit divided by rho"}))
     # Load scope.
     if not declared:
@@ -1001,12 +1131,34 @@ def demand_scope_checks():
     return evaluate_demand_basis({})
 
 
+def story_drift_basis(risk_category, importance_factor, drift_limit_ratio=None):
+    """Category, Ie and the Table 12.12-1 base limit as one consistent set; a contradiction raises.
+
+    The importance factor must be the one Table 1.5-2 gives for the category, and an explicit
+    limit may be stricter than the category's row but never more permissive (no low-rise
+    allowance in this scope). Pure: the tables are read, no module state is consulted.
+    """
+    if not isinstance(risk_category, str) or risk_category not in RISK_CATEGORIES:
+        raise ValueError(f"risk_category {risk_category!r} is not exactly one of {RISK_CATEGORIES}.")
+    ie = _number(importance_factor, "importance_factor", positive=True)
+    table_ie = IMPORTANCE_FACTOR_BY_RISK_CATEGORY[risk_category]
+    if abs(ie - table_ie) > 1e-12:
+        raise ValueError(f"importance_factor {ie:g} contradicts Risk Category {risk_category} "
+                         f"(Ie = {table_ie:g}, ASCE 7-22 Table 1.5-2); category and factor come from one basis.")
+    base = ALLOWABLE_STORY_DRIFT_RATIO_BY_RISK_CATEGORY[risk_category]
+    limit = base if drift_limit_ratio is None else _number(drift_limit_ratio, "drift_limit_ratio", positive=True)
+    if limit > base + 1e-15:
+        raise ValueError(f"drift_limit_ratio {limit:g} exceeds the Risk Category {risk_category} allowable {base:g} "
+                         "(ASCE 7-22 Table 12.12-1, all other structures; the low-rise allowance is not asserted).")
+    return {"risk_category": risk_category, "importance_factor": table_ie, "table_limit": base, "limit": limit}
+
+
 def evaluate_drift_and_stability(stories, cd=5.5, importance_factor=1.0,
-                                 drift_limit_ratio=0.02, redundancy_factor=1.3,
+                                 drift_limit_ratio=None, redundancy_factor=1.3,
                                  seismic_design_category="D", beta=1.0,
                                  overstrength_factor=3.0,
                                  second_order_included=False,
-                                 analysis_succeeded=True):
+                                 analysis_succeeded=True, risk_category="II"):
     """Evaluate node-envelope drift and story stability from elastic results.
 
     Each story has ``id``, ``height_in``, ``node_deltas_in`` mapping grid IDs to
@@ -1017,8 +1169,15 @@ def evaluate_drift_and_stability(stories, cd=5.5, importance_factor=1.0,
     defaults to ('x', 'y'). Input deltas come from QEx/QEy drift analyses with
     rho=1, not factored strength combinations or nonlinear time histories.
 
-    Cd/Ie amplifies elastic drift. Risk-II 0.02h is the base limit (no low-rise
-    allowance); solely moment-frame SDC D/E/F limits are divided by rho.
+    Cd/Ie amplifies elastic drift. The base limit is the Table 12.12-1 "all
+    other structures" row of ``risk_category`` (0.020h for I and II, 0.015h for
+    III, 0.010h for IV; no low-rise allowance); solely moment-frame SDC D/E/F
+    limits are divided by rho (12.12.1.1). ``importance_factor`` must be the
+    Table 1.5-2 value of that category and an explicit ``drift_limit_ratio``
+    may only be stricter than the row: a contradictory set raises
+    (story_drift_basis) instead of evaluating against a stale default. The
+    defaults are the self-consistent Risk II set; the design driver passes the
+    configured basis explicitly.
     theta=P*delta_elastic/(V*h); 7-22 permits theta_max at least 0.10. The
     optional theta/(1+theta) correction applies only to analysis that already
     includes P-Delta. A first-order theta>0.10 requires a subsequent design
@@ -1026,10 +1185,8 @@ def evaluate_drift_and_stability(stories, cd=5.5, importance_factor=1.0,
     applied to an unrelated member-demand envelope.
     """
     cd = _number(cd, "cd", positive=True)
-    ie = _number(importance_factor, "importance_factor", positive=True)
-    limit = _number(drift_limit_ratio, "drift_limit_ratio", positive=True)
-    if limit > 0.02:
-        raise ValueError("This Risk-II research scope does not use drift allowances above 0.02.")
+    drift_basis = story_drift_basis(risk_category, importance_factor, drift_limit_ratio)
+    ie, limit, base_limit = drift_basis["importance_factor"], drift_basis["limit"], drift_basis["limit"]
     rho = _number(redundancy_factor, "redundancy_factor", minimum=1)
     beta = _number(beta, "beta", positive=True)
     omega = _number(overstrength_factor, "overstrength_factor", positive=True)
@@ -1112,8 +1269,14 @@ def evaluate_drift_and_stability(stories, cd=5.5, importance_factor=1.0,
                 checks.append(not_evaluated("demands.stability", "ASCE 7-22 12.8.7", str(exc), loc))
             rows.append(row)
     return {"checks": checks, "stories": rows,
-            "assumptions": {"risk_category": "II", "system": "solely_moment_frames",
+            "assumptions": {"risk_category": drift_basis["risk_category"], "system": "solely_moment_frames",
                             "sdc": sdc, "rho": rho, "cd": cd, "importance_factor": ie,
+                            "base_drift_limit_ratio": base_limit,
+                            "table_drift_limit_ratio": drift_basis["table_limit"],
+                            "limit_divided_by_rho": sdc in ("D", "E", "F"),
+                            "effective_drift_limit_ratio": limit,
+                            "low_rise_allowance_asserted": False,
+                            "drift_limit_source": "ASCE 7-22 Table 12.12-1 (all other structures); 12.12.1.1",
                             "drift_load_rho": 1.0, "theta_max_lower_bound": 0.10,
                             "not_complete_code_acceptance": True},
             **summarize_checks(checks)}

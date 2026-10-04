@@ -3,6 +3,7 @@ import math
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
+from Model import Member_Groups as mg
 from Model.IMK_Calibration import (
     bond_slip_indicator,
     backbone_for_member,
@@ -13,8 +14,8 @@ from Model.IMK_Calibration import (
     column_pm_nominal,
 )
 from Model.IMK_Materials import (
-    MAPPING_VERSION, CyclicParameters, RotationalBackbone, active_energy_modes, define_rotational_imk,
-    define_mapped_rotational_imk, validate_energy_calibration,
+    MAPPING_VERSION, PROVISIONAL_ANCHOR_VERSION, CyclicParameters, RotationalBackbone, active_energy_modes,
+    define_rotational_imk, define_anchored_rotational_imk, define_mapped_rotational_imk, validate_energy_calibration,
 )
 
 
@@ -221,6 +222,55 @@ def _member_properties(member_type, axial_kip=0.0, family=None):
     }
 
 
+def _resolved_member_properties(member, axial_kip=0.0):
+    """The same properties for one resolved member of a grouped design: its own section, concrete,
+    cage and, for a beam, the T/L flange of its line from its actual end columns and neighbouring webs.
+
+    Returns (props, strength_basis); the beam's two signs and two ends are already in ``props``.
+    """
+    from Model import Member_Properties as mp
+    design = member.design
+    section = mp.elastic_section(member)
+    modifier = section["stiffness_modifier"]
+    props = {"area": section["area"], "e": section["e"], "g": section["g"], "j": modifier * section["j"],
+             "iy": modifier * section["iy"], "iz": modifier * section["iz"], "stiffness_modifier": modifier,
+             "group_id": member.group_id}
+    if member.is_column:
+        if getattr(sp, "IMK_USE_CALIBRATED_BACKBONE", True):
+            diagram = mp.column_pm_diagram(design)
+            low, high = column_axial_domain(diagram)
+            if not low <= axial_kip <= high:
+                raise ValueError(f"Column {member.member_tag} ({member.group_id}): gravity axial estimate {axial_kip:.1f} kip "
+                                 f"is outside the nominal P-M surface [{low:.1f}, {high:.1f}] kip (0.80 P0 cap, ACI 318-19 "
+                                 "22.4.2.1); the section cannot carry it and the hinge cannot be calibrated.")
+            my = mz = column_moment_at_axial(axial_kip, diagram)
+        else:
+            my, mz = mp.rc_nominal_moment_kip_in(design, "y"), mp.rc_nominal_moment_kip_in(design, "z")
+        props.update(my=my, mz=mz, theta_y=sp.IMK_COLUMN_THETA_Y)
+        return props, None
+    flexural = section["flexural_section"]
+    strengths = mp.beam_strengths(member)
+    basis = {**strengths["basis"], "bar_rows": strengths.get("bar_rows")}
+    hogging, sagging = strengths["hogging"], strengths["sagging"]
+    props.update(iy_basis=flexural["basis"], flange_width_in=flexural["flange_width_in"],
+                 family=f"{mp.beam_axis(member)}_{member.location_class}",
+                 mz=mp.rc_nominal_moment_kip_in(design, "z"), theta_y=sp.IMK_BEAM_THETA_Y,
+                 my_hogging=hogging, my_sagging=sagging, my=max(hogging, sagging),
+                 my_hogging_i=basis.get("hogging_i_kip_in", hogging), my_hogging_j=basis.get("hogging_j_kip_in", hogging),
+                 my_sagging_i=basis.get("sagging_i_kip_in", sagging), my_sagging_j=basis.get("sagging_j_kip_in", sagging))
+    return props, basis
+
+
+def _resolved_frame_member(ele_tag, member_type, joint_i, joint_j):
+    """The grouped design's member for a physical frame element; a tag that is not that member is refused."""
+    member = mg.resolve(ele_tag)
+    if (member.member_type, member.node_i, member.node_j) != (member_type, int(joint_i), int(joint_j)):
+        raise mg.GroupedStateError(
+            f"Element {ele_tag} is being built as a {member_type} between joints {joint_i} and {joint_j}, but the grouped "
+            f"design holds a {member.member_type} between {member.node_i} and {member.node_j} under that tag.")
+    return member
+
+
 def imk_member_properties(member_type):
     return _member_properties(member_type).copy()
 
@@ -341,7 +391,7 @@ def _orientation(member_type):
 def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone=None,
                               yield_moment_negative=None, *, energy_calibration=None,
                               reverse_physical=False, physical_directions=("section_positive", "section_negative"),
-                              verification_only=False, spring_context=None):
+                              verification_only=False, spring_context=None, anchored=False):
     """Install a member material with its explicit, modern OpenSees signature.
 
     The historical function name is retained for callers. Only Bilin and
@@ -425,6 +475,10 @@ def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone
         return define_mapped_rotational_imk(*args, calibration=energy_calibration,
             reverse=reverse_physical, physical_directions=physical_directions,
             provenance=provenance, verification_only=verification_only)
+    if anchored:
+        # The strengths passed are the PHYSICAL branches; the adapter places them on the input coordinates.
+        return define_anchored_rotational_imk(*args, reverse=reverse_physical,
+            physical_directions=physical_directions, provenance=provenance)
     provenance["energy_mapping_status"] = "legacy_unmapped"
     return define_rotational_imk(*args, provenance=provenance)
 
@@ -435,7 +489,7 @@ def _create_hinge_node(source_node, hinge_node):
 
 def _create_end_hinge(
     ele_tag, end_id, retained_node, hinge_node, member_type, props, length, backbone=None,
-    *, energy_profiles=None, reverse_physical=False, verification_only=False
+    *, energy_profiles=None, reverse_physical=False, verification_only=False, anchored=False
 ):
     orient, tied_dofs = _orientation(member_type)
     ops.equalDOF(retained_node, hinge_node, *tied_dofs)
@@ -466,12 +520,18 @@ def _create_end_hinge(
         positive, negative = hogging, sagging
     else:
         positive, negative = sagging, hogging
-    if energy_profiles is None:
+    directions_y = (("hogging", "sagging") if member_type.startswith("beam")
+                    else ("section_positive_y", "section_negative_y"))
+    if energy_profiles is None and anchored:
+        material_y = _define_imk_peak_material(mat_y, ke_y, hogging, backbone, sagging, anchored=True,
+            reverse_physical=reverse_physical, physical_directions=directions_y, spring_context=contexts[0])
+        material_z = _define_imk_peak_material(mat_z, ke_z, props["mz"], backbone, anchored=True,
+            reverse_physical=reverse_physical, physical_directions=("section_positive_z", "section_negative_z"),
+            spring_context=contexts[1])
+    elif energy_profiles is None:
         material_y = _define_imk_peak_material(mat_y, ke_y, positive, backbone, negative, spring_context=contexts[0])
         material_z = _define_imk_peak_material(mat_z, ke_z, props["mz"], backbone, spring_context=contexts[1])
     else:
-        directions_y = (("hogging", "sagging") if member_type.startswith("beam")
-                        else ("section_positive_y", "section_negative_y"))
         material_y = _define_imk_peak_material(mat_y, ke_y, hogging, backbone, sagging,
             energy_calibration=energy_profiles["y"], reverse_physical=reverse_physical,
             physical_directions=directions_y, verification_only=verification_only, spring_context=contexts[0])
@@ -503,8 +563,8 @@ def _member_energy_profiles(ele_tag, verification_profiles=None):
         if mode != MAPPING_VERSION:
             raise ValueError("Synthetic member fixtures require explicit corrected mapping mode")
         profiles = verification_profiles
-    elif mode == "legacy_unmapped":
-        return None
+    elif mode in ("legacy_unmapped", PROVISIONAL_ANCHOR_VERSION):
+        return None                      # neither reads a supplied profile; the anchor is derived per spring
     elif mode == MAPPING_VERSION:
         profiles = sp.IMK_MEMBER_ENERGY_CALIBRATIONS.get(str(ele_tag))
     else:
@@ -542,20 +602,33 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
     # Validate all four profiles before mutating the OpenSees domain. Normal
     # builders never pass the private synthetic-fixture argument.
     energy_profiles = _member_energy_profiles(ele_tag, _verification_calibrations)
+    anchored = (energy_profiles is None
+                and getattr(sp, "IMK_ENERGY_MAPPING_MODE", "legacy_unmapped") == PROVISIONAL_ANCHOR_VERSION)
     reverse_connectivity = (_canonical_member_reversed(n_i, n_j, member_type)
-                            if energy_profiles is not None else False)
+                            if energy_profiles is not None or anchored else False)
     # A column's backbone depends on how hard it is being squeezed, so the
     # gravity axial load is estimated from tributary area before its hinge
     # properties are fixed. Beams carry no meaningful axial force.
     axial_kip = 0.0
-    if member_type == "column":
+    # Under a grouped design the member is resolved from its tag (integer grid position, group and
+    # that group's design); nothing is read from coordinates or from a one-section global.
+    member = _resolved_frame_member(ele_tag, member_type, joint_i, joint_j) if mg.is_grouped() else None
+    design = None if member is None else member.design
+    if member is not None:
+        if reverse_connectivity:
+            raise mg.GroupedStateError(f"Member {ele_tag} is connected against its canonical direction.")
+        if member.is_column:
+            axial_kip = column_gravity_axial(member.story_or_floor, member.grid_i, member.grid_j)
+        props, strength_basis = _resolved_member_properties(member, axial_kip)
+    elif member_type == "column":
         story_index, grid_i, grid_j = column_grid_position(joint_j if reverse_connectivity else joint_i)
         axial_kip = column_gravity_axial(story_index, grid_i, grid_j)
 
-    family = beam_line_family(member_type, joint_i) if member_type in ("beam_x", "beam_y") else None
-    props = _member_properties(member_type, axial_kip=axial_kip, family=family)
-    strength_basis = None
-    if member_type in ("beam_x", "beam_y"):
+    if member is None:
+        family = beam_line_family(member_type, joint_i) if member_type in ("beam_x", "beam_y") else None
+        props = _member_properties(member_type, axial_kip=axial_kip, family=family)
+        strength_basis = None
+    if member is None and member_type in ("beam_x", "beam_y"):
         hogging, sagging, strength_basis = beam_yield_moments(member_type, joint_i, joint_j)
         props.update(my_hogging=hogging, my_sagging=sagging, my=max(hogging, sagging),
                      my_hogging_i=strength_basis.get("hogging_i_kip_in", hogging),
@@ -567,7 +640,8 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
     # calibrated separately even though they share the axial load.
     from Model.Deformation_Ownership import member_end, ownership
     ends = {"i": member_end(ele_tag, member_type, "i", joint_i), "j": member_end(ele_tag, member_type, "j", joint_j)}
-    backbones = {end: backbone_for_member(member_type, axial_kip=axial_kip, end=ends[end], member_scope=_member_scope)
+    backbones = {end: backbone_for_member(member_type, axial_kip=axial_kip, end=ends[end], member_scope=_member_scope,
+                                          design=design)
                  for end in ("i", "j")}
     backbone = backbones["i"]
     length = _member_length(n_i, n_j)
@@ -578,10 +652,12 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
     _create_hinge_node(n_j, j_hinge_node)
     materials_i = _create_end_hinge(ele_tag, 1, n_i, i_hinge_node, member_type, props, length, backbones["i"],
         energy_profiles=None if energy_profiles is None else energy_profiles["i"],
-        reverse_physical=reverse_connectivity, verification_only=_verification_calibrations is not None)
+        reverse_physical=reverse_connectivity, verification_only=_verification_calibrations is not None,
+        anchored=anchored)
     materials_j = _create_end_hinge(ele_tag, 2, n_j, j_hinge_node, member_type, props, length, backbones["j"],
         energy_profiles=None if energy_profiles is None else energy_profiles["j"],
-        reverse_physical=not reverse_connectivity, verification_only=_verification_calibrations is not None)
+        reverse_physical=not reverse_connectivity, verification_only=_verification_calibrations is not None,
+        anchored=anchored)
 
     ke_y = imk_hinge_stiffness(member_type, "rot_y", length, props=props)
     ke_z = imk_hinge_stiffness(member_type, "rot_z", length, props=props)
@@ -657,6 +733,13 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
         "ends_differ": any(backbones["i"].get(k) != backbones["j"].get(k) for k in ("theta_p", "theta_pc", "theta_u")),
         "deformation_ownership": {end: ownership(ends[end], member_scope=_member_scope) for end in ("i", "j")},
     }
+    if member is not None:
+        # What this member was built from, for the installed-design audit and the exports.
+        _HINGE_REGISTRY[int(ele_tag)].update(
+            group_id=member.group_id, band=member.band, location_class=member.location_class,
+            story_or_floor=member.story_or_floor, grid_i=member.grid_i, grid_j=member.grid_j,
+            installed_design=mg.design_record(design),
+            beam_bar_rows=(strength_basis or {}).get("bar_rows"))
 
     inertia_factor = imk_elastic_inertia_factor()
     ops.element(

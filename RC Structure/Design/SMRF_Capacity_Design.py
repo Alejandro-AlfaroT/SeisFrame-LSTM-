@@ -30,7 +30,17 @@ selected transverse steel. Everything here is ACI 318-19 Chapter 18:
     probable moment over an axial range is the exact section solution at
     the maximizing load, located on the curve's vertices rather than on a
     sparse sample (probable_moment_over_axial_range).
-  Both values are recorded for every story and direction whatever the
+  - ``beam_delivery_analysis_split_v4`` (2026-10-04, pre-generation
+    review): each column end takes the smaller of its own probable moment
+    and the beams' probable delivery at that joint times the share of the
+    joint moment that end carries in the analysis (the largest share over
+    the combinations and columns whose joint moment is significant); the
+    base end takes the column's own probable moment and the roof end the
+    whole delivery. Never below the analysis shear in that direction. It
+    replaces the equal split of the joint-limited method, which is not an
+    equilibrium statement (R18.7.6.1.1 asks for the distribution from
+    analysis).
+  Every value is recorded for every story and direction whatever the
   method; the method only selects Ve. Vc per 18.7.6.2.1 / 22.5.5.1, hoops
   from Vs, the 18.7.5.4 confinement area and the 18.7.5.3 spacing limits
   (so from hx with every face bar tied).
@@ -56,7 +66,7 @@ import math
 import numpy as np
 
 from Design.SMRF_Beam_Slab_Strength import composite_beam_strengths
-from Design.SMRF_Common import make_check, not_evaluated
+from Design.SMRF_Common import SectionAxialDomainError, make_check, not_evaluated
 from Design.SMRF_Joints import (MPR_BASIS, beam_capacity_shear_envelope, rectangular_joint_area)
 
 METHOD_VERSION = "aci318_19_capacity_design_v2_table_18_8_4_3_inputs"
@@ -87,7 +97,13 @@ CONFINING_BEAM_MIN_STIRRUP = 3      # 15.2.8(c): No. 3 or larger stirrups
 # name and is read as the joint-limited method it was produced with.
 COLUMN_SHEAR_METHOD_JOINT_LIMITED = "beam_joint_delivery_limited_v2"
 COLUMN_SHEAR_METHOD_COLUMN_OWN = "column_own_probable_envelope_v3"
-COLUMN_SHEAR_METHODS = (COLUMN_SHEAR_METHOD_JOINT_LIMITED, COLUMN_SHEAR_METHOD_COLUMN_OWN)
+COLUMN_SHEAR_METHOD_ANALYSIS_SPLIT = "beam_delivery_analysis_split_v4"
+COLUMN_SHEAR_METHODS = (COLUMN_SHEAR_METHOD_JOINT_LIMITED, COLUMN_SHEAR_METHOD_COLUMN_OWN,
+                        COLUMN_SHEAR_METHOD_ANALYSIS_SPLIT)
+# Analysis split: a column line and combination counts toward a joint's share only when the two column
+# moments at that joint add to at least this fraction of the largest such sum at that level and direction.
+# Below it the ratio of two small numbers says nothing about how a sway moment divides.
+ANALYSIS_SPLIT_MIN_JOINT_MOMENT_FRACTION = 0.25
 COLUMN_SHEAR_METHOD_DEFAULT = COLUMN_SHEAR_METHOD_JOINT_LIMITED
 # Clear height of the column-own method: every story at the face-to-face
 # height story_h - h_beam (the conservative convention of the engineering
@@ -301,22 +317,42 @@ def design_beam_shear(state, strengths, transfer):
             worst_mechanism = max(worst_mechanism, envelope["mechanism_shear_positive_kip"],
                                   envelope["mechanism_shear_negative_kip"])
         families[key] = entries
+    cover = beam.get("clear_cover_in")
+    if cover is None:
+        raise ValueError("Beam clear cover is required for the hoop arrangement.")
+    result = {"families": families, **select_beam_hoops(bw, d, fc, fy, beam["bar_size"], cover, beam["top_bars"],
+                                                        beam["bot_bars"], worst_ve, worst_mechanism)}
+    selected = result["hoops"]
+    for entries in families.values():
+        for data in entries:
+            data["phi_vn_left_kip"] = selected["phi_vn_kip"] if selected else 0.0
+            data["phi_vn_right_kip"] = selected["phi_vn_kip"] if selected else 0.0
+            data["shear_capacity_requirements_checked"] = bool(selected) and result["section_adequate"]
+            data["hoops"] = selected
+    return result
+
+
+def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bars, worst_ve, worst_mechanism):
+    """Hinge-zone hoops of one beam cage for its governing capacity shear (18.6.4.4, 18.6.5, 22.5.1.2).
+
+    Returns the entries design_beam_shear reports beside its families: ve_kip, mechanism_shear_kip,
+    vc_zero_hinge_zone, vc_kip, vs_required_kip, vs_limit_kip, section_adequate, cage, spacing_bounds_in,
+    hoops and basis. Shared by the uniform design (one beam) and the grouped design (each beam group).
+    """
     # Hinge-zone concrete contribution (18.6.5.2): beams carry no axial load.
     vc_zero = worst_mechanism >= 0.5 * worst_ve
     vc = 0.0 if vc_zero else 2.0 * math.sqrt(fc * 1000.0) * bw * d / 1000.0
     vs_required = max(0.0, worst_ve / PHI_SHEAR - vc)
     vs_limit = 8.0 * math.sqrt(fc * 1000.0) * bw * d / 1000.0
-    db = _BAR[beam["bar_size"]][0]
+    db = _BAR[bar_size][0]
     bounds = {"d_over_4": d / 4.0, "six_db": 6.0 * db, "absolute": 6.0}
     # Hinge-zone hoops must also support the top and bottom bars (18.6.4.4 /
     # 25.7.2.3): the leg count is bounded by what the bars need and can engage.
     from Design.SMRF_Cage_Layout import beam_cage, cage_passes
-    cover = beam.get("clear_cover_in")
-    if cover is None:
-        raise ValueError("Beam clear cover is required for the hoop arrangement.")
+    cover = clear_cover_in
     selected, cage = None, None
     for bar, legs in STIRRUP_LADDER:
-        trial = beam_cage(bw, cover, _BAR[bar][0], db, beam["top_bars"], beam["bot_bars"], legs=legs)
+        trial = beam_cage(bw, cover, _BAR[bar][0], db, top_bars, bot_bars, legs=legs)
         if not cage_passes(trial):
             continue
         av = legs * _BAR[bar][1]
@@ -330,24 +366,17 @@ def design_beam_shear(state, strengths, transfer):
             cage = trial
             break
     if cage is None:
-        first = beam_cage(bw, cover, _BAR[STIRRUP_LADDER[0][0]][0], db, beam["top_bars"], beam["bot_bars"])
+        first = beam_cage(bw, cover, _BAR[STIRRUP_LADDER[0][0]][0], db, top_bars, bot_bars)
         cage = {**first, "legs": None, "constructible": False, "arrangement": None, "hx_in": None,
                 "checks": [{"rule": "18.6.4.4 / 25.7.2.3", "passes": False,
                             "detail": f"no hoop in the ladder is constructible: bars allow {first['legs_max']} legs, "
                                       f"support rules need {first['legs_min']}"}]}
-    result = {"families": families, "ve_kip": worst_ve, "mechanism_shear_kip": worst_mechanism,
-              "vc_zero_hinge_zone": vc_zero, "vc_kip": vc, "vs_required_kip": vs_required,
-              "vs_limit_kip": vs_limit, "section_adequate": vs_required <= vs_limit, "cage": cage,
-              "spacing_bounds_in": bounds, "hoops": selected,
-              "basis": ("Vc = 0 in the hinge zone when the Mpr mechanism shear is at least half of Ve (18.6.5.2); "
-                        "hoops at <= min(d/4, 6db, 6 in) and Av fyt d / Vs; uniform along the member")}
-    for entries in families.values():
-        for data in entries:
-            data["phi_vn_left_kip"] = selected["phi_vn_kip"] if selected else 0.0
-            data["phi_vn_right_kip"] = selected["phi_vn_kip"] if selected else 0.0
-            data["shear_capacity_requirements_checked"] = bool(selected) and result["section_adequate"]
-            data["hoops"] = selected
-    return result
+    return {"ve_kip": worst_ve, "mechanism_shear_kip": worst_mechanism,
+            "vc_zero_hinge_zone": vc_zero, "vc_kip": vc, "vs_required_kip": vs_required,
+            "vs_limit_kip": vs_limit, "section_adequate": vs_required <= vs_limit, "cage": cage,
+            "spacing_bounds_in": bounds, "hoops": selected,
+            "basis": ("Vc = 0 in the hinge zone when the Mpr mechanism shear is at least half of Ve (18.6.5.2); "
+                      "hoops at <= min(d/4, 6db, 6 in) and Av fyt d / Vs; uniform along the member")}
 
 
 def column_probable_pm(state, fy_factor=1.25, n_pts=160):
@@ -406,6 +435,7 @@ def column_action_envelopes(combinations, columns_per_story):
     """
     axial, shear, detail = {}, {}, {}
     used, skipped = 0, []
+    end_moments = {}                    # (story, plan index, axis) -> [(combination, tag, M_i, M_j)]
     for action in combinations or []:
         if action.get("analysis_succeeded") is False:
             skipped.append(action.get("id"))
@@ -443,6 +473,10 @@ def column_action_envelopes(combinations, columns_per_story):
                                                    abs(float(forces[1])), abs(float(forces[2])),
                                                    abs(float(forces[7])), abs(float(forces[8])))
             entry["observations"] += 1
+            for axis in ("x", "y"):
+                index = LOCAL_FORCE_CONVENTION["moment_index"][axis]
+                end_moments.setdefault((story, (int(tag) - 1) % columns_per_story, axis), []).append(
+                    (combination, int(tag), float(forces[index["i"]]), float(forces[index["j"]])))
     if not used:
         raise ValueError("no successful combination actions: the column envelopes cannot be formed")
     for story, entry in detail.items():
@@ -454,8 +488,65 @@ def column_action_envelopes(combinations, columns_per_story):
         entry["axial_max_source"] = ends["i"]["max_source"] if ends["i"]["max_kip"] >= ends["j"]["max_kip"] else ends["j"]["max_source"]
         axial[story] = (low, high)
         shear[story] = entry["shear_any_direction_kip"]
+    _attach_beam_moment_shares(detail, end_moments)
     return {"axial": axial, "shear": shear, "detail": detail, "combinations_used": used,
             "combinations_skipped": skipped, "local_force_convention": LOCAL_FORCE_CONVENTION}
+
+
+def _attach_beam_moment_shares(detail, end_moments):
+    """How the analysis divides each floor joint's moment between the column below and the column above.
+
+    At the joint on top of story k the column below contributes its end-j moment and the column above its
+    end-i moment, in one local axis system, so the beams resist their sum. With both of one sign the share
+    of each is its part of that sum; with opposite signs the larger one resists the beams and the smaller
+    adds to them, so the larger takes the whole (share 1) and the smaller none. Per story and direction the
+    result is the LARGEST share over every combination and column line whose joint moment is significant
+    (ANALYSIS_SPLIT_MIN_JOINT_MOMENT_FRACTION): ``top`` for the end at the joint above the story, ``bottom``
+    for the end at the joint below it. The top story has no column above (top share 1) and the first story
+    no joint below (bottom None: the base).
+    """
+    stories = sorted(detail)
+    observed = {}                                            # (level, axis) -> [(joint moment, share below, source)]
+    for (story, position, axis), rows in end_moments.items():
+        above = {combination: (tag, m_i) for combination, tag, m_i, _m_j in end_moments.get((story + 1, position, axis), [])}
+        for combination, tag, _m_i, m_j in rows:
+            if combination not in above:
+                continue
+            tag_above, m_above = above[combination]
+            total = abs(m_j) + abs(m_above)
+            if total <= 0.0:
+                continue
+            if m_j * m_above >= 0.0:
+                share_below = abs(m_j) / total
+            else:
+                share_below = 1.0 if abs(m_j) >= abs(m_above) else 0.0
+            observed.setdefault((story, axis), []).append(
+                (total, share_below, {"combination": combination, "column_tag_below": tag, "column_tag_above": tag_above,
+                                      "moment_below_kip_in": m_j, "moment_above_kip_in": m_above,
+                                      "same_sense": m_j * m_above >= 0.0}))
+    for story in stories:
+        shares = {}
+        for axis in ("x", "y"):
+            def side(level, below):
+                rows = observed.get((level, axis))
+                if not rows:
+                    return None
+                largest = max(total for total, _share, _source in rows)
+                kept = [(share if below else 1.0 - share, source) for total, share, source in rows
+                        if total >= ANALYSIS_SPLIT_MIN_JOINT_MOMENT_FRACTION * largest]
+                value, source = max(kept, key=lambda item: item[0])
+                return {"share": value, "source": source, "observations": len(rows), "observations_used": len(kept),
+                        "smallest_share_used": min(item[0] for item in kept), "largest_joint_moment_kip_in": largest}
+            top = side(story, True)
+            if top is None and story == stories[-1]:
+                top = {"share": 1.0, "source": None, "observations": 0, "observations_used": 0,
+                       "basis": "top story: no column above the joint, the whole beam delivery enters this column"}
+            shares[axis] = {"top": top, "bottom": side(story - 1, False)}
+        detail[story]["beam_moment_share"] = shares
+        detail[story]["beam_moment_share_basis"] = (
+            "largest share of the joint's column moments carried by this column end over every combination and column line "
+            f"whose joint moment is at least {ANALYSIS_SPLIT_MIN_JOINT_MOMENT_FRACTION:g} of the largest at that level and "
+            "direction; opposite-sense column moments give the larger column the whole delivery")
 
 
 def _probable_section(b, h, fc, fy, es, layers):
@@ -591,7 +682,7 @@ def section_equilibrium_roots(b, h, fc, fy, es, layers, axial, tolerance=EXACT_S
     tension, cap = _section_domain(b, h, fc, fy, es, layers)
     slack = 1e-9 * max(1.0, abs(axial))
     if not tension - slack <= axial <= cap + slack:
-        raise ValueError(f"axial load {axial:.3f} kip is outside the section's [{tension:.3f}, {cap:.3f}] kip domain")
+        raise SectionAxialDomainError(f"axial load {axial:.3f} kip is outside the section's [{tension:.3f}, {cap:.3f}] kip domain")
     roots = []
     for branch in section_branches(b, h, fc, fy, es, layers):
         displaced = branch["displaced"]
@@ -785,7 +876,8 @@ def probable_moment_over_axial_range(section, p_min, p_max, n_pts=PROBABLE_CURVE
     tension, cap = _section_domain(b, h, fc, fy, es, layers)
     slack = 1e-9 * max(1.0, abs(p_max), abs(p_min))
     if p_min < tension - slack or p_max > cap + slack:
-        raise ValueError(f"axial range [{p_min:.3f}, {p_max:.3f}] kip leaves the section's [{tension:.3f}, {cap:.3f}] kip domain")
+        raise SectionAxialDomainError(
+            f"axial range [{p_min:.3f}, {p_max:.3f}] kip leaves the section's [{tension:.3f}, {cap:.3f}] kip domain")
     c_tolerance = tolerance * h
     candidates, evaluations, bracket_widths, branches_checked = [], 0, [], []
     stationary_points, segments_checked, fallback_segments, max_mismatch = [], 0, 0, 0.0
@@ -930,6 +1022,15 @@ def design_column_shear(state, strengths, method=None):
     exact column-own envelope of each end and sense over the saved axial
     ranges (``state["column_action_envelopes"]``, else the story range for
     both ends); the method decides which becomes ``ve_kip``.
+
+    One column group of a grouped design (Design.Group_Capacity) passes its
+    own section and cage with ``state["stories"]`` (the stories of its band),
+    ``state["clear_heights_in"]`` ({story: {"face", "physical"}} from the
+    beams actually framing at its joints), envelopes of its own members only
+    and ``strengths`` None: the beam-delivery (joint-limited) value is then not
+    formed and only the column-own method is accepted, because an equal split
+    of the beam moments between unlike columns above and below is not an
+    equilibrium statement.
     """
     sections, col, mats, geometry = state["sections"], state["column"], state["materials"], state["geometry"]
     b, h, fc = sections["b_col_in"], sections["h_col_in"], sections["fc_col_ksi"]
@@ -940,8 +1041,12 @@ def design_column_shear(state, strengths, method=None):
     convention = state.get("column_clear_height_convention") or CLEAR_HEIGHT_CONVENTION_DEFAULT
     if convention not in CLEAR_HEIGHT_CONVENTIONS:
         raise ValueError(f"unknown clear height convention {convention!r}; expected one of {CLEAR_HEIGHT_CONVENTIONS}")
-    story_h, h_beam = geometry["story_h_in"], sections["h_beam_in"]
-    ln_face = story_h - h_beam
+    if strengths is None and method != COLUMN_SHEAR_METHOD_COLUMN_OWN:
+        raise ValueError("Without beam-delivery strengths only the column-own shear method is defined.")
+    story_h = geometry["story_h_in"]
+    clear_heights = state.get("clear_heights_in")
+    h_beam = sections["h_beam_in"] if clear_heights is None else None
+    ln_face = story_h - h_beam if clear_heights is None else None
     offset = col["centroid_offset_in"]
     cc = col["clear_cover_in"]
     ag = b * h
@@ -974,7 +1079,9 @@ def design_column_shear(state, strengths, method=None):
               "layers_basis": ("column.layers_about_z (bending through b, compression on an h face)"
                                if col.get("layers_about_z") else "column.layers reused; layers_about_z not supplied")},
     }
-    joint_delivery = {axis: {kind: beams_at(kind, axis) for kind in ("interior", "edge", "corner")} for axis in directions}
+    joint_delivery = (None if strengths is None else
+                      {axis: {kind: beams_at(kind, axis) for kind in ("interior", "edge", "corner")} for axis in directions})
+    story_list = list(state.get("stories") or range(1, geometry["num_floor"] + 1))
     cage_identity = (f"{b:g}x{h:g} in f'c {fc:g} ksi; #{col['bar_size']} bars: {col['top_bars']} top, {col['bot_bars']} bottom, "
                      f"{col['side_bars']} per side face; centroid offset {offset:g} in")
     strength_basis = (f"probable flexural strength: fibre section with steel at {PROBABLE_FY_FACTOR:g} fy = {fy_pr:g} ksi, "
@@ -986,11 +1093,15 @@ def design_column_shear(state, strengths, method=None):
         width = spec["width_in"]
         section = spec["section"]
         mirrored = {**section, "layers": _mirrored(section["layers"], section["h_in"])}
-        for story in range(1, geometry["num_floor"] + 1):
+        for story in story_list:
             p_min, p_max = state["column_axial_envelope"].get(story, (0.0, 0.0))
             detail = envelopes.get(story) or envelopes.get(str(story))
             top_is_roof = story == geometry["num_floor"]
-            ln_physical = story_h - 0.5 * h_beam if story == 1 else ln_face
+            if clear_heights is not None:
+                heights = clear_heights.get(story) or clear_heights[str(story)]
+                ln_face, ln_physical = heights["face"], heights["physical"]
+            else:
+                ln_physical = story_h - 0.5 * h_beam if story == 1 else ln_face
             ln_own = ln_physical if convention == CLEAR_HEIGHT_PHYSICAL else ln_face
             # --- joint-limited method numbers (unchanged from the saved evidence) ---
             samples = [p_min + (p_max - p_min) * k / 8.0 for k in range(9)]
@@ -998,10 +1109,13 @@ def design_column_shear(state, strengths, method=None):
             ve_own_legacy = 2.0 * mpr_col / ln_face
             # Interior column: floor joint below gives half the beam sum, joint above
             # gives half (or all of it at the roof).
-            delivery = joint_delivery[axis]["interior"]
-            m_bottom = delivery / 2.0 if story > 1 else mpr_col
-            m_top = delivery if top_is_roof else delivery / 2.0
-            ve_joint_limited = (m_top + m_bottom) / ln_face
+            if joint_delivery is None:
+                ve_joint_limited = None
+            else:
+                delivery = joint_delivery[axis]["interior"]
+                m_bottom = delivery / 2.0 if story > 1 else mpr_col
+                m_top = delivery if top_is_roof else delivery / 2.0
+                ve_joint_limited = (m_top + m_bottom) / ln_face
             vu_any = state["column_shear_demand"].get(story, 0.0)
             vu_direction = detail["shear_by_direction_kip"][axis] if detail else None
             # --- column-own envelope: each end over its own axial range, each bending sense ---
@@ -1022,7 +1136,55 @@ def design_column_shear(state, strengths, method=None):
             story_env = max(probable_moment_over_axial_range(section, p_min, p_max),
                             probable_moment_over_axial_range(mirrored, p_min, p_max), key=lambda r: r["mpr_kip_in"])
             ve_own_story = 2.0 * story_env["mpr_kip_in"] / ln_own
-            if method == COLUMN_SHEAR_METHOD_JOINT_LIMITED:
+            # --- beam delivery split by analysis: each end the smaller of its own Mpr and its share of the delivery ---
+            split = None
+            shares = (detail or {}).get("beam_moment_share", {}).get(axis) if joint_delivery is not None else None
+            if shares is not None and shares.get("top") is not None and (story == 1 or shares.get("bottom") is not None):
+                beam_delivery = max(joint_delivery[axis].values())
+                own = {end: max(mpr[end][sense]["mpr_kip_in"] for sense in ("positive", "negative")) for end in ("i", "j")}
+                top_share = 1.0 if top_is_roof else shares["top"]["share"]
+                delivered_top = top_share * beam_delivery
+                m_top = min(own["j"], delivered_top)
+                if story == 1:
+                    bottom_share, delivered_bottom, m_bottom = None, None, own["i"]
+                else:
+                    bottom_share = shares["bottom"]["share"]
+                    delivered_bottom = bottom_share * beam_delivery
+                    m_bottom = min(own["i"], delivered_bottom)
+                split = {"beam_delivery_kip_in": beam_delivery,
+                         "beam_delivery_basis": "largest sum of beam probable moments any joint kind delivers in this direction "
+                                                "(hogging plus sagging at an interior joint), slab steel in the flange included",
+                         "top": {"share": top_share, "delivered_kip_in": delivered_top, "column_mpr_kip_in": own["j"],
+                                 "moment_kip_in": m_top, "limited_by": "beams" if delivered_top < own["j"] else "column",
+                                 "share_source": None if top_is_roof else shares["top"],
+                                 "basis": "roof joint: no column above, share 1" if top_is_roof else "analysis share of the joint above"},
+                         "bottom": {"share": bottom_share, "delivered_kip_in": delivered_bottom, "column_mpr_kip_in": own["i"],
+                                    "moment_kip_in": m_bottom,
+                                    "limited_by": "column (base)" if story == 1 else ("beams" if delivered_bottom < own["i"] else "column"),
+                                    "share_source": None if story == 1 else shares["bottom"],
+                                    "basis": "base: the column's own probable moment, no beam limits a fixed base" if story == 1
+                                             else "analysis share of the joint below"},
+                         "clear_height_in": ln_own, "ve_kip": (m_top + m_bottom) / ln_own}
+            ve_analysis_split = None if split is None else split["ve_kip"]
+            if method == COLUMN_SHEAR_METHOD_ANALYSIS_SPLIT:
+                if split is None:
+                    raise ValueError(f"story {story}, direction {axis}: the analysis split needs the column end moments of the "
+                                     "combination actions (column_action_envelopes) and the beam delivery strengths")
+                if vu_direction is not None:
+                    vu = vu_direction
+                    vu_basis = (f"largest |V| along the {axis}-frame shear axis (local index "
+                                f"{LOCAL_FORCE_CONVENTION['shear_index'][axis]}) of every combination")
+                else:
+                    vu, vu_basis = vu_any, "per-direction shear not recorded: legacy any-direction maximum used (conservative)"
+                ve = max(ve_analysis_split, vu)
+                mechanism = ve_analysis_split
+                ve_basis = ("max((M,top + M,bottom) / ln, Vu in this direction); each end the smaller of the column's own Mpr over "
+                            "its factored axial range and the beams' probable delivery times that end's analysis share of the "
+                            "joint moment; base end the column's own Mpr; roof end the whole delivery")
+                ln_used, ln_basis = ln_own, (f"{convention}: " + ("physical base-to-soffit height at story 1, face-to-face elsewhere"
+                                                                  if convention == CLEAR_HEIGHT_PHYSICAL
+                                                                  else "face-to-face height story_h - h_beam at every story"))
+            elif method == COLUMN_SHEAR_METHOD_JOINT_LIMITED:
                 vu, vu_basis = vu_any, "largest |V| over both local shear axes of every combination (legacy scalar)"
                 ve = max(min(ve_own_legacy, ve_joint_limited), vu)
                 mechanism = min(ve_own_legacy, ve_joint_limited)
@@ -1043,6 +1205,8 @@ def design_column_shear(state, strengths, method=None):
                 ln_used, ln_basis = ln_own, (f"{convention}: " + ("physical base-to-soffit height at story 1, face-to-face elsewhere"
                                                                   if convention == CLEAR_HEIGHT_PHYSICAL
                                                                   else "face-to-face height story_h - h_beam at every story"))
+                if clear_heights is not None:
+                    ln_basis += "; from the beams framing at this column's own joints"
             vc_zero = mechanism >= 0.5 * ve and p_min < ag * fc / 20.0
             nu_psi = max(0.0, p_min) * 1000.0 / ag
             vc = 0.0 if vc_zero else (2.0 * math.sqrt(fc * 1000.0) + min(nu_psi / 6.0, 0.05 * fc * 1000.0)) * width * d / 1000.0
@@ -1051,6 +1215,7 @@ def design_column_shear(state, strengths, method=None):
                      "axial_min_kip": p_min, "axial_max_kip": p_max,
                      "mpr_column_kip_in": mpr_col, "ve_own_kip": ve_own_legacy, "ve_joint_limited_kip": ve_joint_limited,
                      "ve_own_envelope_kip": ve_own_envelope, "ve_own_story_envelope_kip": ve_own_story,
+                     "ve_analysis_split_kip": ve_analysis_split, "analysis_split": split,
                      "vu_analysis_kip": vu, "vu_direction_kip": vu_direction, "vu_any_direction_kip": vu_any, "vu_basis": vu_basis,
                      "ve_kip": ve, "ve_basis": ve_basis,
                      "clear_height_in": ln_used, "clear_height_basis": ln_basis,
@@ -1190,7 +1355,13 @@ def design_column_shear(state, strengths, method=None):
     # Provided-steel screen with the selected hoops: phi (Vc + min(Av fyt d / s,
     # Vs limit)) against the method's Ve, per story and direction.
     screen = column_shear_screen(stories, selected, vs_limit, fy)
-    if method == COLUMN_SHEAR_METHOD_JOINT_LIMITED:
+    if method == COLUMN_SHEAR_METHOD_ANALYSIS_SPLIT:
+        method_basis = ("per direction: Ve = max((M,top + M,bottom) / ln, Vu); each column end takes the smaller of its own "
+                        "probable moment over its factored axial range and the beams' probable delivery at that joint times "
+                        "the largest share of the joint moment that end carries in the analysis (18.7.6.1.1, R18.7.6.1.1); "
+                        "base end: column's own Mpr; roof end: the whole delivery; Vc = 0 when the mechanism shear >= Ve/2 "
+                        "and Pu,min < Ag fc/20 (18.7.6.2.1); hoops as in the other methods")
+    elif method == COLUMN_SHEAR_METHOD_JOINT_LIMITED:
         method_basis = ("per direction: Ve = min(2 Mpr,col/ln over the factored axial range, joint-limited beam Mpr "
                         "delivery) >= Vu with Mpr about that direction's axis; Vc = 0 when mechanism shear >= Ve/2 "
                         "and Pu < Ag fc/20 (18.7.6.2.1); one hoop bar and spacing, legs per direction from Vs, "
@@ -1201,7 +1372,7 @@ def design_column_shear(state, strengths, method=None):
                         "(18.7.6.1.1; no beam-sharing reduction); Vc = 0 when Pu,min < Ag fc/20 (the mechanism shear is all "
                         "of Ve, 18.7.6.2.1); hoops as in the joint-limited method")
     return {"column_shear_method": method, "method_basis": method_basis,
-            "clear_height_convention": convention if method == COLUMN_SHEAR_METHOD_COLUMN_OWN else CLEAR_HEIGHT_UNIFORM,
+            "clear_height_convention": convention if method != COLUMN_SHEAR_METHOD_JOINT_LIMITED else CLEAR_HEIGHT_UNIFORM,
             "local_force_convention": LOCAL_FORCE_CONVENTION,
             "stories": stories, "governing": governing, "worst_by_direction": worst,
             "vs_limit_kip": vs_limit[governing["axis"]] if governing else min(vs_limit.values()),
@@ -1285,8 +1456,10 @@ def classify_joint_shear_inputs(level, beams_in_direction, transverse_beams, bea
     Column (15.2.6): continuous at a floor joint when the column above
     extends at least the column depth h in the direction of joint shear
     ((a), clear height >= h) and the bars and hoops of the column below
-    continue through the extension ((b), declared); "Other" at the roof,
-    where no column extends above. Beam in the direction of Vu (15.2.7):
+    continue through the extension ((b), declared); at the roof, continuous
+    when the declared column extension above the joint is at least h with
+    the reinforcement continued through it (2026-10-03), "Other" where no
+    such extension is declared. Beam in the direction of Vu (15.2.7):
     continuous when beams frame into both faces of that direction, each
     extending at least the beam depth h beyond the face ((a), clear span
     >= h) with the bars and hoops of the beam on the opposite side
@@ -1300,8 +1473,22 @@ def classify_joint_shear_inputs(level, beams_in_direction, transverse_beams, bea
     continuity = continuity if isinstance(continuity, dict) else {}
     unevaluated = []
     if level == "roof":
-        column_state = "other"
-        column_basis = "terminating column: no column extends above the roof joint (Table 18.8.4.3 Other)"
+        # 15.2.6 at a roof joint: a column extension of at least one column depth above the joint, with the
+        # bars and hoops of the column below continued through it, makes the column continuous for the
+        # table. The extension is a declared detail (detailing.joint_continuity); without it, or with a
+        # shorter one, the roof column stays "Other".
+        extension = continuity.get("roof_column_extension_in")
+        bars = continuity.get("column_reinforcement_continued_through_roof_extension")
+        if extension is not None and extension >= column_depth_in - 1e-9 and bars is True:
+            column_state = "continuous"
+            column_basis = (f"15.2.6: column extension above the roof joint {extension:g} in >= h = {column_depth_in:g} in "
+                            "(declared stub); bars and hoops of the column below continue through the extension: declared")
+        else:
+            column_state = "other"
+            column_basis = ("terminating column: no column extends above the roof joint (Table 18.8.4.3 Other)"
+                            if extension is None else
+                            f"roof column extension {extension:g} in against h = {column_depth_in:g} in, reinforcement "
+                            f"continued: {bars}; 15.2.6 not met (Table 18.8.4.3 Other)")
     else:
         extends = column_clear_height_in >= column_depth_in
         bars = continuity.get("column_reinforcement_continuous_through_floor_joints")
@@ -1506,8 +1693,37 @@ def straight_development_length(bar, fc_ksi, fy_ksi, top_bar=False):
     return max(12.0, fy_ksi * 1000.0 * psi_t / (divisor * math.sqrt(fc_ksi * 1000.0)) * db)
 
 
+def design_column_bar_bond(state):
+    """ACI 318-19 18.7.4.3 for the installed column bars: 1.25 ld <= lu / 2 over the clear height.
+
+    ld by Eq. (25.4.2.4a) with the cage's own cb and Ktr = 0 (Design/ACI_Checks.column_bar_bond_18_7_4_3).
+    The clear height is the face-to-face height of a typical story (story_h - h_beam; the base story's run
+    to the fixed base is longer, so the typical story governs) or, for one column group of a grouped design,
+    the least face-to-face clear height among its members (``state["clear_heights_in"]``).
+    """
+    from Design.ACI_Checks import column_bar_bond_18_7_4_3, column_bar_cb_in
+    sections, col, mats, geometry = state["sections"], state["column"], state["materials"], state["geometry"]
+    heights = state.get("clear_heights_in")
+    if heights:
+        lu = min(entry["face"] for entry in heights.values())
+        basis = "least face-to-face clear height of the group's own members (Design.Group_Capacity.column_clear_heights)"
+    else:
+        lu = geometry["story_h_in"] - sections["h_beam_in"]
+        basis = ("face-to-face clear height story_h - h_beam of a typical story; the base story runs to the fixed base "
+                 "and is longer, so the typical story governs")
+    cb = column_bar_cb_in(sections["b_col_in"], sections["h_col_in"], col["clear_cover_in"], col["stirrup_bar_size"],
+                          col["bar_size"], col["top_bars"], col["side_bars"])
+    result = column_bar_bond_18_7_4_3(col["bar_size"], sections["fc_col_ksi"], mats["fy_ksi"], cb["cb_in"], lu,
+                                      normalweight=bool(mats.get("normalweight", True)))
+    return {**result, "cb": cb, "clear_height_basis": basis,
+            "ktr_basis": ("Ktr = 0: no transverse reinforcement credit, as 25.4.2.4 permits; a positive Ktr needs a "
+                          "declared method naming the crossing legs and the splitting plane over the required length"),
+            "edition_note": ("ACI 318-25 keeps the length limit and adds the alternative Ktr >= 1.2 db, which is not "
+                             "admitted under the 318-19 basis; mechanical splices do not remove the requirement")}
+
+
 def design_splices(state):
-    """Where and how longitudinal bars can be spliced (18.6.3.3, 18.7.4.3, 25.5, 18.2.7).
+    """Where and how longitudinal bars can be spliced (18.6.3.3, 18.7.4.4, 25.5, 18.2.7).
 
     Beams: Class B lap (1.3 ld) only outside the 2h hinge zones and enclosed
     by hoops at <= min(d/4, 4 in); when the middle of the clear span cannot
@@ -1541,7 +1757,7 @@ def design_splices(state):
                         "lap_splice_permitted_25.5.1.1": lap_permitted,
                         "lap_splice_feasible": col_lap_fits,
                         "splice_type": "class_B_lap_center_half" if col_lap_fits else "type_2_mechanical_18.2.7",
-                        "basis": ("18.7.4.3 (laps only in the center half, tension laps, hoops per 18.7.5.2/.3); 25.5.2.1 Class B; "
+                        "basis": ("18.7.4.4 (laps only in the center half, tension laps, hoops per 18.7.5.2/.3); 25.5.2.1 Class B; "
                                   "25.5.1.1 (no lap splices above No. 11: Type 2 mechanical, 18.2.7.1)")}
     result["all_designed"] = True
     return result
@@ -1591,6 +1807,7 @@ def design_bar_threading(state):
             "by_direction": directions,
             "stacking": assembly["stacking"], "stacking_convention": convention,
             "slab_clashes": assembly["slab_clashes"], "slab_tight_crossings": assembly["slab_tight_crossings"],
+            "slab_bottom_mat_displacements": assembly["slab_bottom_mat_displacements"],
             "slab_mats_placed": assembly["slab_mats_placed"],
             "stacking_clear_of_mats": not assembly["slab_clashes"],
             "basis": ("beam bars threaded between the column bars in plan with the 25.2.1 clearance, one layer "
@@ -1608,10 +1825,16 @@ def build_capacity_design(state):
     anchorage = design_anchorage(state)
     splices = design_splices(state)
     threading = design_bar_threading(state)
+    bond = design_column_bar_bond(state)
     beams["bars_thread_column"] = threading
     checks = []
-    checks.append(make_check("detailing.splices_designed", "ACI 318-19 18.6.3.3 / 18.7.4.3 / 18.2.7 / 25.5",
+    checks.append(make_check("detailing.splices_designed", "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.2.7 / 25.5",
                              1, 1, "==", details={"beam": splices["beam"], "column": splices["column"]}))
+    checks.append(make_check("column.bar_bond_development", bond["clause"], bond["factored_ld_in"], bond["half_clear_height_in"],
+                             "<=", "in", details={key: bond[key] for key in (
+                                 "bar_size", "cb", "ktr_in", "confinement_ratio", "confinement_ratio_capped", "psi_s", "psi_g",
+                                 "sqrt_fc_psi", "ld_in", "minimum_ld_applied", "length_factor", "clear_height_in",
+                                 "clear_height_basis", "ktr_basis", "edition_note")}))
     checks.append(make_check("beam.bars_thread_column",
                              f"ACI 318-19 25.2.1 clearance; at most {threading['max_layers']} layer(s) between the column bars (25.2.2)",
                              int(threading["passes"]), 1, "==",
@@ -1627,6 +1850,7 @@ def build_capacity_design(state):
                                       "lower_direction": threading["stacking"]["lower_direction"],
                                       "lower_layer_centroid_from_face_in": threading["stacking"]["lower_layer_centroid_from_face_in"],
                                       "overlaps": threading["slab_clashes"],
+                                      "bottom_mat_displacements": threading.get("slab_bottom_mat_displacements", []),
                                       "tight_crossings": len(threading["slab_tight_crossings"]),
                                       "slab_mats_placed": threading["slab_mats_placed"]}))
     checks.append(make_check("beam.capacity_shear_section", "ACI 318-19 22.5.1.2 with 18.6.5.1 Ve",
@@ -1681,7 +1905,7 @@ def build_capacity_design(state):
     beam_evidence = [data for entries in beams["families"].values() for data in entries]
     return {"method_version": METHOD_VERSION, "column_shear_method": columns["column_shear_method"],
             "beam_strengths": strengths, "beams": beams, "bar_threading": threading,
-            "columns": columns, "joints": joints, "anchorage": anchorage, "splices": splices,
+            "columns": columns, "joints": joints, "anchorage": anchorage, "splices": splices, "column_bar_bond": bond,
             "transverse": {"beam": beams["hoops"], "column": columns["hoops"]},
             "joint_evidence": {"beam_capacity_shear": beam_evidence, "joint_shear": joints["evidence"]},
             "checks": checks,

@@ -47,14 +47,91 @@ SEED = 20260731
 # made every frame square in plan, so span-driven demand could never differ
 # between the two directions and the biaxial ground motion had nothing
 # asymmetric to excite.
+# V2 population (user decisions 2026-10-01): column-grid centerline bays of 18 to 30 ft in each plan
+# direction, independently, and one story height per building of 12 to 18 ft, both in 0.5-ft steps
+# (25 bay-width levels, 13 story-height levels). The earlier 10-15 ft bays and 12-16 ft stories were
+# narrower than practice (NIST GCR 16-917-40 reports 20 to 30 ft as the typical economical beam span;
+# the 18-ft lower bound is the user's research choice, not the guide's). Bay counts (2..6) and floor
+# counts (4..9) are unchanged and stay integers. Lengths are generated from integer half-foot ticks,
+# so every value is an exact binary fraction and its inch value (6 x ticks) is exact. The basis name
+# travels with every plan built from these ranges so a plan of an earlier population is never mistaken
+# for this one.
+POPULATION_BASIS = "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_20261001"
+GEOMETRY_INCREMENT_FT = 0.5
 RANGES = {
     "num_bay_x": tuple(range(2, 7)),
     "num_bay_y": tuple(range(2, 7)),
     "num_floor": tuple(range(4, 10)),
-    "story_height_ft": tuple(range(12, 17)),  # 12–16 ft inclusive, in 1 ft steps.
-    "bay_x_width_ft": tuple(range(10, 16)),
-    "bay_y_width_ft": tuple(range(10, 16)),
+    "story_height_ft": tuple(tick / 2 for tick in range(24, 37)),  # 12–18 ft inclusive, 0.5 ft steps: 13 levels.
+    "bay_x_width_ft": tuple(tick / 2 for tick in range(36, 61)),   # 18–30 ft inclusive, 0.5 ft steps: 25 levels.
+    "bay_y_width_ft": tuple(tick / 2 for tick in range(36, 61)),
 }
+
+
+def feet_label(value_ft):
+    """A length in feet for a case name: 14 -> '14', 12.5 -> '12.5' (never '12.0', never rounded)."""
+    return f"{float(value_ft):g}"
+
+
+def feet_to_inches(value_ft):
+    """Exact inches of a half-foot-tick length; anything off the 0.5-ft grid is refused, not rounded."""
+    ticks = round(float(value_ft) / GEOMETRY_INCREMENT_FT)
+    if abs(ticks * GEOMETRY_INCREMENT_FT - float(value_ft)) > 1e-12:
+        raise ValueError(f"{value_ft!r} ft is not on the {GEOMETRY_INCREMENT_FT}-ft geometry grid.")
+    return 6.0 * ticks
+
+
+# ---- candidate planning: one named, seeded, replaceable method --------------------------------------
+# The plan order of the candidate geometries comes from a named planner. Today there is one: the
+# discrete Cartesian pool of RANGES shuffled with the seed, of which a plan takes a contiguous slice.
+# A Latin hypercube planner is a candidate under review (record sampling_candidate_lhs_20261001),
+# not implemented; it would be registered here beside this one, and every plan records which planner,
+# seed, bounds and level mapping produced it, so plans of different methods are never confused.
+SAMPLING_METHOD = "seeded_shuffled_cartesian_prefix_v1"
+
+
+def _shuffled_cartesian_pool(seed):
+    geometries = list(product(*RANGES.values()))
+    random.Random(seed).shuffle(geometries)
+    return geometries
+
+
+CANDIDATE_PLANNERS = {SAMPLING_METHOD: _shuffled_cartesian_pool}
+
+
+def candidate_geometries(seed, method=SAMPLING_METHOD):
+    """Every candidate geometry in plan order: tuples in the key order of RANGES."""
+    if method not in CANDIDATE_PLANNERS:
+        raise ValueError(f"Unknown sampling method {method!r}; registered: {sorted(CANDIDATE_PLANNERS)}.")
+    return CANDIDATE_PLANNERS[method](seed)
+
+
+def sampling_provenance(seed, method=SAMPLING_METHOD, include_source=True):
+    """What produced a plan's candidates: method, seed, bounds, the discrete level mapping and this source.
+
+    ``include_source=False`` leaves the source hash out: that form is what a resumed plan is compared
+    against, so an unrelated edit of this file does not strand a campaign, while a change of method,
+    seed, bounds or levels still refuses the resume. The written plan always carries the hash."""
+    if method not in CANDIDATE_PLANNERS:
+        raise ValueError(f"Unknown sampling method {method!r}; registered: {sorted(CANDIDATE_PLANNERS)}.")
+    pool = 1
+    for values in RANGES.values():
+        pool *= len(values)
+    return {
+        "method": method, "seed": seed, "population_basis": POPULATION_BASIS,
+        "parameter_order": list(RANGES),
+        "bounds": {key: [min(values), max(values)] for key, values in RANGES.items()},
+        "levels": {key: list(values) for key, values in RANGES.items()},
+        "level_counts": {key: len(values) for key, values in RANGES.items()},
+        "discrete_mapping": ("each parameter takes one of its listed levels; lengths are integer half-foot ticks "
+                             f"({GEOMETRY_INCREMENT_FT} ft), counts are integers; no continuous draw is rounded"),
+        "pool_size": pool,
+        "selection": "contiguous slice (geometry offset, count) of the seeded shuffle of the full Cartesian pool",
+        "duplicates_possible": False,
+        "hazard_assignment": "round-robin over the seeded shuffle of the site labels (seed + 2); not a sampled coordinate",
+        **({"source_sha256": sha256_file(Path(__file__).resolve())} if include_source else {}),
+        "candidate_methods_not_implemented": ["latin_hypercube (under review; not selected)"],
+    }
 
 # Design hazard, assigned per case. Geometry alone barely moves design demand,
 # so without this axis the design loop returns near-identical members for
@@ -391,8 +468,10 @@ def build_plan(
     records_per_case=DEFAULT_RECORDS_PER_CASE,
     calibration=None,
     record_pairs=None,
+    sampling_method=SAMPLING_METHOD,
 ):
-    geometries = list(product(*RANGES.values()))
+    # The candidate order comes from the named planner (already seeded); the plan takes a slice of it.
+    geometries = candidate_geometries(seed, sampling_method)
     if geometry_offset < 0 or case_id_offset < 0:
         raise ValueError("geometry-offset and case-id-offset must be nonnegative.")
     if not 1 <= num_cases or geometry_offset + num_cases > len(geometries):
@@ -419,7 +498,6 @@ def build_plan(
             f"{len(records)} eligible record pair(s); clamping to {len(records)}."
         )
         records_per_case = len(records)
-    random.Random(seed).shuffle(geometries)
     random.Random(seed + 1).shuffle(records)
     sites = list(seismic_sites)
     random.Random(seed + 2).shuffle(sites)
@@ -457,7 +535,7 @@ def build_plan(
         estimated_period_sec = None
         case_targets = None
         if plan_targets is not None:
-            geometry = {"num_floor": floors, "story_height_in": story_ft * 12}
+            geometry = {"num_floor": floors, "story_height_in": feet_to_inches(story_ft)}
             start = (local_index - 1) * runs_per_case
             case_targets = plan_targets[start:start + runs_per_case]
             case_records = _matched_case_records(
@@ -474,7 +552,7 @@ def build_plan(
                 "case_id": case_id,
                 "geometry_name": (
                     f"{case_id}_bx{bx}_by{by}_s{floors}_"
-                    f"sh{story_ft}ft_bwx{width_x_ft}ft_bwy{width_y_ft}ft_{site}"
+                    f"sh{feet_label(story_ft)}ft_bwx{feet_label(width_x_ft)}ft_bwy{feet_label(width_y_ft)}ft_{site}"
                 ),
                 "seismic_site": site,
                 "result_ids": case_records,
@@ -482,11 +560,11 @@ def build_plan(
                 "num_bay_y": by,
                 "num_floor": floors,
                 "story_height_ft": story_ft,
-                "story_height_in": story_ft * 12,
+                "story_height_in": feet_to_inches(story_ft),
                 "bay_x_width_ft": width_x_ft,
                 "bay_y_width_ft": width_y_ft,
-                "bay_x_in": width_x_ft * 12,
-                "bay_y_in": width_y_ft * 12,
+                "bay_x_in": feet_to_inches(width_x_ft),
+                "bay_y_in": feet_to_inches(width_y_ft),
                 "runs": build_runs(case_records, intensity_levels, scale_factors, case_targets),
                 "estimated_period_sec": estimated_period_sec,
             }
@@ -532,6 +610,7 @@ def load_plan(
     records_per_case=DEFAULT_RECORDS_PER_CASE,
     calibration=None,
     record_pairs=None,
+    profile=None,
 ):
     path = root / "parameter_plan.json"
     # Every field is compared on every version. Earlier revisions left
@@ -543,6 +622,8 @@ def load_plan(
         "num_cases": num_cases,
         "max_npts": max_npts,
         "ranges": {key: list(value) for key, value in RANGES.items()},
+        "population_basis": POPULATION_BASIS,
+        "sampling": sampling_provenance(seed, include_source=False),
         "set_name": set_name,
         "geometry_offset": geometry_offset,
         "case_id_offset": case_id_offset,
@@ -563,6 +644,10 @@ def load_plan(
         "calibration_fingerprint": (
             calibration["coefficients"] if calibration else None
         ),
+        # The analysis profile every child run is built under (screening repair item 6, 2026-10-02): part of
+        # the plan, so a root never mixes profiles. None for an unprofiled plan, which an older plan without
+        # the key still matches.
+        "analysis_profile": profile,
     }
     if path.exists():
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -595,6 +680,7 @@ def load_plan(
             "created_at": now(),
             "bay_width_policy": "independent widths in X and Y",
             "record_policy": "seeded shuffle then balanced round-robin",
+            "sampling_source_sha256": sampling_provenance(seed)["source_sha256"],
             "eligible_result_ids": records,
             "cases": cases,
         }
@@ -795,6 +881,8 @@ def command_for(args, case, paths):
         command.extend(["--result-id", str(result_id)])
     for run in case_runs(case):
         command.extend(["--run-pair", f"{int(run['result_id'])}:{float(run['scale_factor'])}"])
+    if getattr(args, "profile", None):
+        command.extend(["--profile", args.profile])
     return command
 
 
@@ -1045,6 +1133,9 @@ def parse_args():
     )
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--python-exe", default=sys.executable)
+    parser.add_argument("--profile", default=None,
+                        help="Analysis profile (Model/Analysis_Profile) recorded in the plan and applied by every child "
+                             "run before its design is loaded or created, e.g. v2_nonlinear_flexure_screening_v1.")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument(
         "--refresh-status",
@@ -1147,6 +1238,7 @@ def main():
         records_per_case=args.records_per_case,
         calibration=calibration,
         record_pairs=record_pairs,
+        profile=args.profile,
     )
     total_runs = sum(len(case_runs(case)) for case in cases)
     print(

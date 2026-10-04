@@ -1,4 +1,4 @@
-"""Codex review follow-ups (2026-09-18) verified through final qualification, not helper returns.
+"""Review follow-ups (2026-09-18) verified through final qualification, not helper returns.
 
 R2: torsion evidence fails closed in ``qualify_design``. R3: TIR (story
 drifts) and Ax (level displacements) are separate physical inputs in the
@@ -125,7 +125,7 @@ class FinalQualificationCounterexamples(unittest.TestCase):
         record["demand_basis"]["torsion"].pop("classification", None)
         self.assertIn("no story_strength_model_verified assertion", statuses(record)["demands.torsional_irregularity"]["details"]["reason"])
 
-    # ---- R2: Codex's counterexamples through qualify_design ----------------------------------------
+    # ---- R2: the review's counterexamples through qualify_design ----------------------------------------
     def test_removing_every_case_and_row_leaves_the_items_open(self):
         record = self.fresh()
         record["demand_basis"]["torsion"]["stories"] = []

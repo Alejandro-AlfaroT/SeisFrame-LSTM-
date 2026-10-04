@@ -1,5 +1,5 @@
 """Coupon check of the beam-steel materials against the measured D16 properties (paper Table 2(b), Fig. 5),
-independent of the specimen model (Codex Unit 1 review, 2026-09-28: "implement and independently check the
+independent of the specimen model (Unit 1 review, 2026-09-28: "implement and independently check the
 measured yield plateau and subsequent hardening, not just a larger Steel02 ratio").
 
 Materials checked: the example's Steel02 (bilinear, b E = 488.5 MPa, no plateau); ReinforcingSteel with the

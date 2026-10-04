@@ -394,7 +394,7 @@ class ColumnAndJointTests(unittest.TestCase):
                          {"column_reinforcement_continuous_through_floor_joints",
                           "beam_reinforcement_continuous_through_interior_joints"})
         # The conservative arithmetic never reads as a checked classification: the
-        # downstream check stays open and names what is missing (Codex R5).
+        # downstream check stays open and names what is missing (R5).
         self.assertFalse(entry["capacity_topology_and_confinement_checked"])
         from Design.SMRF_Joints import joint_shear_check
         downstream = joint_shear_check(entry, location=entry["id"])

@@ -303,7 +303,7 @@ class StaggeredElevationTests(unittest.TestCase):
             section_bar_coordinates(data, "beam", "x")
 
     def test_unequal_row_arrays_are_rejected_not_truncated(self):
-        """Codex item 3: [3, 1] bars with one elevation must not quietly become three bars."""
+        """Review item 3: [3, 1] bars with one elevation must not quietly become three bars."""
         data = self.staggered()
         rows = data["reinforcement"]["beam_bar_stacking"]["layers"]["x"]["top"]
         rows["layers"], rows["per_layer"], rows["offsets_in"], rows["centroid_in"] = 2, [3, 1], [5.07], 5.07

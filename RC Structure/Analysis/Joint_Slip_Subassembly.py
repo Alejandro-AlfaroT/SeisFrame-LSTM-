@@ -1,9 +1,9 @@
 """Isolated beam-column-joint subassembly with member-face slip interfaces (diagnostic, 2026-09-27).
 
-Codex's joint-slip review asked for an isolated diagnostic before anything touches the frame: the
+The joint-slip review asked for an isolated diagnostic before anything touches the frame: the
 force/rotation map written first (Model/JOINT_SLIP_SUBASSEMBLY.md), flexural rotation, slip rotation
 and panel shear recorded separately, total displacement and external/internal work checked, and the
-provisional slip calibration kept out of the production model. Codex's slip-calibration resolution
+provisional slip calibration kept out of the production model. The slip-calibration resolution
 (the same evening) added: the interface stiffness must be a property of the physical calibration,
 invariant under node-order/axis reversal, with complete branches and reference energies mapped
 together (Model/IMK_Materials.define_mapped_rotational_imk); bar slip is owned per member end
@@ -118,7 +118,7 @@ def slip_calibration(bar_size, fy_ksi, fc_anchorage_ksi, d_in, c_y_in, bars, ec_
     length ld' = (fs - fy) db / (4 ub') carries the average strain (es + ey) / 2 at ub' = ub_post_factor
     sqrt(f'c), adding (es + ey) / 2 * ld'. Rotation = slip / (d - c), tension-side slip about the
     neutral axis (the review's applicability caveats apply: not an interface law for compression-bar
-    slip, through-bars or anchorage failure; first bar yield is not the nominal My, Codex resolution
+    slip, through-bars or anchorage failure; first bar yield is not the nominal My, slip-calibration resolution
     section 1).
     """
     db = sp.rebar_diameter(bar_size)
@@ -142,7 +142,7 @@ def slip_calibration(bar_size, fy_ksi, fc_anchorage_ksi, d_in, c_y_in, bars, ec_
 
 def interface_stiffness(cal_hog, cal_sag, rule=PROVISIONAL_INTERFACE_KE_RULE):
     """One elastic stiffness for the interface, a property of the physical calibration and invariant
-    under which direction the element calls positive (Codex resolution, section 2).
+    under which direction the element calls positive (slip-calibration resolution, section 2).
 
     The bond law gives a secant to first bar yield per face, My / theta_slip,y, which differ because
     the two faces have different lever arms; an IMK material has one Ke, so the interface takes the
@@ -533,7 +533,7 @@ def evaluate(hist, meta, components):
     # M^2 / (2 Ke) is the stored energy of a LINEAR ELASTIC spring on its installed stiffness. The signed
     # work less its change is exact dissipation only for a component that never left its elastic
     # branch; for a deteriorating IMK state (path-dependent unloading, internal variables) it is an
-    # elastic-reference ESTIMATE and is labelled so (Codex next-calibration package, 2026-09-27). The
+    # elastic-reference ESTIMATE and is labelled so (next-calibration package, 2026-09-27). The
     # signed work is the reliable quantity; the global balance uses it.
     stored = {n: hist["moment"][n] ** 2 / (2.0 * components[n]["ke_kip_in_per_rad"]) for n in names}
     stayed_elastic = {n: bool(np.max(np.abs(hist["rotation"][n])) <= _elastic_rotation_limit(components[n])) for n in names}

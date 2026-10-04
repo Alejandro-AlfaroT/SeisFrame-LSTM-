@@ -44,10 +44,15 @@ import math
 
 import openseespy.opensees as ops
 
+from Design import SMRF_Floor_Sections as floor_sections
 from Design.SMRF_Floor_Analysis import _inputs, _integer, _number, MAX_SHELLS
 from Design.SMRF_Floor_Mesh import coupled_floor_mesh
 
 METHOD_VERSION = "smrf_monolithic_eccentric_shell_web_column_gravity_v5_explicit_mesh"
+# Sections of a grouped design (2026-10-02): every floor described line by line, in ascending floor order.
+# The beams of floor k and the columns of story k (the supports of floor k: the column below it) are that
+# floor's; one column concrete grade. {"schema", "floors": [by-line floor, ...], "fc_col_ksi", modifiers}.
+BY_MEMBER_SCHEMA = "smrf_coupled_sections_by_member_v1"
 SECTION_ACTION_SCHEMA = "native_global_actions_applied_loads_and_constraint_actions_v2"
 INPLANE_RESTRAINTS = ("finite_membrane", "rigid_joints", "rigid_floor")
 CONSTRAINT_HANDLERS = ("Transformation", "Lagrange", "Penalty")
@@ -132,26 +137,55 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
         raise ValueError("Provide one explicit load case per floor, in ascending order.")
     parsed = [_inputs(slab_record, geometry, sections, case, mesh_per_bay, allow_zero=True, mesh_spec=mesh_spec) for case in floor_loadcases]
     nx, ny, lx, ly, hs, fc, nu, mesh, _ = parsed[0]
-    b = _number(sections.get("b_beam_in"), "b_beam_in")
-    hb = _number(sections.get("h_beam_in"), "h_beam_in")
-    bc = _number(sections.get("b_col_in"), "b_col_in")
-    hc = _number(sections.get("h_col_in"), "h_col_in")
-    fcb = _number(sections.get("fc_beam_ksi"), "fc_beam_ksi")
+    by_member = isinstance(sections, dict) and sections.get("schema") == BY_MEMBER_SCHEMA
     fcc = _number(sections.get("fc_col_ksi"), "fc_col_ksi")
     bm = _number(sections.get("beam_stiffness_modifier", 1.), "beam_stiffness_modifier")
     cm = _number(sections.get("column_stiffness_modifier", 1.), "column_stiffness_modifier")
-    if not hs < hb < sh or hc >= lx or bc >= ly or b >= min(lx, ly):
-        raise ValueError("Coupled geometry must leave a downstand web, clear column height and clear beam spans.")
+    if by_member:
+        floors = sections.get("floors")
+        if not isinstance(floors, list) or len(floors) != nf:
+            raise ValueError("By-member coupled sections need one by-line floor per elevated floor, in ascending order.")
+        if slab_perimeter != "centerlines":
+            raise ValueError("The perimeter-face slab extension assumes one beam width; a grouped design uses 'centerlines'.")
+        for floor in floors:
+            floor_sections.validate(floor, nx, ny)
+            for beam in floor["beam_lines"]["x"] + floor["beam_lines"]["y"]:
+                if not hs < beam["h_in"] < sh or beam["b_in"] >= min(lx, ly):
+                    raise ValueError("Coupled geometry must leave a downstand web, clear column height and clear beam spans.")
+            for row in floor["supports"]:
+                for col in row:
+                    if col["h_in"] >= lx or col["b_in"] >= ly:
+                        raise ValueError("Coupled geometry must leave a downstand web, clear column height and clear beam spans.")
+        b = min(beam["b_in"] for floor in floors for beam in floor["beam_lines"]["x"] + floor["beam_lines"]["y"])
+        web = column = offset = None
+
+        def web_of(k, axis, line):
+            beam = floors[k-1]["beam_lines"][axis][line]
+            return _rectangle(beam["b_in"], beam["h_in"]-hs, beam["fc_ksi"], bm, nu), -beam["h_in"]/2., beam
+
+        def column_of(k, i, j):
+            col = floors[k-1]["supports"][j][i]
+            return _rectangle(col["b_in"], col["h_in"], fcc, cm, nu), col
+    else:
+        b = _number(sections.get("b_beam_in"), "b_beam_in")
+        hb = _number(sections.get("h_beam_in"), "h_beam_in")
+        bc = _number(sections.get("b_col_in"), "b_col_in")
+        hc = _number(sections.get("h_col_in"), "h_col_in")
+        fcb = _number(sections.get("fc_beam_ksi"), "fc_beam_ksi")
+        if not hs < hb < sh or hc >= lx or bc >= ly or b >= min(lx, ly):
+            raise ValueError("Coupled geometry must leave a downstand web, clear column height and clear beam spans.")
     grid = coupled_floor_mesh(nx, ny, lx, ly, mesh, beam_width_in=b, slab_perimeter=slab_perimeter, mesh_spec=mesh_spec)
     if nf*grid['shell_count'] > MAX_SHELLS:
         raise ValueError(f"Coupled diagnostic exceeds {MAX_SHELLS} total shells across floors, including perimeter.")
     xs = dict(enumerate(grid['x_coordinates_in'], start=grid['index_start']))
     ys = dict(enumerate(grid['y_coordinates_in'], start=grid['index_start']))
     cell_x, cell_y = list(xs)[:-1], list(ys)[:-1]
-    web = _rectangle(b, hb-hs, fcb, bm, nu)
-    column = _rectangle(bc, hc, fcc, cm, nu)
-    # From slab mid-plane to downstand-web centroid: -(hs/2+(hb-hs)/2).
-    offset = -hb/2.
+    if not by_member:
+        web = _rectangle(b, hb-hs, fcb, bm, nu)
+        column = _rectangle(bc, hc, fcc, cm, nu)
+        # From slab mid-plane to downstand-web centroid: -(hs/2+(hb-hs)/2).
+        offset = -hb/2.
+    link_offset = {}
     gamma = _number(slab_record["concrete_unit_weight_kcf"], "concrete_unit_weight_kcf") / 1728.
     if ops.getNodeTags() or ops.getEleTags():
         raise RuntimeError("Coupled diagnostic requires an empty OpenSees domain; existing model was preserved.")
@@ -232,12 +266,25 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                     n = node(x, y, k*sh)
                     floor_nodes[k, i, j] = n
                     if 0 <= i <= ex and 0 <= j <= ey and (i % mx == 0 or j % my == 0):
+                        if by_member:
+                            # One web node for each beam line through this point, at that line's own centroid
+                            # depth; where an X and a Y line cross, two web nodes hang from the one slab node.
+                            for axis, on_line, line in (("x", j % my == 0, j // my), ("y", i % mx == 0, i // mx)):
+                                if on_line:
+                                    depth = web_of(k, axis, line)[1]
+                                    nw = node(x, y, k*sh+depth)
+                                    web_nodes[k, i, j, axis] = nw
+                                    ops.rigidLink("beam", n, nw)
+                                    links.append((n, nw))
+                                    link_offset[nw] = depth
+                            continue
                         nw = node(x, y, k*sh+offset)
                         web_nodes[k, i, j] = nw
                         # No constraint chains: shell node is retained only;
                         # the web node is constrained only, in one rigid link.
                         ops.rigidLink("beam", n, nw)
                         links.append((n, nw))
+                        link_offset[nw] = offset
         if inplane_restraint != "finite_membrane":
             for k in range(1, nf+1):
                 # Unloaded bookkeeping master at the plan centroid; its out-of-plane
@@ -279,16 +326,20 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                     ni = base_nodes[i, j] if k == 1 else floor_nodes[k-1, i*mx, j*my]
                     nj = floor_nodes[k, i*mx, j*my]
                     tag += 1
-                    _frame_element(tag, ni, nj, column, 1)
+                    _frame_element(tag, ni, nj, column_of(k, i, j)[0] if by_member else column, 1)
                     columns.append({"tag": tag, "story": k, "grid_i": i, "grid_j": j, "nodes": [ni, nj]})
             for axis, lines, intervals in (("x", ny+1, ex), ("y", nx+1, ey)):
                 for line in range(lines):
                     for t in range(intervals):
                         i, j = (t, line*my) if axis == "x" else (line*mx, t)
-                        ni = web_nodes[k, i, j]
-                        nj = web_nodes[k, i+int(axis == "x"), j+int(axis == "y")]
+                        if by_member:
+                            ni = web_nodes[k, i, j, axis]
+                            nj = web_nodes[k, i+int(axis == "x"), j+int(axis == "y"), axis]
+                        else:
+                            ni = web_nodes[k, i, j]
+                            nj = web_nodes[k, i+int(axis == "x"), j+int(axis == "y")]
                         tag += 1
-                        _frame_element(tag, ni, nj, web, 2)
+                        _frame_element(tag, ni, nj, web_of(k, axis, line)[0] if by_member else web, 2)
                         beams.append({"tag": tag, "floor": k, "axis": axis, "line_index": line,
                                       "span_index": t//(mx if axis == "x" else my), "segment_index": t % (mx if axis == "x" else my), "nodes": [ni, nj],
                                       "body_load_force_kip": [0., 0., 0.]})
@@ -300,15 +351,31 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
         if include_member_weight:
             for item in columns:
                 factor = floor_loadcases[item["story"]-1]["dead_factor"]
-                p = factor*bc*hc*(sh-hs)*gamma
+                if by_member:
+                    col = column_of(item["story"], item["grid_i"], item["grid_j"])[1]
+                    p = factor*col["b_in"]*col["h_in"]*(sh-hs)*gamma
+                else:
+                    p = factor*bc*hc*(sh-hs)*gamma
                 ops.eleLoad("-ele", item["tag"], "-type", "-beamUniform", 0., 0., -p/sh)
                 weight_ledger["column_weight_kip"] += p
                 gravity_resultant(p, item["grid_i"]*lx, item["grid_j"]*ly)
             for item in beams:
                 axis = item["axis"]
-                length, clear = (lx, lx-hc) if axis == "x" else (ly, ly-bc)
                 factor = floor_loadcases[item["floor"]-1]["dead_factor"]
-                w = factor*b*(hb-hs)*gamma*clear/length
+                if by_member:
+                    # The drop of this line's own web, between the faces of the columns below the floor at its two ends.
+                    floor, line, span = floors[item["floor"]-1], item["line_index"], item["span_index"]
+                    beam = floor["beam_lines"][axis][line]
+                    if axis == "x":
+                        length = lx
+                        clear = lx-0.5*floor["supports"][line][span]["h_in"]-0.5*floor["supports"][line][span+1]["h_in"]
+                    else:
+                        length = ly
+                        clear = ly-0.5*floor["supports"][span][line]["b_in"]-0.5*floor["supports"][span+1][line]["b_in"]
+                    w = factor*beam["b_in"]*(beam["h_in"]-hs)*gamma*clear/length
+                else:
+                    length, clear = (lx, lx-hc) if axis == "x" else (ly, ly-bc)
+                    w = factor*b*(hb-hs)*gamma*clear/length
                 ops.eleLoad("-ele", item["tag"], "-type", "-beamUniform", 0., -w, 0.)
                 p = w*math.dist(positions[item["nodes"][0]], positions[item["nodes"][1]])
                 item["body_load_force_kip"] = [0., 0., -p]
@@ -348,7 +415,8 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
         link_error = 0.
         for retained, constrained_node in links:
             u = disps[retained]
-            expected = [u[0]+offset*u[4], u[1]-offset*u[3], u[2], *u[3:]]
+            depth = link_offset[constrained_node]
+            expected = [u[0]+depth*u[4], u[1]-depth*u[3], u[2], *u[3:]]
             link_error = max(link_error, *(abs(a-b) for a, b in zip(disps[constrained_node], expected)))
         # Diaphragm kinematics: every tied node moves with its master's rigid
         # in-plane field. Exact under Lagrange; a Penalty run reports its slip.
@@ -437,7 +505,8 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
             max(item["force_relative_error"], item["moment_relative_error"],
                 item["max_out_of_plane_component"]/force_scale) for item in diaphragm_balance]
         interface = []
-        interface_nodes = [retained for retained, _ in links]
+        # Each retained slab node once (a crossing of unlike beam lines retains two web nodes).
+        interface_nodes = list(dict.fromkeys(retained for retained, _ in links))
         if inplane_restraint == "rigid_floor":
             # Interior slab nodes carry in-plane diaphragm forces too; the
             # global shell-to-frame balance has to see them.

@@ -9,6 +9,15 @@ import math
 from datetime import date
 
 
+class SectionAxialDomainError(ValueError):
+    """An axial load (or range) lies outside what a section can carry: the section has no strength there.
+
+    A ValueError, as before, so nothing that caught it changes. The grouped design search catches this
+    class by name and records the candidate that produced it as infeasible; it never clamps the load and
+    never treats another exception as this one.
+    """
+
+
 def assertion_provenance_valid(policy):
     """Require a named, dated basis; this does not authenticate/review it."""
     if not isinstance(policy, dict):

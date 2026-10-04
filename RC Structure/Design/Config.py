@@ -97,7 +97,10 @@ class RebarConfig:
     col_n_side_options: List[int] = field(
         default_factory=lambda: [0, 1, 2, 3, 4]    # bars per face
     )
-    beam_n_range: Tuple[int, int] = (2, 7)         # inclusive, per layer
+    # Total bars per face, including both permitted layers. The former seven-bar
+    # ceiling excluded reinforced candidates even when the two-layer cage fit.
+    # Actual lanes, layer count, steel ratio and joint depth still screen each cage.
+    beam_n_range: Tuple[int, int] = (2, 14)
     beam_symmetric: bool = True                  # same bar size and count on both faces
     # 2026-09-27 (user decision, "the larger bars per layer option"): among
     # beam cages whose estimated DCR is within the ceiling, the pick takes the
@@ -317,16 +320,22 @@ class DemandPolicy:
 
     These are the engineer's declarations about the research archetype; the
     demand checks evaluate the design against them and stay not_evaluated
-    while ``declaration_basis`` is empty. Site class matters for 11.4.8
-    site-specific requirements even though SDS/SD1/S1 are given directly.
+    while ``declaration_basis`` is empty. The site class is the declared basis
+    (Structure_Parameters.ASCE_SITE_CLASS, Site Class C since the user decision
+    of 2026-10-02); under ASCE 7-22 it bears on 11.4.7 (site response analysis
+    for Site Class F only) even though SDS/SD1/S1 are given directly.
     Occupancy fixes the 12.7.2 effective-weight inventory: an office carries
     a partition allowance (>= 10 psf where partitions exist) and no storage
     live-load fraction. Wind, snow and rain are declared not to govern this
     seismic archetype; the 50 psf floor live load is applied to the roof
     and envelopes the Table 4.3-1 roof live load.
     """
-    risk_category: str = "II"
-    site_class: str = "C"
+    # One source: Structure_Parameters.ASCE_RISK_CATEGORY (Risk Category III since the user decision of
+    # 2026-10-01), which also fixes Ie and the drift criterion (sp.seismic_design_basis). A policy that
+    # names another category is refused by the design driver, not silently designed with a stale Ie.
+    # The category does not select the occupancy, the gravity loading or the hazard declared below.
+    risk_category: str = field(default_factory=lambda: sp.ASCE_RISK_CATEGORY)
+    site_class: str = field(default_factory=lambda: sp.ASCE_SITE_CLASS)
     occupancy: str = "office"
     partition_allowance_ksf: float = 0.010
     storage_live_fraction_in_weight: float = 0.0
@@ -454,8 +463,10 @@ class FloorAnalysisConfig:
 # ACI acceptance limit, and the recipe is not validated for every geometry:
 # a floor whose affordable levels are fewer than two is an explicit
 # unresolved result, and a genuine convergence rejection stays a rejection.
+# 2026-10-03: allow all four levels on the pilot's largest 6x6 floor
+# (129,600 shells at 60 cells/bay). Explicit smaller user budgets still apply.
 PROBE_SLAB_REFINEMENT = {
-    "recipe": "graded_face_v1", "levels": 4, "max_shells": 45000,
+    "recipe": "graded_face_v1", "levels": 4, "max_shells": 130000,
     "moment_tolerance": 0.05, "shear_tolerance": 0.05,
     "tolerance_basis": "PROBE -- inherited 5% all-strip investigation screen of the 2026-09-24 "
                        "fixed-candidate benchmark (graded face meshes 12/24/48/60 per bay); not an ACI "
@@ -486,6 +497,8 @@ class IterationConfig:
     convergence_tol: float = 1e-3
     seed: Optional[int] = None
     penalty_weight: float = 1e3
+    # Full evaluations after first feasibility; untested alternatives are reported.
+    uniform_reduction_trials: int = 24
 
 
 @dataclass
@@ -498,7 +511,7 @@ class CapacityPolicy:
     2026-09-27 was produced with (records without the key are read as it,
     never relabelled); ``column_own_probable_envelope_v3`` is the column-own
     probable-strength rule prepared for review on 2026-09-20 and selected as
-    the design basis on 2026-09-27 (Codex repair review: the joint-limited
+    the design basis on 2026-09-27 (repair review: the joint-limited
     rule rested on an unsupported 50/50 sharing reduction, and the existing
     cage was inadequate under column-own demands). ``column_clear_height_convention``
     applies to the column-own rule: ``uniform_face_to_face`` (story_h - h_beam
@@ -507,6 +520,14 @@ class CapacityPolicy:
     """
     column_shear_method: str = "column_own_probable_envelope_v3"
     column_clear_height_convention: str = "physical_base"
+    # The uniform design's Ve rule (user decision 2026-10-02): 18.7.6.1.1 lets the column shear be limited
+    # by what the beams' probable strengths deliver through the joints, and the column-own rule left 42-in
+    # columns designing for about three times that. The grouped design is not defined for the joint-limited
+    # rule and keeps ``column_shear_method``. None makes the uniform design read ``column_shear_method`` too.
+    # User decision 2026-10-04 (pre-generation review): the beam limit stays, but the beam moments are divided
+    # between the column above and the column below by the analysis, not equally
+    # (``beam_delivery_analysis_split_v4``; ``beam_joint_delivery_limited_v2`` is the equal split it replaces).
+    uniform_column_shear_method: Optional[str] = "beam_delivery_analysis_split_v4"
 
 
 # ---------------------------------------------------------------------------

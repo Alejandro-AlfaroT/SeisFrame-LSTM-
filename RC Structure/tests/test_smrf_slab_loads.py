@@ -191,5 +191,19 @@ class SlabLoadTests(unittest.TestCase):
                     driver.ops.wipe()
 
 
+# These hand totals describe the framed members; the column extension above the roof is verified on its own
+# (tests/test_roof_extension.py), so this module runs with the terminating roof column.
+def setUpModule():
+    global _ROOF_PATCH
+    from unittest import mock as _mock
+    import Structure_Parameters as _sp
+    _ROOF_PATCH = _mock.patch.object(_sp, "ROOF_COLUMN_EXTENSION", False)
+    _ROOF_PATCH.start()
+
+
+def tearDownModule():
+    _ROOF_PATCH.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -94,6 +94,8 @@ def verify_installed_design(record):
     recorded with their axial estimates (the record holds no per-member
     column hinge strength to compare against, which is stated, not hidden).
     """
+    if record.get("design_mode") == "grouped":
+        return verify_installed_grouped_design(record)
     sections, rebar, slab = record["sections"], record["reinforcement"], record.get("slab") or {}
     checks, differences = [], []
 
@@ -207,6 +209,108 @@ def verify_installed_design(record):
                          "slab layout presence", "gravity load model", "steel materials", "hinged member count",
                          "beam family hogging/sagging strengths", "beam end strengths per member, end and sign against the record's "
                          "beam_slab_strengths entries" if per_end_checked else "beam end strengths (no record entries to compare)"],
+            "recorded_not_verified": ["column hinge strengths and axial estimates", "theta_p / theta_pc / theta_u", "spring Ke"]}
+
+
+def verify_installed_grouped_design(record):
+    """Compare the installed grouped design and the hinge registry with a saved grouped record, member by member.
+
+    Every hinged member's registry entry carries the design its hinges were built from; it is compared with
+    the record's own row for that physical member (group, section, bars, hoops), each beam end's hinge
+    yield strengths with the record's ``beam_end_strengths``, and each beam's bar rows with the record's
+    group rows. Column hinge strengths, rotation capacities and spring stiffness are recorded with their
+    ranges per group; the record holds no independent copy of them, which is stated, not hidden.
+    """
+    from Model import Member_Groups as mg
+    slab = record.get("slab") or {}
+    block = record.get("member_groups") or {}
+    checks, differences = [], []
+
+    def check(name, saved, installed, rel=1e-9):
+        ok = _close(saved, installed, rel)
+        checks.append({"item": name, "saved": saved, "installed": installed, "match": ok})
+        if not ok:
+            differences.append(f"{name}: saved {saved!r} installed {installed!r}")
+
+    state = mg.active()
+    check("member_groups.installed", True, state is not None)
+    check("member_groups.sha256", block.get("sha256"), None if state is None else state.identity())
+    check("slab.thickness_in", slab.get("thickness_in"), sp.SLAB_THICKNESS_IN)
+    check("slab_reinforcement.layout_present", bool((record.get("slab_reinforcement") or {}).get("layout")),
+          bool((sp.SLAB_REINFORCEMENT or {}).get("layout")))
+    check("gravity_load_model", record.get("gravity_load_model"), sp.effective_gravity_load_model())
+    materials = record.get("materials") or {}
+    check("materials.fy_ksi", materials.get("fy_ksi"), sp.FY_KSI)
+    check("materials.es_ksi", materials.get("es_ksi"), sp.ES_KSI)
+    for key, attr in (("beam_clear_cover_in", "BEAM_CLEAR_COVER_IN"), ("col_clear_cover_in", "COL_CLEAR_COVER_IN")):
+        check(f"materials.{key}", materials.get(key), getattr(sp, attr))
+    registry = hinge_registry()
+    inventory = element_inventory()
+    expected_hinged = (len(inventory["columns"]) if sp.IMK_APPLY_TO_COLUMNS else 0) + (len(inventory["beams"]) if sp.IMK_APPLY_TO_BEAMS else 0)
+    check("registry.hinged_member_count", expected_hinged, len(registry))
+    rows = {int(row["member_tag"]): row for row in block.get("members") or []}
+    design_keys = ("b_in", "h_in", "fc_ksi", "bar_size", "top_bars", "bot_bars", "side_bars", "stirrup_bar_size", "stirrup_legs",
+                   "stirrup_spacing_in", "stirrup_legs_by_direction")
+    saved_strengths = record.get("beam_end_strengths") or {}
+    saved_rows = (record.get("bar_layers") or {}).get("groups") or {}
+    member_mismatch, end_mismatch, row_mismatch, ends_checked, by_group = [], [], [], 0, {}
+    for entry in registry.values():
+        tag = int(entry["ele_tag"])
+        row = rows.get(tag)
+        installed = entry.get("installed_design") or {}
+        if row is None or entry.get("group_id") != row.get("group_id"):
+            member_mismatch.append(f"member {tag}: group {entry.get('group_id')!r} installed, {None if row is None else row.get('group_id')!r} saved")
+        else:
+            bad = [key for key in design_keys if not _close(row.get(key), installed.get(key))]
+            if bad:
+                member_mismatch.append(f"member {tag} ({row['group_id']}): {', '.join(bad)} differ from the saved member row")
+        group = by_group.setdefault(entry.get("group_id"), {"members": 0, "hogging": set(), "sagging": set(), "yield": set(), "axial": []})
+        group["members"] += 1
+        if entry["member_type"] == "column":
+            group["yield"].add(round(entry["yield_moment_y_kip_in"], 6))
+            group["axial"].append(entry["axial_kip"])
+            continue
+        saved = saved_strengths.get(str(tag)) or {}
+        for end in ("i", "j"):
+            for sign in ("hogging", "sagging"):
+                installed_value = entry[f"yield_moment_y_{sign}_{end}_kip_in"]
+                group[sign].add(round(installed_value, 6))
+                ends_checked += 1
+                if not _close(saved.get(f"{sign}_{end}_kip_in"), installed_value, 1e-6):
+                    end_mismatch.append(f"beam {tag} end {end} {sign}: record {saved.get(f'{sign}_{end}_kip_in')!r} installed {installed_value}")
+        installed_rows, group_rows = entry.get("beam_bar_rows") or {}, saved_rows.get(entry.get("group_id")) or {}
+        for face in ("top", "bottom"):
+            a, b = installed_rows.get(face) or {}, group_rows.get(face) or {}
+            if (a.get("per_layer") != b.get("per_layer") or len(a.get("offsets_in") or []) != len(b.get("offsets_in") or [])
+                    or any(not _close(x, y) for x, y in zip(a.get("offsets_in") or [], b.get("offsets_in") or []))):
+                row_mismatch.append(f"beam {tag} {face} bar rows differ from the saved rows of {entry.get('group_id')}")
+    for name, total, bad in (("registry.member_designs_vs_record_rows", len(registry), member_mismatch),
+                             ("registry.beam_end_strengths_vs_record", ends_checked, end_mismatch),
+                             ("registry.beam_bar_rows_vs_record", sum(1 for e in registry.values() if e["member_type"] != "column"),
+                              row_mismatch)):
+        checks.append({"item": name, "saved": f"{total} entries", "installed": f"{total - len(bad)} match", "match": not bad})
+        differences.extend(bad[:20])
+    groups = {gid: {"members": data["members"],
+                    **({"yield_moment_range_kip_in": [min(data["yield"]), max(data["yield"])],
+                        "axial_estimate_range_kip": [min(data["axial"]), max(data["axial"])]} if data["yield"] else
+                       {"hogging_kip_in": sorted(data["hogging"]), "sagging_kip_in": sorted(data["sagging"])})}
+              for gid, data in sorted(by_group.items(), key=lambda item: str(item[0]))}
+    registry_summary = {
+        "hinged_members": len(registry), "groups": groups,
+        "beam_end_strengths_verified_against_record_entries": ends_checked,
+        "column_hinges": {"basis": "nominal P-M of each column's own section and cage at its tributary gravity axial estimate; the "
+                                   "saved record holds no per-member column hinge strength, so this is recorded, not verified"},
+        "rotation_capacities_and_ke": {"theta_p_range": [min(e["theta_p"] for e in registry.values()), max(e["theta_p"] for e in registry.values())] if registry else None,
+                                       "theta_u_range": [min(e["theta_u"] for e in registry.values()), max(e["theta_u"] for e in registry.values())] if registry else None,
+                                       "basis": "Haselton 2008 per member from its own group's cage and hoops, and Ke from the member's own "
+                                                "properties; the record stores no independent copy, so these are recorded, not verified"},
+        "stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", None), "stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
+    }
+    return {"consistent": not differences, "checks": checks, "differences": differences, "registry": registry_summary,
+            "design_evidence_gaps": [],
+            "verified": ["member groups digest", "every hinged member's group, section, longitudinal bars and hoops against its saved row",
+                         "covers", "slab thickness", "slab layout presence", "gravity load model", "steel materials",
+                         "hinged member count", "beam end strengths per member, end and sign", "beam bar rows per member"],
             "recorded_not_verified": ["column hinge strengths and axial estimates", "theta_p / theta_pc / theta_u", "spring Ke"]}
 
 

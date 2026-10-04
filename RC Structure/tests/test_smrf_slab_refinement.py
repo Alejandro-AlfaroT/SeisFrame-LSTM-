@@ -10,7 +10,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import openseespy.opensees as ops
 from Design.SMRF_Floor_Analysis import analyze_floor
-from Design.SMRF_Floor_Mesh import floor_mesh
+from Design.SMRF_Floor_Mesh import floor_mesh, MAX_EXPLICIT_SHELLS
 from Design.SMRF_Slab_Actions import evaluate_slab_actions
 from Design.SMRF_Slab_Refinement import build_refined_slab_action_evidence, refinement_verified
 from test_smrf_slab_recovery import panel
@@ -95,7 +95,7 @@ class ExplicitFloorMeshTests(unittest.TestCase):
         ops.node(900, 1., 2., 3.)
         bad = [spec([0, 0, 200]), spec([0, 10, 199]), spec([0, math.nan, 200]),
                spec([0, True, 200]), spec([0, 7, 100, 193, 200], budget=4),
-               spec([0, 100, 200], budget=45001)]
+               spec([0, 100, 200], budget=MAX_EXPLICIT_SHELLS + 1)]
         for s in bad:
             with self.subTest(mesh=s), self.assertRaises(ValueError):
                 analyze_floor(SLAB, GEOMETRY, SECTIONS, CASE, mesh_spec=s)

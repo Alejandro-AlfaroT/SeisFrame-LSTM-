@@ -309,8 +309,25 @@ type rather than silently adopting these assumptions for unrelated input data.
   the captured actions (`run_checks_phase1(..., member_actions=...)`); a
   test pins the captured-action checks to the live-domain checks.
 - Separate rho=1 QEx/QEy drift runs, floor-node drift envelopes, Cd/Ie
-  amplification, and a story P-Delta screen. The current conservative screen
-  uses Risk II solely-moment-frame D/E/F drift limits.
+  amplification, and a story P-Delta screen. The screen uses the Table 12.12-1
+  "all other structures" limit of the configured risk category
+  (`Structure_Parameters.ASCE_RISK_CATEGORY`; Risk Category III, Ie = 1.25,
+  0.015 h since 2026-10-01), divided by rho as for solely-moment-frame SDC
+  D/E/F. The low-rise allowance of that table is not asserted. Category, Ie
+  and the limit come from one basis (`seismic_design_basis`); a contradictory
+  set is refused, and a record saved under another category is redesigned,
+  not relabelled (`demands.risk_basis`). The same basis declares the site
+  class (`Structure_Parameters.ASCE_SITE_CLASS`): Site Class C of ASCE 7-22
+  Table 20.2-1 for the whole generated population, by user decision of
+  2026-10-02 (the class in use since the demand declarations were introduced,
+  kept rather than changed). The hazard presets are declared SDS/SD1/S1 values
+  for that class, not geodatabase values; 7-22 takes SMS and SM1 from the
+  USGS geodatabase per site class (11.4.3) and has no Fa/Fv tables. The
+  ground-motion catalog stations are Site Class CD and D by Table 20.2-1
+  (Vs30 254 to 443 m/s); their use for a Site Class C design is a declared
+  simplification of the record set. A policy naming another class is refused
+  by the driver. Tables 1.5-2 and 12.12-1 were read from the standard on
+  2026-10-02 and agree with the transcribed values.
 - The section search closes on what qualification evaluates (see "Section
   search closure" below): drift steps the beam to the next depth, the beam
   capacity-shear section steps it to the wider variant of its depth, a
@@ -608,6 +625,65 @@ runs on the selected candidate and decides acceptance, so a preferred
 candidate that failed a constraint is saved as failed (dv150_v10 case_0138:
 the saved iteration failed beam shear, the last one passed capacity design
 and failed SCWB).
+
+Two bounded escalations (2026-10-02, from the v2VerificationPilot10
+screen). Axial domain: a factored axial load outside the installed
+section's nominal P-M domain, raised as `SectionAxialDomainError` in the
+steel pass or the capacity design, no longer ends the design. In the
+strong-column cage escalation (`_scwb_column_steel`) a cage whose domain
+does not hold the load is rejected by name and a heavier cage is tried; the
+rejections are kept under `scwb_joint.axial_domain`. When every cage of the
+section is outside its domain, or the installed cage's envelope leaves it,
+the column steps (larger size first, then the next concrete strength at the
+top size) without spending a design iteration, as a gravity failure does;
+each escalation is kept under `axial_domain_escalations` with its demand and
+domain, and a ladder with nothing left is a precise exhaustion. Nothing is
+clamped or extrapolated. Slab search (`_slab_search`): when the strip actions
+are verified and no four-layer layout of the declared bars and spacings
+carries them at the chosen thickness (`SlabLayoutError`), the thickness steps
+up the declared ladder (policy increment) for as long as the thickness screen
+supports the thicker slab on the installed beam; the transfer and the strip
+actions are rebuilt at each step. A thicker slab lowers alpha_fm, and at or
+below 0.2 the beam-supported screen no longer applies, so on long bays the
+ladder can end well short of its declared maximum; the exhaustion
+(`SlabThicknessExhausted`) says which of the two ended it. The beam then
+steps to the next deeper compatible rung and the slab is fitted and searched
+again from that rung's own screen: beam depth raises alpha_f, the beams take
+the panel shear the slab could not, and the screen admits a thinner slab. The
+step is recorded as a `slab_layout` substitution, every rung's thickness
+trials are kept under `slab_thickness_search` (`trials`, `beam_rung_steps`),
+and a thickness reached by stepping becomes the floor of the screen for the
+later rungs of the same design. A refinement comparison failure is not a
+thickness matter and is not retried. With no deeper compatible rung left the
+design ends in `SlabSearchExhausted`; nothing is assigned. Every slab refusal
+carries its evidence (the bar trials, the failing checks, the final strip
+comparisons, and for each unsized layer the demand envelope against the
+closest offered candidate, `explain_unsized_layers`), and the verification
+worker writes it to `failure_evidence.json` beside `result.json`.
+
+Beam growth (user decision 2026-10-02). The beam strength step used to scale
+the capacity proxy b h^2 sqrt(f'c) by DCR / target. A beam the steel pass
+cannot reinforce at its section keeps the seed bars and reports its DCR on
+them (5 to 12 in the 2 October screens), so that jump sent a 12 x 24 beam to
+30 x 36 at 8 ksi in one step; the stiffer frame then drew more base shear
+and asked for columns past the ladder. The step is now sized from the
+governing factored beam moment of the evaluation (`beam_flexure_demand_kip_in`,
+kept in the history): the lightest rung at or above the current one whose
+singly reinforced section carries that moment at a tension steel ratio of
+0.015 (`Section_Design.BEAM_GROWTH_STEEL_RATIO`, d = h - 3.5 in), never above
+the proxy jump. The ratio is a search heuristic, not a code limit (18.6.3.1
+allows 0.025); the steel pass still selects the bars and the next evaluation
+decides. Drift, the shear section and bar threading keep their own steps.
+
+Retention (user decision 2026-10-02): only the verification runs
+(`Design/Verify_Designs`, `Design/Grouped_Runner`) keep the per-iteration
+`history`; data generation (`Ground_Motion_Main`, via
+`load_or_create_design(keep_history=False)`) writes the final design with
+`history` empty and `search.history_retained` false, keeping the search
+summary, the counts and the selected candidate's constraints. On the
+screening records the history is 0.2 MB of a 96 MB reference record; the
+weight is the combination member actions and the joint evidence, which the
+launcher's re-qualification reads, so they stay.
 
 One more closure came out of the rerun: the joint rule is priced on bar
 positions, which sit inside the hoops the capacity design selects for the
@@ -929,15 +1005,17 @@ beam width, budget) travel with the evidence and are re-resolved and
 compared at qualification. The nested levels are increasing, so the
 affordable ones under `max_shells` are a prefix; fewer than two is an
 explicit `unresolved_budget` result -- no solve, no coarsening, no pass --
-and the design refuses with that status named. On the plan's largest 6x6
-floors only the 12- and 24-cell levels fit the 45,000-shell budget, so
-their screen is coarser than the benchmark's and a genuine convergence
-rejection there is a result, not a malfunction. Both PROBE factories
+and the design refuses with that status named. The original 45,000-shell
+budget retained only the 12- and 24-cell levels on the largest 6x6 floors.
+The 2026-10-03 repair raises the PROBE budget to 130,000, admitting the full
+12/24/48/60 sequence (129,600 shells at the finest level). Explicit smaller
+budgets still truncate the sequence and cannot claim the omitted comparisons.
+Both PROBE factories
 (`Verify_Designs.probe_config`, `Evidence_Summary.probe_config`) carry the
 one shared `Design.Config.PROBE_SLAB_REFINEMENT`; an asserted design
 without any plan is refused before solving, naming the missing field.
 Each mesh contains `x_offsets_in` and `y_offsets_in` spanning one bay,
-and an explicit `max_shells` budget (at most 45,000 for one floor).
+and an explicit `max_shells` budget (at most 130,000 for one floor).
 Coordinates repeat at every bay; later meshes retain all previous nodes.
 `SMRF_Floor_Analysis` uses actual cell widths and physical load fractions,
 records the full coordinates and coordinate hash, and selects UmfPack for
@@ -1180,7 +1258,7 @@ class and risk category from ASCE 7-22's lists, a non-blank occupancy,
 finite nonnegative loads, an accidental-torsion ratio of at least 5% and
 Boolean flags (`SMRF_Demands.demand_policy_problems`). Site class and risk
 category must be exactly the ASCE 7-22 spelling: the fourth cross-check
-found the validator folding " D " to D while the 11.4.8 site-specific flag
+found the validator folding " D " to D while the site-specific flag
 read the value verbatim, so the padded spelling dodged the flag. The
 validator no longer normalises anything and the flag reads the declared
 value as declared. The design refuses a partly filled or invalid
@@ -1194,8 +1272,10 @@ and the drift/ELF assumptions. Items:
 
 - `demands.site_hazard`: SDC derived from SDS/SD1/S1 and risk category
   (Tables 11.6-1/11.6-2, S1 >= 0.75 rule) must match the preset label; a
-  declared Site Class D/E/F with S1 >= 0.2 flags the 11.4.8 site-specific
-  requirement.
+  declared Site Class F flags the site response analysis of ASCE 7-22
+  11.4.7. Until 2026-10-02 the flag applied the 7-16 rule (Site Class D, E
+  or F with S1 >= 0.2, its 11.4.8), which the 2022 edition does not have;
+  it never fired because the declared class is C.
 - `demands.elf_eligibility`: ASCE 7-22 12.6 permits the ELF procedure for
   any structure; the check records the edition, the height, the torsional
   classification and regularity by construction (rectangular grid, frames
@@ -1572,7 +1652,9 @@ beyond 36 in (at 40 in the same cage leaves four lanes per layer and the
 strong-column check eases), No. 18 column bars at four and two per face
 with a column-side one-layer preference, interleaved orthogonal layers, or
 a relaxed width-to-depth cap. The user raised the column ladder's cap to
-42 in, with a 40-in rung (2026-09-27, `Section_Design.COLUMN_SIZES_IN`);
+42 in, with a 40-in rung (2026-09-27, `Section_Design.COLUMN_SIZES_IN`),
+and on 2026-10-02 set the steps for V2 at 1 in from 14 to 24 and 2 in from
+24 to 42 (20 sizes, 80 rungs with the four concrete strengths);
 a larger column gives the strong-column check its lever arm back without
 adding face bars, and a cage with two interior side bars then keeps four
 or five beam lanes per layer.
@@ -1751,6 +1833,227 @@ beyond 42 in, or treating this plan as one the rules do not close and
 taking a representative case with 15-ft bays. The Codex-accepted review
 candidate is unchanged and was designed under the joint-limited rule.
 
+## Column bar development over the clear height (ACI 318-19 18.7.4.3)
+
+Added 2026-10-02 from the code-book review: the 2019 edition requires, for
+special moment frame columns, that 1.25 ld of the longitudinal bars fit within
+half the clear height (18.7.4.3; the 2025 edition keeps the length limit and
+adds an alternative, Ktr >= 1.2 db, which is not admitted under the 2019
+basis). The design had no such check. ld is Eq. (25.4.2.4a) with the cage's
+own cb (the lesser of the bar centroid's distance to the face, clear cover +
+hoop + db/2, and half the least bar spacing), Ktr = 0, the confinement ratio
+capped at 2.5 and never assumed there, sqrt(f'c) capped at 100 psi, the size
+and grade factors of Table 25.4.2.5 and the 12-in minimum
+(`Design/ACI_Checks.column_bar_bond_18_7_4_3`, `column_bar_cb_in`). The clear
+height is the face-to-face height of a typical story, story_h - h_beam; the
+base story runs to the fixed base and is longer. A positive Ktr needs a
+declared method that names the crossing legs and the splitting plane; none is
+declared. Mechanical splices do not remove the requirement.
+
+Where it acts. (1) Cage selection: `Redesign._col_candidates` never offers a
+cage whose bars cannot develop (`_column_cage_bond_ok`), on the slab-aware
+path; the strong-column escalation draws from the same pool. (2) Capacity
+design: `SMRF_Capacity_Design.design_column_bar_bond` records every factor
+and the check `column.bar_bond_development` (1.25 ld <= lu / 2, in inches);
+qualification recomputes it from the record like the other capacity items.
+(3) The planner: when no cage at the column develops its bars the column
+steps (reason `column_bar_bond`); `column_cage_rule.bond_cages_available`
+says whether any cage of the declared bar sizes could. (4) Grouped design:
+`Group_Selection.select_column_chain` rejects such cages by name
+(`rejected.bar_bond`) and `Group_Capacity.column_group_bar_bond` checks each
+column group against the least face-to-face clear height of its members.
+
+Numbers. On the independent screen of the r4 reference record (No. 10 bars,
+No. 5 hoops, 1.5 in cover, f'c 5 ksi): cb 2.760 in, ratio 2.173, ld 37.19 in,
+1.25 ld 46.49 in against 66 in. The simplified Table 25.4.2.3 expression the
+transitions module uses for laps gives 67.35 in and would fail there; the
+detailed equation is the basis of this check. At the repository's default
+10-ft test story a No. 11 at 5 ksi (55.9 in against 48 in) is rejected, so
+the cage-rule test fixtures now use a 14-ft story; at 14 ft a No. 14 at 5 ksi
+(76.7 in against 72) is rejected and needs a 16-ft story or higher f'c. The
+V2 population has 12 to 18 ft stories.
+
+The center-half lap rule cited as 18.7.4.3 in earlier notes is 18.7.4.4 in
+the 2019 and 2025 editions; the citations were corrected at the same time,
+as was the radius-of-gyration clause (6.2.5.2(b), not 10.10.1.2) and the
+numbering of the two redundancy conditions of ASCE 7-22 12.3.4.2.
+
+## Grouped design (2026-10-02)
+
+User decision: member design may vary by story band and framing location.
+Everything above describes the uniform design (one column section and cage,
+one beam section and cage for the whole frame); it is unchanged and remains
+the reference. A grouped design is a second mode. The two are never mixed:
+while a grouped design is installed the uniform section and cage values of
+`Structure_Parameters` are withdrawn (any use raises), and a grouped record
+carries no `sections` or `reinforcement` block.
+
+**Groups.** `Model/Member_Groups.py`. Story bands are pairs from the base;
+an orphan last story joins the band below (five stories: 1-2, 3-5). Within a
+band the columns form four groups (corner, x-boundary edge, y-boundary edge,
+interior) and the beams four (x edge, x interior, y edge, y interior).
+Opposite sides of the plan share a group. The explicit assignment of every
+physical member is saved with its digest. The two-story rule is a research
+policy, not a code rule. All grid lines remain special moment frames.
+
+**Member properties.** `Model/Member_Properties.py` resolves every physical
+member: the joint core at floor k is the column of story k (the column
+below); a beam's clear span runs between the faces of its own two end
+joints; its flange comes from its actual neighbouring webs; weights, masses
+and the ELF weights come from one member ledger. Both analysis frames
+(`Design/SMRF_Elastic.py`, `Model/Build_Model.py`), gravity and mass
+(`Loads/`), the hinges (`Model/IMK_Hinges.py`, `Model/IMK_Calibration.py`)
+and the bar layering (`Model/Member_Bar_Layers.py`) read the resolved member.
+
+**Floors.** A floor is described line by line (`Design/SMRF_Floor_Sections.py`)
+and identified by the signature of its beam lines and supports. Floors with
+one signature share one slab-to-frame transfer and one strip-demand solve;
+a transfer is matched to a floor by signature, never by band, and a transfer
+solved for other floors is refused. One slab thickness and one layout serve
+all floors: the thickness passes every panel of every distinct floor and the
+layout is designed on the envelope of their strip demands. When the demands
+are verified and no layout passes, the thickness steps up.
+
+**Checks by group.** `Design/Group_Checks.py` (member strength on each
+member's own concurrent actions), `Design/Group_Capacity.py` (column-own
+capacity shear per column group, hoops per group, joint types by the groups
+that meet, the strong-column rule at every physical joint with each column's
+own axial range and one column at the roof), `Design/Group_Selection.py`
+(each group's cage; the cages of one column line are chosen together over
+its bands so that strength, the strong-column rule and the transition at
+every band boundary hold).
+
+**Column transitions.** `Design/SMRF_Transitions.py`, declared rule set
+`column_transition_rules_v2`. Every longitudinal bar of both columns is
+placed at its declared coordinates (clear cover + hoop diameter + half the bar
+diameter from the face), so a column's bar positions depend on its section,
+its bar size and its hoop bar size; two columns of one section and cage with
+different hoop bars do not have the same bar positions. Each upper bar is
+paired with one lower bar on the same face, and every lower bar has one path:
+straight (same coordinates), offset (bent inside the joint to its upper
+position), lap spliced or mechanically spliced (a smaller bar above, or an
+upper bar on a face with fewer bars), or terminated at mid-height of the upper
+story. All offset bars are bent between the same two elevations; the inclined
+length is 6 times the largest bar offset (10.7.4.1) and must fit the joint
+depth; a face that steps in 3 in or more takes no offset bends (10.7.4.2). The
+hoop legs crossing the section in each direction carry 1.5 times the horizontal
+components of the offset bars on the more heavily loaded side (10.7.6.4), with
+the lower column's hoop sets at stated stations within 6 in of each bend
+point; additional sets down to 3 in spacing are counted and priced (that 3 in
+is a declared search restriction, not an ACI minimum). Development lengths are
+those of Table 25.4.2.3 with the row decided from each cage (clear spacing,
+clear cover to the bar, hoops as ties). Unsupported: a larger column above, a
+face step of 3 in or more, more or larger bars above, different concrete
+grades; a bar that stops where the column steps in fails its rule. This is the
+supported scope of the implementation, not a statement that no other detail
+can be built. Not established, and reported as such: which hoop legs engage
+which offset bar and their anchorage, the bend ties among the beam bars of the
+joint, the congestion of the lap zone, and whether the upper column's own
+hoops satisfy 15.2.6(b) above a reduced column. A record in which any bar is
+moved, spliced or stopped keeps `detailing.column_transition_rules_reviewed`
+open.
+
+**Candidate evaluation.** `Design/Grouped_Design.py` evaluates one complete
+grouped design: slab and floors, the elastic frame, every strength
+combination, cages and hoops of every group until they stop changing, member
+strength, capacity design, joints, drift and stability, and the story-by-story
+strength and stiffness evidence. The reinforcement is settled only when the
+longitudinal selection and the hoops stop changing in the same pass and the
+slab layout, re-priced on the final cages, does not change; a design that does
+not settle is a search outcome, with the capacity design rebuilt on the design
+left installed so the evidence describes it. A candidate that cannot be evaluated
+for a named design reason is `infeasible` with the stage and the evidence: no
+slab thickness, a floor solve that does not balance, a slab refinement that
+does not pass, a gravity analysis that does not converge, an axial load
+outside a section's strength domain (never clamped), no admissible cage.
+Anything else is an error and is raised. An axial load is placed against both
+ends of the strength surface before any shortcut: above the compression cap
+and beyond the pure-tension end it is a named domain failure with the ratio of
+the load to the capacity of its own sign, in the grouped routines and in the
+two shared uniform helpers alike.
+
+**Vertical regularity (ASCE 7-22 Table 12.3-2).** Stiffness: soft story
+(Type 1a, below 70% of the story above or 80% of the three-story average) and
+extreme soft story (Type 1b, 60% and 70%), with the two exceptions of 12.3.2.2,
+which apply to Types 1a and 1b only. Exception 1: no story drift ratio above
+130% of the next story above, the top two stories not evaluated; with no
+relationship left to evaluate (two stories or fewer) it is not shown, since an
+empty list is not a passing one. Exception 2: the types are not required to be
+considered for a one-story building in any SDC or a two-story building in SDC
+B, C or D. The table and both exceptions were read from the standard itself
+(ASCE/SEI 7-22 p. 120) on 2 October 2026. The ratios are formed only
+from complete evidence: one finite positive drift row per story and direction,
+no duplicates, a coherent ELF shear basis; otherwise the check is not
+evaluated. Type 1b is failed in SDC E and F (12.3.3.1); otherwise an indicated
+type is left open for engineering review. Table 12.3-2 gives Type 1a no
+reference section and Type 1b only 12.3.3.1 (SDC E and F), so in SDC D the
+open status is a project choice, not a prohibition of the standard. Strength:
+weak story (Type 4a, "less than that in the story above" in the table;
+permitted in SDC E and F at or above 80% by the exception of 12.3.3.1) and
+extreme weak story (Type 4b, below 65%; not permitted in SDC D, E and F by
+12.3.3.1 and 12.3.3.2; limited to two stories or 30 ft in SDC B and C by
+12.3.3.3 unless the weak story resists Omega0 times the design force); the
+rows are provisional and the check stays open while the story-strength model
+is unverified (M1). The 2022 edition has no weight (mass) irregularity: the
+story weights and their ratios are recorded as a description, with no
+threshold and no check. Types 2 and 3 do not arise by construction.
+
+**Search.** `Design/Grouped_Search.py`. The seed is where the search starts
+(a uniform design expanded into its groups, or one column and one beam
+section for every group); it bounds nothing. Feasibility phase: the groups
+named by the failed constraints grow one ladder step. Reduction phase: one
+group at a time is offered the next smaller ladder section, the whole frame
+is re-evaluated, and the move is kept only under the declared policy
+`dominance_concrete_and_total_reinforcement_v1`: modeled concrete and total
+reinforcement do not increase and at least one decreases. A move that lowers
+one and raises the other is retained as a tradeoff for review and not
+adopted; with a quantity unknown (no slab layout) the move is unresolved and
+not adopted; fewer form sizes decide only a tie. A rejected trial restores
+the previous design completely (members, slab, transfer, layout). Columns
+may not grow upward along a line nor step in by 3 in or more per face
+between bands. Both phases have explicit budgets of complete evaluations,
+part of the request identity; the stop reason separates budget exhaustion
+from infeasibility and none of them is evidence of an optimum. Every
+candidate is appended to `grouped_candidates.jsonl` as it is decided.
+
+**Record and qualification.** `Design/Grouped_Record.py`, schema
+`rc_smrf_grouped_candidate_v1`. Qualification installs the record, recomputes
+the capacity design, member strengths, beam end strengths, quantities, the
+weight ledger and the story evidence, compares them with the saved copies
+and consumes only the recomputed objects. Open whatever the numbers:
+`qualification.strength_model_verification`, the vertical strength
+regularity (story-strength model, review item M1; nothing is regular by
+construction over height), `qualification.detailing_model_consistency`,
+`detailing.congestion_and_placement`, and the transition rules whenever a bar
+is moved, spliced or stopped at a band boundary. `GENERATION_RELEASE_READY` is untouched.
+
+**Model and exports.** The nonlinear frame of a grouped design is supported
+for IMK member hinges with rigid centerline joints. Fiber members, the
+scissors joint springs and the floor compatibility, cut-region, nodal-cut and
+composite-section diagnostics refuse a grouped design. The installed-design
+check compares every hinged member with its saved row. Element rows carry
+each member's own section, cage, hoops, group and grid position after the
+uniform columns (the 14-column edge attributes are unchanged); the hinge
+tables add the group columns; `global_parameters.json` writes the
+one-section entries as null with the group designs beside them, and the
+digest of the member groups is an output identity key. The hybrid sample's
+global feature vector has one-section entries that do not exist for a
+grouped design: it refuses such a case until a replacement is declared.
+
+**Running one case.** `Design/Grouped_Runner.py` designs one manifest case in
+a new directory with explicit seed and budgets and optionally runs the
+gravity / modal stage; see its docstring. A directory holds one attempt.
+
+Limitations of this revision: one column and one beam concrete grade, taken
+from the seed and not searched (so no size is shown to be a minimum and no
+geometry infeasible over the full material domain); square columns; mirrored
+plan groups; the transition rules as declared above; the story-strength model
+provisional; quantities are modeled quantities for comparing candidates, not a
+takeoff, and no cost data is used. At transitions the terminated bars, the
+additional hoop sets at offset bends and the lower hoops continued above a
+joint of unchanged section are priced; above a reduced column no
+continuing-hoop detail is declared and none is priced.
+
 ## Generation safeguard and diagnostic use
 
 `Ground_Motion_Main.py` stops before design/NTHA when the new methodology is
@@ -1767,6 +2070,33 @@ An old design artifact is rejected, never silently upgraded.
 
 `--skip-design` remains an explicit legacy-analysis option. It must not be used
 to bypass qualification for a dataset claimed to consist of designed SMRFs.
+
+Verification stages (`Design/Verify_Designs --stages`): `design`, then
+`gravity_modal` (the nonlinear build, gravity, modal, installed-topology and
+hinge-export checks) and, since 2026-10-02, `figures`
+(`Design/Design_Figures`): the structure in 3D, the column and beam cross
+sections with the saved cage's bar positions, hoops, crossties, bar layers
+and slab mats, the elevation of the hoop zones at a joint, and the joint
+detailing with the plan section, the anchorage elevation, the splice basis
+and the joint shear table by Table 18.8.4.3 row. Everything is read from
+`design.json`; nothing is recomputed, a missing value is named in the stage's
+`notes`, and a grouped record is refused (its figures are a later extension).
+The stage result is `figures.json` beside the design and its status appears
+in `numerical_completion` like the gravity and modal stage.
+
+The analysis profile (`Model/Analysis_Profile`; `v2_nonlinear_flexure_screening_v1`
+for V2) is carried through the generation chain since 2026-10-02 (screening
+repair item 6): `Generate_Parameterized_Dataset --profile` records it in the
+plan (`analysis_profile`, None for an unprofiled plan, so a root never mixes
+profiles) and hands it to `Generate_Hybrid_Dataset --profile`, which passes it
+to every `Ground_Motion_Main --profile` run. The run applies the profile after
+the geometry and site and before the design is loaded or created, so the
+design identity carries it (a design made under another profile is refused),
+verifies the built domain against it before any analysis
+(`verify_installed_domain`), and writes `analysis_profile_id` and its identity
+digest into `global_parameters.json`; the id is an output identity key, so
+runs of different profiles cannot share a directory. Changing only the
+repository default `JOINT_MODEL` would not have done this.
 Neither code tests nor a manually edited `accepted: true` clears open checks.
 
 `Design/Evidence_Summary.py` writes the evidence summary the assertion
@@ -1808,6 +2138,103 @@ child would refuse it again on every resume at the cost of a full design.
 After the remaining design work is verified, freeze one new plan and methodology
 version, distribute disjoint case ranges, and compare hashes on all computers.
 Keep old and new datasets separate until their compatibility is assessed.
+
+## Uniform search repair (2026-10-03)
+
+The uniform path now evaluates independent candidates from the same requested
+reinforcement, hoop and slab state. Nested state snapshots are copied on capture
+and restore. Failed candidates cannot impose their cage or slab thickness on a
+later trial. Joint/cage failures add independent concrete-grade and beam-width
+alternatives to a bounded feasibility frontier. The frontier prioritizes proposals
+from parents closer to strength and drift feasibility before older branches, so
+alternatives from a severely undersized beam cannot consume the entire budget.
+
+After the first passing candidate, `IterationConfig.uniform_reduction_trials`
+(default 24, zero disables reduction) bounds a discrete neighborhood of column
+sizes and concrete grades and up to two lighter beam shapes. A failed intermediate
+size does not exclude any smaller size. All proposed pairs still undergo the full
+slab, demand, reinforcement, capacity and drift pipeline. Substituted beam rungs
+are recorded as the actual evaluated section.
+
+The incumbent changes only when modeled concrete and total steel do not increase,
+neither concrete grade increases, and the form count does not increase, with at
+least one strict improvement. These are quantities, not prices. Other feasible
+candidates remain recorded alternatives. The report states the budget and every
+untested pair; it makes no minimum-size or global-optimum claim. The DCR objective
+only ranks diagnostic fallback if no candidate passes. Candidate screening and
+final qualification remain separate, including unresolved torsion evidence.
+
+A proposed slab bottom-mat displacement without an installed bar path/elevation
+now remains an unresolved overlap and fails the geometry check. The earlier
+one-inch proposal is retained as a diagnostic, not an acceptance waiver. The
+slab reinforcement scope and nonlinear model profile are unchanged. Gravity or
+hoop-closure nonconvergence is unresolved analysis, not proof of section weakness
+and not a reason to automatically grow a section.
+
+`Design/Replay_Uniform_Candidate.py` audits a saved cage and re-evaluates its section
+seed with fresh reinforcement in a new output directory. Original runs are read
+only. Replay without reduction is a section-seed diagnostic, not an optimization
+or an earthquake moment–rotation validation.
+
+For the ten-case feasibility regression, use
+`tests/run_uniform_search_regression.py --manifest <pilot manifest> --root <new folder>`.
+It validates the manifest, runs its initial case alone, then uses the declared
+worker cap. Reduction is disabled by default in this regression only; the separate
+case-0004 replay exercises 24 reduction trials. `--summarize-only` revalidates and
+summarizes the saved results using that same explicit reduction budget.
+
+## Beam/slab bar-layout repair (2026-10-03)
+
+When the installed candidate passes strength and joint checks and its only
+capacity-design failure is a crossing slab-mat overlap, the uniform driver tries
+the other supported beam stacking directions and row orders at the same sections,
+bar counts, diameters and slab layout. It prefers the current row order before
+trying the alternative. These are actual straight beam row arrangements installed
+in `Structure_Parameters`, not changes to the acceptance flag or local slab-bar
+displacement proposals. Every geometric fit reruns hoop closure, every captured
+member action, and the complete joint SCWB checks. A rejected trial restores the
+original cage. Saved row coordinates feed the existing strength and IMK paths.
+
+If no arrangement passes, the driver tries the next slab thickness on the existing
+configured ladder before returning to member-section search. Each thickness starts
+from the same requested cage and rebuilds floor transfer, strip actions and slab
+reinforcement, periods, torsion and frame demands. The outer search then checks drift
+and quantities for that final thickness. The ladder remains bounded by the slab
+policy and applicability screen; numerical/refinement failures remain unresolved.
+Other strength or capacity failures bypass this targeted repair. All arrangements,
+rejections and thickness trials are retained in `slab_thickness_search.bar_layout_trials`.
+This is a feasibility repair, not an economic optimum or validation of earthquake
+moment–rotation histories.
+
+## Slab refinement repair (2026-10-03)
+
+The pilot failures had two causes: the shell budget dropped requested fine
+levels on cases 0007, 0009 and 0010, while the bottom-shear envelope selected
+only Gauss points classified as pure sagging. That discrete mask could change
+abruptly between meshes, including the final 48/60 comparison of case 0008.
+
+Bottom shear now uses each element's bilinear raw-tensor recovery over its
+clear-span area, with Wood-Armer applied at the recovered coordinates. A
+bounded subdivision search retains a pure-sagging witness and a conservative
+upper bound on absolute shear. Corner extrema bound bilinear fields; interval
+tests discard only boxes that cannot contain the required tension region.
+The upper bound must close within 0.05% of the witness plus 1e-10 kip/in
+(0.01% until the 2026-10-03 review, where 2 of 400 random fields did not close).
+After at most 10,000 subdivisions per panel/axis, an unclosed search raises
+an analysis error. Element sides remain separate; peaks are not averaged.
+Stored demand locations include the witness, upper bound and remaining gap.
+The moment envelope and support-face shear recovery are unchanged.
+
+The PROBE shell budget now admits all four existing graded levels on the
+largest pilot floor. Moment and shear refinement tolerances remain 5%; this
+is still a numerical investigation screen, not an engineering acceptance
+assertion. Refinement success does not imply full slab or frame qualification.
+
+`tools/replay_slab_refinement_failure.py --case-dir <old case> --output <new folder>`
+replays the precise failed sections and slab thickness, retaining the source
+hashes, every level and comparison, recovered demands and subsequent slab
+reinforcement selection. The optional `--max-shells` changes the declared
+budget for that replay only, within the explicit mesh limit.
 
 ## Reference basis
 

@@ -97,7 +97,7 @@ class TorsionalIrregularityRuleTests(unittest.TestCase):
             self.assertIn("not a code provision", basis)
 
     def test_amplification_uses_level_displacements_not_story_drifts(self):
-        """Codex's example: edge displacements (0.10, 0.10) at level 1 and (0.30, 0.20) at level 2."""
+        """The review example: edge displacements (0.10, 0.10) at level 1 and (0.30, 0.20) at level 2."""
         self.assertAlmostEqual(story_drift_ratio(0.30 - 0.10, 0.20 - 0.10), 4.0 / 3.0)   # story 2 drifts 0.20 / 0.10
         level_2 = amplification_from_level_displacements(0.30, 0.20)
         self.assertAlmostEqual(level_2["ratio"], 1.2)
@@ -126,7 +126,7 @@ class TorsionalIrregularityRuleTests(unittest.TestCase):
             one_sided_strength_fraction([0.0, 1.0], [1.0], 0.5)
 
     def test_saved_strength_evidence_needs_the_full_line_contract(self):
-        """Codex F1: a named scalar, a single direction or a short roster is unknown, never a fraction."""
+        """Review item F1: a named scalar, a single direction or a short roster is unknown, never a fraction."""
         import copy
         geometry = {"num_bay_x": 2, "num_bay_y": 3, "num_floor": 4, "story_h_in": 120.0, "bay_x_in": 120.0, "bay_y_in": 144.0}
         families = {"x_edge": {"mn_negative_kip_in": 500.0, "mn_positive_kip_in": 400.0},
@@ -377,13 +377,21 @@ class DemandBasisEvaluationTests(unittest.TestCase):
         self.assertFalse(DemandPolicy(declared_by="a", declaration_date="2026-09-14", declaration_basis="b", site_class="Z").declared())
 
     def test_site_specific_analysis_flag_cannot_be_dodged_by_whitespace(self):
-        """Fourth cross-check: 'D' failed the 11.4.8 flag and ' D ' passed it."""
+        """Fourth cross-check: a padded spelling once dodged the flag. Under ASCE 7-22 the flag is Site Class F
+        only (11.4.7); Site Class D with S1 >= 0.2 passes (the 7-16 rule is not in this edition)."""
         record = _record()
-        record["demand_basis"]["policy"]["site_class"] = "D"
+        record["demand_basis"]["policy"]["site_class"] = "F"
         canonical = {c["id"]: c for c in evaluate(record)}["demands.site_hazard"]
         self.assertEqual(canonical["status"], "fail")
         self.assertTrue(canonical["details"]["site_specific_ground_motion_required"])
-        for spelling in (" D ", "d", "D\n"):
+        self.assertIn("11.4.7", canonical["clause"])
+        self.assertNotIn("11.4.8", canonical["clause"])
+        record["demand_basis"]["policy"]["site_class"] = "D"
+        self.assertGreaterEqual(record["seismic"]["s1"], 0.2)
+        in_d = {c["id"]: c for c in evaluate(record)}["demands.site_hazard"]
+        self.assertEqual(in_d["status"], "pass")
+        self.assertFalse(in_d["details"]["site_specific_ground_motion_required"])
+        for spelling in (" F ", "f", "F\n"):
             record["demand_basis"]["policy"]["site_class"] = spelling
             padded = {c["id"]: c for c in evaluate(record)}["demands.site_hazard"]
             self.assertEqual(padded["status"], "not_evaluated", spelling)
@@ -437,7 +445,7 @@ class DemandBasisEvaluationTests(unittest.TestCase):
         self.assertTrue(in_e["demands.redundancy"]["details"]["tir_exceeds_1_4"])
 
     def test_torsion_evidence_fails_closed(self):
-        """Codex's counterexamples plus duplicates, missing cases, tampered rows, legacy rows and stale scalars."""
+        """The review counterexamples plus duplicates, missing cases, tampered rows, legacy rows and stale scalars."""
         def torsion_statuses(record):
             checks = {c["id"]: c for c in evaluate(record)}
             return checks["demands.torsional_irregularity"], checks["demands.accidental_torsion"]
@@ -523,7 +531,7 @@ class DemandBasisEvaluationTests(unittest.TestCase):
         self.assertEqual(len(irregularity["details"]["ax_by_level"]), 8)
 
     def test_strength_evidence_gaps_leave_the_classification_open(self):
-        """Codex F1 through the evaluator: X-only lines, a named scalar, a short roster, stale inputs."""
+        """Review item F1 through the evaluator: X-only lines, a named scalar, a short roster, stale inputs."""
         def status(mutate):
             record = _record()
             block = record["demand_basis"]["regularity"]["lateral_strength_distribution"]
@@ -596,7 +604,7 @@ class DemandBasisEvaluationTests(unittest.TestCase):
         self.assertEqual((item["status"], item["details"]["label"]), ("pass", "type_1"))
 
     def test_drift_primitives_must_match_displacement_primitives(self):
-        """Codex F2: story drifts are the differences of the same edge's level displacements (fixed base)."""
+        """Review item F2: story drifts are the differences of the same edge's level displacements (fixed base)."""
         # Consistent non-proportional response: edge a levels 0.1, 0.3, 0.5, ...; edge b 0.1, 0.2, 0.3, ...
         # Story drifts (0.1, 0.1) then (0.2, 0.1): TIR = 1.333 (by drift); level ratios 1.0, 1.2, 1.25, ... 1.304.
         record = _record_from_levels([0.1 + 0.2 * k for k in range(8)], [0.1 + 0.1 * k for k in range(8)])
@@ -610,7 +618,7 @@ class DemandBasisEvaluationTests(unittest.TestCase):
         self.assertEqual(checks["demands.torsional_irregularity"]["status"], "pass")
         self.assertAlmostEqual(checks["demands.torsional_irregularity"]["capacity"], top["ax"])
         self.assertAlmostEqual(checks["demands.accidental_torsion"]["demand"], 4.0 / 3.0)
-        # Codex's inconsistent record: drift magnitudes 2.0769 / 1.0 with displacements that imply 1.0 / 1.0.
+        # The inconsistent record: drift magnitudes 2.0769 / 1.0 with displacements that imply 1.0 / 1.0.
         broken = _record_from_levels([1.0 * (k + 1) for k in range(8)], [1.0 * (k + 1) for k in range(8)])
         for row in broken["demand_basis"]["torsion"]["stories"]:
             row["delta_end_a_in"], row["delta_max_over_avg"] = 1.35 / (2.0 - 1.35), 1.35

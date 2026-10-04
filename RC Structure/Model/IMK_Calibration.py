@@ -35,6 +35,7 @@ import math
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
+from Model import Member_Groups as mg
 from RC_Design_Check import _beta1, _col_steel_layers
 
 
@@ -184,8 +185,13 @@ def column_gravity_axial(story_index, grid_i, grid_j):
     contributes its tributary load, plus the self weight of the columns above.
 
     story_index is one-based: story 1 is the column between the base and the
-    first elevated floor.
+    first elevated floor. Under a grouped design every floor above contributes
+    the weight of its own members (Model.Member_Properties).
     """
+    from Model import Roof_Extension as roof
+    if mg.is_grouped():
+        from Model import Member_Properties as mp
+        return mp.column_gravity_axial(story_index, grid_i, grid_j)
     floors_above = max(0, sp.NUM_FLOOR - story_index + 1)
     floor_load = sp.node_gravity_load_kip(grid_i, grid_j) * floors_above
     if sp.SLAB_THICKNESS_IN is not None:
@@ -195,7 +201,7 @@ def column_gravity_axial(story_index, grid_i, grid_j):
         self_weight = sp.node_structural_self_weight_kip(grid_i, grid_j) * floors_above
     else:
         self_weight = sp.col_self_weight_kip_per_in() * sp.STORY_H * floors_above
-    return floor_load + self_weight
+    return floor_load + self_weight + roof.weight_kip(grid_i, grid_j)
 
 
 def column_grid_position(node_tag):
@@ -207,14 +213,33 @@ def column_grid_position(node_tag):
     return floor_below + 1, grid_i, grid_j
 
 
-def axial_load_ratio(axial_kip, member_type):
-    """Normalized axial load nu = P / (Ag f'c)."""
+def _section_values(member_type, design=None):
+    """(b, h, fc, bar_size, bar_area, top, bot, hoop_size, hoop_legs, hoop_spacing) of one member.
+
+    ``design`` is the member's own (Model.Member_Groups.MemberDesign); without it the single column or
+    beam design of Structure_Parameters is read (the uniform mode, unchanged).
+    """
+    if design is not None:
+        return (design.b_in, design.h_in, design.fc_ksi, design.bar_size, design.bar_area_in2, design.top_bars,
+                design.bot_bars, design.stirrup_bar_size, design.stirrup_legs, design.stirrup_spacing_in)
     if member_type == "column":
-        gross_area = sp.B_COL * sp.H_COL
-        strength = sp.FC_COL_KSI
-    else:
-        gross_area = sp.B_BEAM * sp.H_BEAM
-        strength = sp.FC_BEAM_KSI
+        return (sp.B_COL, sp.H_COL, sp.FC_COL_KSI, sp.COL_BAR_SIZE, sp.COL_BAR_AREA, sp.COL_TOP_BARS, sp.COL_BOT_BARS,
+                sp.COL_STIRRUP_BAR_SIZE, sp.COL_STIRRUP_LEGS, sp.COL_STIRRUP_SPACING)
+    return (sp.B_BEAM, sp.H_BEAM, sp.FC_BEAM_KSI, sp.BEAM_BAR_SIZE, sp.BEAM_BAR_AREA, sp.BEAM_TOP_BARS, sp.BEAM_BOT_BARS,
+            sp.BEAM_STIRRUP_BAR_SIZE, sp.BEAM_STIRRUP_LEGS, sp.BEAM_STIRRUP_SPACING)
+
+
+def _longitudinal_cover(member_type, design=None):
+    kind = "column" if member_type == "column" else "beam"
+    if design is None:
+        return sp.longitudinal_cover_in(kind)
+    return sp.longitudinal_cover_in(kind, design.bar_size, design.stirrup_bar_size)
+
+
+def axial_load_ratio(axial_kip, member_type, design=None):
+    """Normalized axial load nu = P / (Ag f'c)."""
+    b, h, strength = _section_values(member_type, design)[:3]
+    gross_area = b * h
     if gross_area <= 0.0 or strength <= 0.0:
         return 0.0
     return max(0.0, axial_kip / (gross_area * strength))
@@ -224,50 +249,36 @@ def axial_load_ratio(axial_kip, member_type):
 # Haselton et al. (2008) rotation capacities
 # ---------------------------------------------------------------------------
 
-def transverse_steel_ratio(member_type):
+def transverse_steel_ratio(member_type, design=None):
     """rho_sh = Ash / (b * s) for the member's confinement."""
-    if member_type == "column":
-        legs, bar_size, spacing, width = (
-            sp.COL_STIRRUP_LEGS, sp.COL_STIRRUP_BAR_SIZE,
-            sp.COL_STIRRUP_SPACING, sp.B_COL,
-        )
-    else:
-        legs, bar_size, spacing, width = (
-            sp.BEAM_STIRRUP_LEGS, sp.BEAM_STIRRUP_BAR_SIZE,
-            sp.BEAM_STIRRUP_SPACING, sp.B_BEAM,
-        )
+    values = _section_values(member_type, design)
+    width, bar_size, legs, spacing = values[0], values[7], values[8], values[9]
     if spacing <= 0.0 or width <= 0.0:
         return RHO_SH_MIN
     return legs * sp.rebar_area(bar_size) / (width * spacing)
 
 
-def longitudinal_steel_ratio(member_type):
+def longitudinal_steel_ratio(member_type, design=None):
     """rho = As / (b * d) using the tension-side longitudinal steel."""
-    if member_type == "column":
-        area = max(sp.COL_TOP_BARS, sp.COL_BOT_BARS) * sp.COL_BAR_AREA
-        width, depth = sp.B_COL, sp.H_COL - sp.longitudinal_cover_in("column")
-    else:
-        area = max(sp.BEAM_TOP_BARS, sp.BEAM_BOT_BARS) * sp.BEAM_BAR_AREA
-        width, depth = sp.B_BEAM, sp.H_BEAM - sp.longitudinal_cover_in("beam")
+    b, h, _fc, _size, bar_area, top, bot = _section_values(member_type, design)[:7]
+    area = max(top, bot) * bar_area
+    width, depth = b, h - _longitudinal_cover(member_type, design)
     if width <= 0.0 or depth <= 0.0:
         return 0.0
     return area / (width * depth)
 
 
-def _stability_index(member_type):
+def _stability_index(member_type, design=None):
     """s_n = (s / d_b) * sqrt(fy_MPa / 100), the rebar buckling index."""
-    if member_type == "column":
-        spacing = sp.COL_STIRRUP_SPACING
-        bar_diameter = sp.rebar_diameter(sp.COL_BAR_SIZE)
-    else:
-        spacing = sp.BEAM_STIRRUP_SPACING
-        bar_diameter = sp.rebar_diameter(sp.BEAM_BAR_SIZE)
+    values = _section_values(member_type, design)
+    spacing = values[9]
+    bar_diameter = sp.rebar_diameter(values[3])
     if bar_diameter <= 0.0:
         return 1.0
     return (spacing / bar_diameter) * math.sqrt(sp.FY_KSI * KSI_TO_MPA / 100.0)
 
 
-def haselton_theta_p(member_type, nu, end=None, *, member_scope=None):
+def haselton_theta_p(member_type, nu, end=None, *, member_scope=None, design=None):
     """Plastic rotation capacity to the capping point.
 
     Haselton et al. (2008), PEER 2007/03, equation 3.10 (full form):
@@ -278,10 +289,10 @@ def haselton_theta_p(member_type, nu, end=None, *, member_scope=None):
     Beams are the nu = 0 case, where the (0.16)^nu term is unity.
     """
     nu = _clamp(nu, NU_MIN, NU_MAX)
-    rho_sh = _clamp(transverse_steel_ratio(member_type), RHO_SH_MIN, RHO_SH_MAX)
-    rho = longitudinal_steel_ratio(member_type)
-    fc_mpa = (sp.FC_COL_KSI if member_type == "column" else sp.FC_BEAM_KSI) * KSI_TO_MPA
-    s_n = _stability_index(member_type)
+    rho_sh = _clamp(transverse_steel_ratio(member_type, design), RHO_SH_MIN, RHO_SH_MAX)
+    rho = longitudinal_steel_ratio(member_type, design)
+    fc_mpa = _section_values(member_type, design)[2] * KSI_TO_MPA
+    s_n = _stability_index(member_type, design)
 
     theta_p = (
         0.12
@@ -295,7 +306,7 @@ def haselton_theta_p(member_type, nu, end=None, *, member_scope=None):
     return max(THETA_P_FLOOR, theta_p)
 
 
-def haselton_theta_pc(member_type, nu):
+def haselton_theta_pc(member_type, nu, design=None):
     """Post-capping rotation capacity.
 
     Haselton et al. (2008), equation 3.16:
@@ -307,12 +318,12 @@ def haselton_theta_pc(member_type, nu):
     ductile post-peak behaviour.
     """
     nu = _clamp(nu, NU_MIN, NU_MAX)
-    rho_sh = _clamp(transverse_steel_ratio(member_type), RHO_SH_MIN, RHO_SH_MAX)
+    rho_sh = _clamp(transverse_steel_ratio(member_type, design), RHO_SH_MIN, RHO_SH_MAX)
     theta_pc = 0.76 * (0.031 ** nu) * ((0.02 + 40.0 * rho_sh) ** 1.02)
     return max(THETA_PC_FLOOR, min(THETA_PC_CAP, theta_pc))
 
 
-def deterioration_for_member(member_type, nu):
+def deterioration_for_member(member_type, nu, design=None):
     """Explicit OpenSees energy convention; PEER 2007/03 Eq. 3.20.
 
     Eq. 3.20 is a column regression, extended here to zero-axial beams.
@@ -325,8 +336,8 @@ def deterioration_for_member(member_type, nu):
         return {"deterioration_source": "direct_opensees"}
     if mode != "haselton_2008":
         raise ValueError(f"Unknown IMK_DETERIORATION_MODE: {mode!r}")
-    spacing = sp.COL_STIRRUP_SPACING if member_type == "column" else sp.BEAM_STIRRUP_SPACING
-    depth = sp.H_COL if member_type == "column" else sp.H_BEAM
+    values = _section_values(member_type, design)
+    spacing, depth = values[9], values[1]
     theta_y = sp.IMK_COLUMN_THETA_Y if member_type == "column" else sp.IMK_BEAM_THETA_Y
     if not all(math.isfinite(v) and v > 0 for v in (spacing, depth, theta_y)):
         raise ValueError("Deterioration calibration requires positive spacing, depth and member yield rotation")
@@ -352,7 +363,7 @@ def deterioration_for_member(member_type, nu):
             "deterioration_beam_extrapolation": member_type != "column"}
 
 
-def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *, member_scope=None):
+def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *, member_scope=None, design=None):
     """Full per-member IMK backbone, for one member END when ``end`` is given.
 
     Returns yield moment, plastic and post-capping rotations, ultimate
@@ -366,7 +377,7 @@ def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *
     """
     from Model import Deformation_Ownership as ownership
     use_calibration = getattr(sp, "IMK_USE_CALIBRATED_BACKBONE", True)
-    nu = axial_load_ratio(axial_kip, member_type)
+    nu = axial_load_ratio(axial_kip, member_type, design)
     indicator = bond_slip_indicator(end, member_scope=member_scope)
     slip = {"bond_slip_indicator": indicator,
             "slip_owner": (ownership.ownership(end, member_scope=member_scope)["bar_slip"] if end is not None
@@ -385,11 +396,11 @@ def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *
             "theta_pc_neg": sp.IMK_THETA_PC_NEG,
             "theta_u_neg": sp.IMK_THETA_U_NEG,
             **slip,
-            **deterioration_for_member(member_type, nu),
+            **deterioration_for_member(member_type, nu, design),
         }
 
-    theta_p = haselton_theta_p(member_type, nu, end, member_scope=member_scope)
-    theta_pc = haselton_theta_pc(member_type, nu)
+    theta_p = haselton_theta_p(member_type, nu, end, member_scope=member_scope, design=design)
+    theta_pc = haselton_theta_pc(member_type, nu, design)
     return {
         **slip,
         "axial_kip": axial_kip,
@@ -398,5 +409,5 @@ def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *
         "theta_pc": theta_pc,
         "theta_u": theta_p + theta_pc + (sp.IMK_COLUMN_THETA_Y if member_type == "column" else sp.IMK_BEAM_THETA_Y),
         "source": "haselton_2008",
-        **deterioration_for_member(member_type, nu),
+        **deterioration_for_member(member_type, nu, design),
     }

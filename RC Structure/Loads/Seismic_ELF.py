@@ -24,6 +24,7 @@ Unit system: kip, inch, second.
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
+from Model import Member_Groups as mg
 from Model.Build_Model import floor_master_node
 
 
@@ -34,8 +35,19 @@ ELF_PATTERN_TAG_Y = 22
 
 
 def seismic_weight_per_floor():
-    """Effective seismic weight at each elevated floor, kips."""
-    return [sp.total_floor_seismic_weight() for _ in range(sp.NUM_FLOOR)]
+    """Effective seismic weight at each elevated floor, kips.
+
+    The same accounted weight Model/Build_Model turns into nodal mass: one floor weight repeated in the
+    uniform mode, each floor's own members under a grouped design.
+    """
+    if mg.is_grouped():
+        from Model import Member_Properties as mp               # its roof value carries the column extensions
+        return [mp.floor_seismic_weight_kip(k) for k in range(1, sp.NUM_FLOOR + 1)]
+    from Model import Roof_Extension as roof
+    weights = [sp.total_floor_seismic_weight() for _ in range(sp.NUM_FLOOR)]
+    if weights:
+        weights[-1] += roof.seismic_weight_kip()               # the column extensions above the roof joints
+    return weights
 
 
 def floor_heights_ft():

@@ -1,6 +1,6 @@
 """Orientation regression for the diagnostic slip interface (Analysis/Joint_Slip_Subassembly, 2026-09-27).
 
-Codex's slip-calibration resolution: the interface stiffness is a property of the physical
+The slip-calibration resolution: the interface stiffness is a property of the physical
 calibration and invariant under node-order/axis reversal; complete branches, directional D and
 reference energies are mapped together; the original positive-selected Ke is the negative control
 and must be caught. Acceptance is a relative moment discrepancy below 1e-9 between equivalent

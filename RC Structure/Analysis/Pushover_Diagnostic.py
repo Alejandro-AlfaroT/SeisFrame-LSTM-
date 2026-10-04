@@ -283,8 +283,38 @@ def hinge_inventory(inventory):
     return hinges
 
 
+def _joint_springs_installed():
+    """Whether this build installed joint springs: the joint registry, not the configuration text."""
+    from Model.Joint_Springs import joint_registry
+    return bool(joint_registry())
+
+
+def _installed_sections_and_cage():
+    """The section and cage blocks of the audit: one of each in the uniform mode, one per design group otherwise."""
+    from Model import Member_Groups as mg
+    hoop_note = "rho_sh in the Haselton rotation capacities only (IMK_Calibration)"
+    if not mg.is_grouped():
+        return ({"b_col_in": sp.B_COL, "h_col_in": sp.H_COL, "fc_col_ksi": sp.FC_COL_KSI, "b_beam_in": sp.B_BEAM,
+                 "h_beam_in": sp.H_BEAM, "fc_beam_ksi": sp.FC_BEAM_KSI, "slab_thickness_in": sp.SLAB_THICKNESS_IN},
+                {"col_bar_size": sp.COL_BAR_SIZE, "col_top_bars": sp.COL_TOP_BARS, "col_bot_bars": sp.COL_BOT_BARS,
+                 "col_side_bars": sp.COL_SIDE_BARS, "beam_bar_size": sp.BEAM_BAR_SIZE, "beam_top_bars": sp.BEAM_TOP_BARS,
+                 "beam_bot_bars": sp.BEAM_BOT_BARS, "col_hoops": (sp.COL_STIRRUP_BAR_SIZE, sp.COL_STIRRUP_LEGS, sp.COL_STIRRUP_SPACING),
+                 "beam_hoops": (sp.BEAM_STIRRUP_BAR_SIZE, sp.BEAM_STIRRUP_LEGS, sp.BEAM_STIRRUP_SPACING),
+                 "hoops_enter_the_model_through": hoop_note})
+    state = mg.active()
+    sections = {"design_mode": "grouped", "member_groups_sha256": state.identity(), "slab_thickness_in": sp.SLAB_THICKNESS_IN,
+                "by_group": {gid: {"member_type": d.member_type, "b_in": d.b_in, "h_in": d.h_in, "fc_ksi": d.fc_ksi,
+                                   "members": len(state.groups[gid]["member_tags"])} for gid, d in sorted(state.designs.items())}}
+    cage = {"by_group": {gid: {"bar_size": d.bar_size, "top_bars": d.top_bars, "bot_bars": d.bot_bars, "side_bars": d.side_bars,
+                               "hoops": (d.stirrup_bar_size, d.stirrup_legs, d.stirrup_spacing_in),
+                               "hoop_legs_by_direction": d.legs_by_direction} for gid, d in sorted(state.designs.items())},
+            "hoops_enter_the_model_through": hoop_note}
+    return sections, cage
+
+
 def model_audit(inventory, hinges):
     """What the built model represents, stated from its own registry and parameters."""
+    from Model import Member_Groups as mg
     registry = hinge_registry()
     families = {}
     columns = []
@@ -292,7 +322,9 @@ def model_audit(inventory, hinges):
         if entry["member_type"] == "column":
             columns.append(entry)
         else:
-            families.setdefault(entry.get("beam_family"), entry)
+            # Under a grouped design a plan family holds several groups with their own strengths: key by group.
+            families.setdefault(entry.get("group_id") if mg.is_grouped() else entry.get("beam_family"), entry)
+    sections, cage = _installed_sections_and_cage()
     return {
         "diagnostic_version": DIAGNOSTIC_VERSION,
         "element_formulation": sp.ELEMENT_FORMULATION,
@@ -303,18 +335,19 @@ def model_audit(inventory, hinges):
                 "beam_theta_y_target": sp.IMK_BEAM_THETA_Y, "column_theta_y_target": sp.IMK_COLUMN_THETA_Y},
         "stiffness_modifiers": {"beam": sp.section_stiffness_modifier("beam"), "column": sp.section_stiffness_modifier("column")},
         "transformations": {"column": "PDelta, vecxz (1, 0, 0)", "beam_x": "Linear, vecxz (0, 0, 1)", "beam_y": "Linear, vecxz (0, 0, 1)"},
-        "joints": "centerline nodes; zero-length IMK springs at the member ends; no rigid end zones, no panel-zone element, "
-                  "no joint shear deformation or strength",
+        # Stated from the configured joint model and the joint registry of this build, not assumed.
+        "joints": (("centerline nodes; zero-length IMK springs at the member ends; no rigid end zones, no panel-zone element, "
+                    "no joint shear deformation or strength") if not _joint_springs_installed() else
+                   ("centerline nodes with a scissors joint spring (IMKPinching, panel shear only, provisional) at every elevated "
+                    "joint; zero-length IMK springs at the member ends; no rigid end zones")),
+        "joint_model": getattr(sp, "JOINT_MODEL", "rigid_centerline"),
+        "joint_springs_installed": _joint_springs_installed(),
+        "analysis_profile_id": getattr(sp, "ANALYSIS_PROFILE_ID", None),
         "diaphragm": "rigid (ux, uy, rz of every floor node tied to the floor master)",
         "base": "fixed (all six DOFs)",
         "gravity_model": sp.effective_gravity_load_model(),
-        "sections": {"b_col_in": sp.B_COL, "h_col_in": sp.H_COL, "fc_col_ksi": sp.FC_COL_KSI, "b_beam_in": sp.B_BEAM,
-                     "h_beam_in": sp.H_BEAM, "fc_beam_ksi": sp.FC_BEAM_KSI, "slab_thickness_in": sp.SLAB_THICKNESS_IN},
-        "cage": {"col_bar_size": sp.COL_BAR_SIZE, "col_top_bars": sp.COL_TOP_BARS, "col_bot_bars": sp.COL_BOT_BARS,
-                 "col_side_bars": sp.COL_SIDE_BARS, "beam_bar_size": sp.BEAM_BAR_SIZE, "beam_top_bars": sp.BEAM_TOP_BARS,
-                 "beam_bot_bars": sp.BEAM_BOT_BARS, "col_hoops": (sp.COL_STIRRUP_BAR_SIZE, sp.COL_STIRRUP_LEGS, sp.COL_STIRRUP_SPACING),
-                 "beam_hoops": (sp.BEAM_STIRRUP_BAR_SIZE, sp.BEAM_STIRRUP_LEGS, sp.BEAM_STIRRUP_SPACING),
-                 "hoops_enter_the_model_through": "rho_sh in the Haselton rotation capacities only (IMK_Calibration)"},
+        "sections": sections,
+        "cage": cage,
         "beam_hinge_strengths_by_family": {fam: {"hogging_kip_in": e["yield_moment_y_hogging_kip_in"], "sagging_kip_in": e["yield_moment_y_sagging_kip_in"],
                                                  "basis": e.get("strength_basis"), "flange_width_in": e.get("flange_width_in"),
                                                  "exterior_slab_anchorage": e.get("exterior_slab_anchorage")}
@@ -422,14 +455,22 @@ def _column_rows(inventory, forces, global_forces, direction, gravity_forces=Non
     linear in the chord frame, so the face moments come from the local
     forces.
     """
-    a_bottom = sp.H_BEAM / 2.0
+    from Model import Member_Groups as mg
+    grouped = mg.is_grouped()
+    a_bottom = None if grouped else sp.H_BEAM / 2.0
     dof = DIRECTION_DOF[direction] - 1
     rows = []
     for c in inventory["columns"]:
         f, fg = forces[c["tag"]], global_forces[c["tag"]]
         length = c["length_in"]
-        x_bottom_face = 0.0 if c["story"] == 1 else a_bottom
-        x_top_face = length - sp.H_BEAM / 2.0
+        if grouped:
+            # Each column's own joints: half the deepest beam framing into the joint below and above it.
+            from Design.Group_Checks import joint_beam_depth_in
+            x_bottom_face = 0.5 * joint_beam_depth_in(c["story"] - 1, c["grid_i"], c["grid_j"])
+            x_top_face = length - 0.5 * joint_beam_depth_in(c["story"], c["grid_i"], c["grid_j"])
+        else:
+            x_bottom_face = 0.0 if c["story"] == 1 else a_bottom
+            x_top_face = length - sp.H_BEAM / 2.0
         moment = COLUMN_MOMENT_ALONG[direction]
         m_i, m_j = COLUMN_END_MOMENT_INDEX[direction]
         row = {"tag": c["tag"], "story": c["story"], "grid_i": c["grid_i"], "grid_j": c["grid_j"],
@@ -464,10 +505,16 @@ def _beam_rows(inventory, forces, gravity_forces=None):
             g = gravity_forces[b["tag"]]
             d = [a - c for a, c in zip(f, g)]
             # The lateral increment carries no span load: its moment is linear and its face values follow.
-            depth = sp.H_COL if b["kind"] == "beam_x" else sp.B_COL
+            from Model import Member_Groups as mg
+            if mg.is_grouped():
+                # The joint cores at this beam's own two ends (they can differ across a group boundary).
+                from Model import Member_Properties as mp
+                depth_i, depth_j = mp.beam_end_joint_depths(mg.resolve(b["tag"]))
+            else:
+                depth_i = depth_j = sp.H_COL if b["kind"] == "beam_x" else sp.B_COL
             row["increment"] = {"moment_y_i_kip_in": d[4], "moment_y_j_kip_in": d[10], "torsion_i_kip_in": d[3],
-                                "moment_face_i_kip_in": -d[4] - d[2] * (depth / 2.0),
-                                "moment_face_j_kip_in": -d[4] - d[2] * (b["length_in"] - depth / 2.0)}
+                                "moment_face_i_kip_in": -d[4] - d[2] * (depth_i / 2.0),
+                                "moment_face_j_kip_in": -d[4] - d[2] * (b["length_in"] - depth_j / 2.0)}
         rows.append(row)
     return rows
 
@@ -594,23 +641,36 @@ def _hinge_rows(hinges, hinge_state, forces, direction, events, step, control_di
 def expected_gravity_total_kip(settings):
     """Total vertical load the declared gravity state applies, from the load inventory (None if unknown)."""
     try:
+        from Model import Member_Groups as mg
         floors = sp.NUM_FLOOR
-        self_weight = settings.gravity_self_weight_factor * (
-            sp.col_self_weight_kip_per_in() * sp.STORY_H * floors * (sp.NUM_BAY_X + 1) * (sp.NUM_BAY_Y + 1)
-            + sp.beam_self_weight_kip_per_in("x") * sp.BAY_X * sp.NUM_BAY_X * (sp.NUM_BAY_Y + 1) * floors
-            + sp.beam_self_weight_kip_per_in("y") * sp.BAY_Y * sp.NUM_BAY_Y * (sp.NUM_BAY_X + 1) * floors)
+        grouped = mg.is_grouped()
+        if grouped:
+            # Every member's own weight (the member ledger gravity, mass and ELF share).
+            from Model import Member_Properties as mp
+            self_weight = settings.gravity_self_weight_factor * mp.weight_ledger()["total_member_self_weight_kip"]
+        else:
+            self_weight = settings.gravity_self_weight_factor * (
+                sp.col_self_weight_kip_per_in() * sp.STORY_H * floors * (sp.NUM_BAY_X + 1) * (sp.NUM_BAY_Y + 1)
+                + sp.beam_self_weight_kip_per_in("x") * sp.BAY_X * sp.NUM_BAY_X * (sp.NUM_BAY_Y + 1) * floors
+                + sp.beam_self_weight_kip_per_in("y") * sp.BAY_Y * sp.NUM_BAY_Y * (sp.NUM_BAY_X + 1) * floors)
+        from Model import Roof_Extension as roof
+        self_weight += settings.gravity_self_weight_factor * roof.total_weight_kip()
         mode = sp.effective_gravity_load_model()
         if mode == "slab_transfer":
-            transfer = sp.FLOOR_TRANSFER
             live_case = "live" if settings.live_pattern in (None, "all") else f"live_pattern_{settings.live_pattern}"
+            # One transfer for every floor in the uniform mode; each floor's own transfer under a grouped design.
+            container = sp.FLOOR_TRANSFER
+            transfers = ([container["transfers"][container["floors"][str(k)]] for k in range(1, floors + 1)] if grouped
+                         else [container] * floors)
             total = 0.0
-            for name, factor in (("dead", settings.gravity_dead_factor), (live_case, settings.gravity_live_factor)):
-                case = transfer["unit_cases"].get(name)
-                if case is None or factor == 0.0:
-                    continue
-                per_floor = sum(load for beam in case["beams"] for _, load in beam["node_loads"])
-                per_floor += sum(column["direct_load_kip"] for column in case["columns"])
-                total += factor * per_floor * floors
+            for transfer in transfers:
+                for name, factor in (("dead", settings.gravity_dead_factor), (live_case, settings.gravity_live_factor)):
+                    case = transfer["unit_cases"].get(name)
+                    if case is None or factor == 0.0:
+                        continue
+                    per_floor = sum(load for beam in case["beams"] for _, load in beam["node_loads"])
+                    per_floor += sum(column["direct_load_kip"] for column in case["columns"])
+                    total += factor * per_floor
             return total + self_weight, "slab transfer unit cases (beam node loads + column direct loads) x factors x floors + member self-weight"
         floor_dead = sp.floor_dead_load_ksf()
         total = floor_dead + sp.FLOOR_LIVE_LOAD_KSF

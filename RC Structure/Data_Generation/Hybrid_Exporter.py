@@ -772,6 +772,12 @@ def compile_hybrid_sample(
     damage_metrics = np.asarray(
         [damage[column] for column in DAMAGE_METRIC_COLUMNS], dtype=np.float32
     )
+    if global_parameters.get("design_mode") == "grouped":
+        # The global feature vector holds one column section, one beam section and one cage of each. A grouped
+        # design has none of those; a missing value would be read as zero here, which is not a description of it.
+        raise ValueError("This case was built from a grouped design: the global feature vector (GLOBAL_FEATURE_KEYS) has "
+                         "one-section entries that do not exist for it. Its per-member sections, cages and groups are in "
+                         "elements.csv; the hybrid sample needs a declared replacement for those global entries first.")
     global_features = _json_to_feature_array(global_parameters, GLOBAL_FEATURE_KEYS)
     record_features = np.stack(
         [
@@ -784,6 +790,14 @@ def compile_hybrid_sample(
 
     if hashlib.sha256((ntha_dir / "status.json").read_bytes()).hexdigest() != status_digest:
         raise RuntimeError("Analysis status changed while compiling the sample; retry after the analysis finishes.")
+    # Synchronized hinge moments (2026-10-01): the conjugate of hinge_rotation on the same rows, with
+    # the explicit time and commit count of each row. Written only when the analysis produced them: a
+    # run from before the moment history has no such array, and a None here would be stored as a
+    # pickled object that a plain np.load refuses.
+    hinge_moment_arrays = {name: arrays[name] for name in ("hinge_moment", "hinge_history_time", "hinge_history_commit_count")
+                           if arrays.get(name) is not None}
+    hinge_schema_path = ntha_dir / "hinge_moment_rotation_schema.json"
+    hinge_schema = _read_json(hinge_schema_path) if hinge_schema_path.exists() else None
     np.savez_compressed(
         sample_path,
         x=x,
@@ -823,6 +837,7 @@ def compile_hybrid_sample(
         hinge_rotation_steps=arrays.get("hinge_rotation_steps"),
         hinge_tag_order=arrays.get("hinge_tag_order"),
         floor_master_nodes=arrays.get("floor_master_nodes"),
+        **hinge_moment_arrays,
     )
 
     metadata = {
@@ -886,6 +901,15 @@ def compile_hybrid_sample(
         "damage_values_discarded": damage.get("damage_values_discarded", 0.0),
         "physical_drift_ceiling": PHYSICAL_DRIFT_CEILING,
         "num_hinges": int(hinge_features.shape[0]) if hinge_features.size else 0,
+        # hinge_rotation and hinge_moment share rows (hinge_rotation_steps), entity order
+        # (hinge_tag_order) and columns: two per hinge, local y (direction 5) then local z (direction 6).
+        "hinge_history_columns": ["local_y_direction_5", "local_z_direction_6"],
+        "hinge_moment_present": "hinge_moment" in hinge_moment_arrays,
+        "hinge_moment_rotation": (
+            {key: hinge_schema.get(key) for key in ("schema_version", "available", "units", "quantities", "sign_convention",
+                                                    "reference_state", "sampling", "missing", "identity", "status", "claims_not_made")}
+            if hinge_schema else
+            {"available": False, "reason": "the analysis output has no hinge_moment_rotation_schema.json (run predates the moment history)"}),
         "hinge_history_stride": int(
             arrays["hinge_rotation_steps"][1] - arrays["hinge_rotation_steps"][0]
         ) if arrays.get("hinge_rotation_steps") is not None

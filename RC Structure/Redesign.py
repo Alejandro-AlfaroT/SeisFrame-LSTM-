@@ -277,6 +277,26 @@ def _column_cage_threads_beam_bars(bar_size, n_top, n_side_pf):
         sp.AGGREGATE_MAX_SIZE_IN, max_layers=sp.BEAM_BAR_MAX_LAYERS)["passes"]
 
 
+def _column_cage_bond_ok(bar_size, n_top, n_side_pf):
+    """ACI 318-19 18.7.4.3 at this column with Ktr = 0 (design-basis rule 2026-10-02): 1.25 ld of the bar, by
+    Eq. (25.4.2.4a) at the cage's own cb, within half the face-to-face clear height story_h - h_beam. A cage
+    that cannot develop its bars is never installed; the search moves the section or the concrete strength."""
+    from Design.ACI_Checks import column_bar_bond_18_7_4_3, column_bar_cb_in
+    cb = column_bar_cb_in(sp.B_COL, sp.H_COL, sp.COL_CLEAR_COVER_IN, sp.COL_STIRRUP_BAR_SIZE, bar_size, n_top, n_side_pf)["cb_in"]
+    return column_bar_bond_18_7_4_3(bar_size, sp.FC_COL_KSI, sp.FY_KSI, cb, sp.STORY_H - sp.H_BEAM)["passes"]
+
+
+def column_cages_that_bond_exist(cfg=None):
+    """Whether any cage of the declared bar sizes and counts develops its bars at this column (18.7.4.3, Ktr = 0),
+    before the other admissibility rules: the planner's lever when the bond rule empties the candidate list."""
+    cfg = cfg or DesignConfig()
+    if sp.SLAB_THICKNESS_IN is None:
+        return True
+    return any(_column_cage_bond_ok(bar_size, n_top, n_side)
+               for bar_size in cfg.rebar.bar_sizes_col for n_top in cfg.rebar.col_n_top_iter()
+               for n_side in cfg.rebar.col_n_side_options if n_top >= 2)
+
+
 def _column_cage_beam_layers(bar_size, n_top, n_side_pf):
     """Layers the current beam bars need to pass this column cage (the larger of the two directions);
     one on the legacy path, 99 when a direction has no lane at all."""
@@ -361,6 +381,9 @@ def _col_candidates(Ast_lo, Ast_hi, cfg=None, threading=False):
                 Ast     = n_total * Ab
                 rho     = Ast / Ag
                 if not (max(0.01, cfg.rebar.rho_col_min) <= rho <= min(0.06, cfg.rebar.rho_col_max)):
+                    continue
+                # ACI 318-19 18.7.4.3 (2026-10-02): the bar must develop in half the clear height at Ktr = 0.
+                if sp.SLAB_THICKNESS_IN is not None and not _column_cage_bond_ok(bar_size, n_top, n_side_pf):
                     continue
                 db = sp.rebar_diameter(bar_size)
                 # Single-layer geometry matching the current fiber layout.
@@ -484,7 +507,11 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
                 As_bot = n_bot * Ab
                 if n_bot < 2 or As_bot > 0.025 * sp.B_BEAM * d:
                     continue
-                if (sp.B_BEAM - 2 * cover) / (n_bot - 1) - db < clear_min:
+                if sp.SLAB_THICKNESS_IN is not None and threading:
+                    fit_bot = min(sp.beam_bars_per_layer(bar_size, n_bot).values())
+                    if fit_bot <= 0 or math.ceil(n_bot / fit_bot) > sp.BEAM_BAR_MAX_LAYERS:
+                        continue
+                elif (sp.B_BEAM - 2 * cover) / (n_bot - 1) - db < clear_min:
                     continue
                 def nominal(area):
                     a = area * sp.FY_KSI / (0.85 * sp.FC_BEAM_KSI * sp.B_BEAM)
@@ -498,6 +525,19 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
                     continue
                 if not (max(As_bot_lo, code_min) <= As_bot <= As_bot_hi):
                     continue
+                if sp.SLAB_THICKNESS_IN is not None:
+                    # A flexural pick must have a support arrangement in the
+                    # existing hoop ladder. Otherwise a dense small-bar cage
+                    # can displace a larger-bar alternative, only to fail the
+                    # same deterministic cage screen in capacity design.
+                    # Shear sizing and the installed row/slab checks still run
+                    # after selection; this does not certify stacked-row ties.
+                    from Design.SMRF_Capacity_Design import STIRRUP_LADDER
+                    from Design.SMRF_Cage_Layout import beam_cage, cage_passes
+                    if not any(cage_passes(beam_cage(
+                            sp.B_BEAM, sp.BEAM_CLEAR_COVER_IN, sp.rebar_diameter(hoop),
+                            db, n_top, n_bot, legs=legs)) for hoop, legs in STIRRUP_LADDER):
+                        continue
                 candidates.append((bar_size, n_top, n_bot))
     return candidates
 

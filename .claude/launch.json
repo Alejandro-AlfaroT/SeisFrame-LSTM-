@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "code-map",
+      "runtimeExecutable": "C:/Users/andro/anaconda3/envs/OpPy/python.exe",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "code_map"],
+      "port": 8765
+    }
+  ]
+}

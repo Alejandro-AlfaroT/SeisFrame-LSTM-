@@ -33,6 +33,20 @@ dict with keys:
     damping_ratio       float
     rayleigh_a0         float  – mass coefficient
     rayleigh_a1         float  – initial-stiffness coefficient
+
+Hinge histories (every ``hinge_history_stride``-th scheduled step; two values per hinge, local y then z,
+in ``hinge_tag_order``), read together from the same committed state:
+    hinge_rotation_history      list[rows][2H]  total relative spring rotation, rad
+    hinge_moment_history        list[rows][2H]  conjugate spring moment, kip-in
+    hinge_rotation_steps        list[rows]      0-based scheduled step of each row
+    hinge_history_time          list[rows]      analysis time of each row, s
+    hinge_history_strategy      list[rows]      how that scheduled step converged
+    hinge_history_commit_count  list[rows]      states committed by the transient analysis up to the row
+    hinge_gravity_state         dict            rotation and moment before the first transient step
+    hinge_history_missing_values int            query values that came back empty (stored as NaN)
+Rows are scheduled snapshots; the internal sub-steps of a subdivided recovery are never stored. Values
+are absolute (they include the gravity state). Analysis/Hinge_Moment_Rotation writes them with a schema.
+Floor accelerations are relative to the ground; story_drift_history holds unsigned drift ratios.
 """
 
 import math
@@ -352,6 +366,42 @@ def _query_hinge_rotations(hinge_ele_tags):
     return rotations
 
 
+def _query_hinge_states(hinge_ele_tags):
+    """Rotation AND conjugate moment of both springs of every hinge, from the same committed state.
+
+    ``deformation`` is the zeroLength's relative rotation in its two spring directions (local 5,
+    then local 6) and ``basicForce`` the material moments in the same order and sign; the pair is
+    what the full-rate ``material i stressStrain`` recorder writes (tests/test_hinge_hysteresis_
+    fixture: equal at every committed step). A query that returns nothing is kept as None so the
+    history carries NaN there, never a zero that would read as a valid label.
+    Returns {tag: (rotation_pair_or_None, moment_pair_or_None)}.
+    """
+    states = {}
+    for tag in hinge_ele_tags:
+        deformation = ops.eleResponse(tag, "deformation")
+        force = ops.eleResponse(tag, "basicForce")
+        states[tag] = (list(deformation) if deformation and len(deformation) >= 2 else None,
+                       list(force) if force and len(force) >= 2 else None)
+    return states
+
+
+def _hinge_history_rows(hinge_tag_order, states):
+    """Flat rotation and moment rows in ``hinge_tag_order`` (two values per hinge: local y, local z).
+
+    Missing values are NaN and counted; nothing is filled with zero."""
+    nan = float("nan")
+    rotation_row, moment_row, missing = [], [], 0
+    for tag in hinge_tag_order:
+        rotation, moment = states.get(tag, (None, None))
+        if rotation is None:
+            rotation = (nan, nan); missing += 2
+        if moment is None:
+            moment = (nan, nan); missing += 2
+        rotation_row.extend(float(v) for v in rotation[:2])
+        moment_row.extend(float(v) for v in moment[:2])
+    return rotation_row, moment_row, missing
+
+
 def _update_rotation_envelope(envelope, current):
     """Track peak positive, negative and absolute rotation per hinge."""
     for tag, values in current.items():
@@ -521,9 +571,13 @@ def run_ntha(
     rayleigh_mode_j: int = 2,
     dt_factor: float = 1.0,
     log_path=None,
+    hinge_history_stride: int | None = None,
 ):
     """
     Run NLTHA on the current OpenSees model (gravity already applied).
+
+    ``hinge_history_stride`` overrides Structure_Parameters.NTHA_HINGE_HISTORY_STRIDE for the
+    hinge moment-rotation history (1 stores every scheduled step).
 
     Parameters
     ----------
@@ -557,6 +611,7 @@ def run_ntha(
             damping_ratio, modal_results,
             rayleigh_mode_i, rayleigh_mode_j,
             dt_factor, log_fh,
+            hinge_history_stride=hinge_history_stride,
         )
     finally:
         if log_fh is not None:
@@ -568,6 +623,7 @@ def _run_ntha_impl(
     damping_ratio, modal_results,
     rayleigh_mode_i, rayleigh_mode_j,
     dt_factor, log_fh,
+    hinge_history_stride=None,
 ):
     # ------------------------------------------------------------------
     # 1. Rayleigh damping
@@ -659,15 +715,30 @@ def _run_ntha_impl(
 
     hinge_rotation_envelope = {}
     hinge_rotation_history  = []
+    hinge_moment_history    = []          # conjugate moments, same rows, same committed state as the rotations
     hinge_history_steps     = []
-    hinge_stride = max(1, int(getattr(sp, "NTHA_HINGE_HISTORY_STRIDE", 8)))
+    hinge_history_time      = []          # analysis time of each stored row (never inferred from a row index)
+    hinge_history_strategy  = []          # how the scheduled step of each stored row converged
+    hinge_history_commits   = []          # committed-state count in the domain at each stored row (1-based)
+    hinge_history_missing   = 0           # query values that came back empty (stored as NaN)
+    hinge_stride = max(1, int(hinge_history_stride if hinge_history_stride is not None
+                              else getattr(sp, "NTHA_HINGE_HISTORY_STRIDE", 8)))
     hinge_tag_order = list(hinge_ele_tags)
     joint_rotation_envelope = {}          # joint springs: (Rx, Ry) per joint element, peaks every step
+    # The gravity-equilibrated state the excitation starts from: the absolute rotation and moment
+    # of every spring before the first transient step. Histories are absolute, not increments.
+    hinge_gravity_state = None
+    if hinge_ele_tags:
+        rotation_0, moment_0, missing_0 = _hinge_history_rows(hinge_tag_order, _query_hinge_states(hinge_tag_order))
+        hinge_gravity_state = {"time": float(ops.getTime()), "rotation": rotation_0, "moment": moment_0,
+                               "missing_values": missing_0}
+    commit_count = 0                      # states committed by the transient analysis so far
 
     convergence_log = []
     failed          = False
     failed_step     = None
     failed_time     = None
+    domain_time_at_failure = None
 
     _log(
         log_fh,
@@ -682,10 +753,16 @@ def _run_ntha_impl(
             failed      = True
             failed_step = step
             failed_time = step * dt
+            # A failed subdivided attempt can leave sub-steps committed: the domain time at the
+            # failure is recorded so a full-rate recorder's trailing rows can be told apart from
+            # snapshots. No snapshot is taken of this state.
+            domain_time_at_failure = float(ops.getTime())
             msg = f"Step {step}: FAILED after all recovery strategies at t={failed_time:.4f}s"
             _log(log_fh, msg)
             convergence_log.append({"step": step, "strategy": "failed", "ok": False})
             break
+
+        commit_count += _DT_SUBDIVIDE if "subdivide" in strategy else 1
 
         if strategy != "Newton":
             msg = f"Step {step}: recovered with {strategy}"
@@ -738,14 +815,21 @@ def _run_ntha_impl(
         if hinge_ele_tags:
             _update_envelope(hinge_envelope, _query_element_forces(hinge_ele_tags))
 
-            # Peaks every step so none is missed; history decimated.
-            rotations = _query_hinge_rotations(hinge_tag_order)
+            # Peaks every step so none is missed; history decimated. Rotation and moment are
+            # read together at this scheduled snapshot; the internal sub-steps of a subdivided
+            # recovery are committed by OpenSees but are not snapshots and are never stored.
+            states = _query_hinge_states(hinge_tag_order)
+            rotations = {tag: pair[0] for tag, pair in states.items() if pair[0] is not None}
             _update_rotation_envelope(hinge_rotation_envelope, rotations)
             if step % hinge_stride == 0:
+                rotation_row, moment_row, missing = _hinge_history_rows(hinge_tag_order, states)
                 hinge_history_steps.append(step)
-                hinge_rotation_history.append(
-                    [value for tag in hinge_tag_order for value in rotations.get(tag, (0.0, 0.0))]
-                )
+                hinge_history_time.append(t)
+                hinge_history_strategy.append(strategy)
+                hinge_history_commits.append(commit_count)
+                hinge_history_missing += missing
+                hinge_rotation_history.append(rotation_row)
+                hinge_moment_history.append(moment_row)
         if joint_ele_tags:
             _update_rotation_envelope(joint_rotation_envelope, _query_hinge_rotations(joint_ele_tags))
 
@@ -802,6 +886,17 @@ def _run_ntha_impl(
         "hinge_rotation_history":  hinge_rotation_history,
         "hinge_rotation_steps":    hinge_history_steps,
         "hinge_tag_order":         hinge_tag_order,
+        # Synchronized moment-rotation target (Analysis/Hinge_Moment_Rotation documents the schema):
+        # same rows, same committed state; explicit time, convergence strategy and commit count per
+        # row; the gravity state the histories start from; NaN where a query returned nothing.
+        "hinge_moment_history":    hinge_moment_history,
+        "hinge_history_time":      hinge_history_time,
+        "hinge_history_strategy":  hinge_history_strategy,
+        "hinge_history_commit_count": hinge_history_commits,
+        "hinge_history_missing_values": hinge_history_missing,
+        "hinge_gravity_state":     hinge_gravity_state,
+        "hinge_history_substeps_per_subdivided_step": _DT_SUBDIVIDE,
+        "domain_time_at_failure":  domain_time_at_failure,
         "element_force_history":   element_force_history,
         "element_force_steps":     element_history_steps,
         "element_tag_order":       element_tag_order,

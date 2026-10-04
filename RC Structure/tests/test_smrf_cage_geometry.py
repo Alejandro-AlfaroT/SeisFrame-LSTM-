@@ -92,10 +92,15 @@ class JointAssembly(unittest.TestCase):
         self.assertAlmostEqual(joint["stacking"]["lower_layer_centroid_from_face_in"], 4.5)
         self.assertAlmostEqual(joint["stacking"]["effective_depth_lower_in"], 19.5)
         self.assertLess(joint["stacking"]["lower_direction_lever_arm_ratio"], 0.92)
-        # y over x keeps the crossing mats clear of the lower layer; x over y overlaps the x bottom mat
+        # A suggested displacement with no installed bar path must remain a clash.
         self.assertEqual(res["stacking_selected"], "y_over_x")
         self.assertEqual(res["joint_by_stacking"]["y_over_x"]["slab_clashes"], [])
-        self.assertTrue(any(c.get("overlap_in") for c in res["joint_by_stacking"]["x_over_y"]["slab_clashes"]))
+        self.assertEqual(res["joint_by_stacking"]["y_over_x"]["slab_bottom_mat_displacements"], [])
+        moved = res["joint_by_stacking"]["x_over_y"]["slab_bottom_mat_displacements"]
+        self.assertTrue(moved and all(0.0 < item["displacement_in"] <= cg.SLAB_BOTTOM_MAT_DISPLACEMENT_MAX_IN for item in moved))
+        self.assertTrue(all(item["between"][0].endswith("bottom") for item in moved))
+        self.assertTrue(res["joint_by_stacking"]["x_over_y"]["slab_clashes"])
+        self.assertTrue(all(item["status"] == "unresolved" and not item["applied"] for item in moved))
         self.assertTrue(joint["exterior_hooks"]["tail_within_joint_depth"])
         # the deepest top layer governs the tail: the lower direction's bars sit 4.5 in from the face
         self.assertAlmostEqual(joint["exterior_hooks"]["tail_reaches_from_top_face_in"], 4.5 + 3.0 + 1.0 + 12.0)

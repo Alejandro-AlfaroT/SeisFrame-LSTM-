@@ -44,6 +44,9 @@ FULL_RATE_ARRAYS = (
 STRIDED_ARRAYS = {
     "element_force_history": "element_force_steps",
     "hinge_rotation": "hinge_rotation_steps",
+    # The conjugate spring moments (kip-in), read from the same committed state as hinge_rotation and
+    # stored on the same rows; absent from samples compiled before 2026-10-01 (then simply skipped).
+    "hinge_moment": "hinge_rotation_steps",
     # Joint forces are written on the element stride and share its index array.
     "joint_force_history": "element_force_steps",
 }
@@ -59,6 +62,8 @@ STRIDED_ARRAYS = {
 ENTITY_LAYOUTS = {
     "element_force_history": ("element_force_tag_order", "element_force_history_columns"),
     "hinge_rotation": ("hinge_tag_order", None),
+    # Two components per hinge, local y (direction 5) then local z (direction 6), as hinge_rotation.
+    "hinge_moment": ("hinge_tag_order", "hinge_history_columns"),
     # Joints are a SUBSET of nodes -- interior joints only, not base or
     # floor-master nodes -- so this order is what a per-node decoder must
     # target. It is shorter than num_nodes and must never be assumed equal.

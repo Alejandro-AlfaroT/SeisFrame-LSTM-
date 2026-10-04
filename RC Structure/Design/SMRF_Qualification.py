@@ -253,7 +253,7 @@ def _apply_capacity_design_evidence(record, checks, evidence):
         splices = capacity.get("splices")
         if splices:
             replaced["detailing.anchorage_splices_and_cover"] = make_check(
-                "detailing.anchorage_splices_and_cover", "ACI 318-19 18.6.3.3 / 18.7.4.3 / 18.8.5 / 20.5 / 25.4--25.5",
+                "detailing.anchorage_splices_and_cover", "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.8.5 / 20.5 / 25.4--25.5",
                 int(capacity.get("anchorage", {}).get("all_pass", False)), 1, "==",
                 details={"anchorage": capacity.get("anchorage", {}).get("directions"),
                          "beam_splice": splices["beam"], "column_splice": splices["column"],

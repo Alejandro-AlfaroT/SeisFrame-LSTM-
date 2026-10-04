@@ -1,6 +1,6 @@
 """Per-end ownership of bar slip (Model/Deformation_Ownership, 2026-09-27 evening).
 
-Pins the policy Codex's slip resolution asked for: the member hinge keeps Haselton's slip share
+Pins the policy the slip resolution asked for: the member hinge keeps Haselton's slip share
 (a_sl = 1) at every end, column bases included, unless a face interface is registered for that
 end; a declared joint scope is not an owner; duplicate and unowned claims are refused; the
 ownership travels into the hinge registry and the NTHA end inventory.
@@ -175,7 +175,7 @@ class FrameInventory(unittest.TestCase):
 
 
 class DomainLifecycle(unittest.TestCase):
-    """Codex Unit 1 review (2026-09-28), commit blocker 1: a registration from a previous domain must not
+    """Unit 1 review (2026-09-28), commit blocker 1: a registration from a previous domain must not
     survive build_model/ops.wipe, and a registration is honoured only while its element is installed."""
 
     def setUp(self):

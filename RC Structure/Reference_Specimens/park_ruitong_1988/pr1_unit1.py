@@ -1,6 +1,6 @@
 """Park and Ruitong (1988) Unit 1: OpenSeesPy port of the OpenSees PR1 example, its checks, the fixed
 experimental-history mode and the untuned input-correction cases (2026-09-27; revised 2026-09-29 after
-Codex's Unit 1 review of 2026-09-28).
+the Unit 1 review of 2026-09-28).
 
 Isolated reference-specimen diagnostic. Nothing here touches the project frame. The model is the official
 OpenSees example PR1.tcl (N. Mitra, 16 Feb 2003, opensees.berkeley.edu/OpenSees/manuals/usermanual/1178.htm)
@@ -17,7 +17,7 @@ Loading protocols:
               from the test (EXPERIMENT_AMPLITUDES_MM); the model's own yield displacement is reported, never used
               to rescale the history; --amplitude-shift applies the +-3 mm reading bound coherently to every peak
 
-Input cases (Codex review: no bond, pinching, damage or stiffness parameter is fitted in this matrix):
+Input cases (review: no bond, pinching, damage or stiffness parameter is fitted in this matrix):
   example_inputs             the example's Steel02 beam steel and its confinement inputs
   measured_beam_steel_only   ReinforcingSteel with the measured plateau and hardening (paper Table 2(b), Fig. 5)
   verified_confinement_only  beam stirrup stations from Fig. 7 with R6(B) fy = 366 MPa (Table 2(a)); column unchanged
@@ -500,7 +500,7 @@ def _analyze_step(rec, integrator_args, allow_loose=True):
     """One step through the recovery chain: Newton at the requested tolerance, then KrylovNewton, then (only
     when ``allow_loose``) Newton and KrylovNewton at the loose tolerance (procRC's 1e-6 fallback, or 100 x the
     requested one). Every attempt is recorded with its algorithm and tolerance; the accepted one is what the
-    row carries. The equilibrium residual of the accepted state is evaluated by the recorder (Codex 2026-09-28:
+    row carries. The equilibrium residual of the accepted state is evaluated by the recorder (review 2026-09-28:
     normalized residuals no greater than 1e-6) and an over-limit row is polished there."""
     ops.integrator(*integrator_args)
     loose = max(LOOSE_TOLERANCE_FLOOR, SOLVER["tolerance"] * 100.0)
@@ -606,7 +606,7 @@ def run_example_protocol(rec, step=None, sign=1.0):
 def run_paper_protocol(rec, step=0.01, sign=1.0, force_step_n=500.0):
     """Section 3.2 read literally: load control to +-0.75 V2, Delta_y from the two displacements the MODEL
     reaches, then displacement cycles at mu x that Delta_y. Self-scaled: a diagnostic, not an
-    experiment-matched comparison (Codex review 2026-09-28)."""
+    experiment-matched comparison (review 2026-09-28)."""
     reached = _load_control_cycle(rec, sign, force_step_n)
     delta_y = (4.0 / 3.0) * 0.5 * (abs(reached["pos"]) + abs(reached["neg"]))
     targets = []
@@ -662,7 +662,7 @@ def _interp_crossing(x, y, i):
 
 
 def _branch_metrics(us, vs, i_peak):
-    """The branch after the reversal at i_peak (Codex fit criteria, 2026-09-28): the first zero-force
+    """The branch after the reversal at i_peak (fit criteria, 2026-09-28): the first zero-force
     crossing (residual displacement, linear interpolation between recorder points), the first
     zero-displacement crossing on that same branch with its force sign retained, and the unloading chord
     between the first 80 % and 20 % force levels measured toward zero force, with its endpoints."""
@@ -704,16 +704,20 @@ def evaluate(rows, meta):
     # moment about the base pin, M = sum(x Fy - y Fx): the tip load gives -H V, the beam support forces
     # +-L Ry, the two gravity loads cancel (+-x_P); reactions are the support forces on the structure
     mz = -v * 1000.0 * h + (rr - rl) * L_BEAM
-    scale_v = max(float(np.max(np.abs(v))) * 1000.0, 1.0)
+    # one declared denominator for every equilibrium statement (review 2026-09-30): the fixed characteristic
+    # scales of EQUILIBRIUM_SCALES, the same ones the per-row residual uses
+    scale_v = EQUILIBRIUM_SCALES["force_N"]
     scale_fy = 2.0 * P_GRAVITY
-    rel = (float(np.max(np.abs(fx)) / scale_v), float(np.max(np.abs(fy)) / scale_fy), float(np.max(np.abs(mz)) / (scale_v * h)))
+    scale_m = EQUILIBRIUM_SCALES["moment_Nmm"]
+    rel = (float(np.max(np.abs(fx)) / scale_v), float(np.max(np.abs(fy)) / scale_fy), float(np.max(np.abs(mz)) / scale_m))
     equilibrium = {"sum_fx_max_abs_N": float(np.max(np.abs(fx))), "sum_fy_max_abs_N": float(np.max(np.abs(fy))),
                    "moment_about_base_max_abs_Nmm": float(np.max(np.abs(mz))),
                    "sum_fx_relative": rel[0], "sum_fy_relative": rel[1], "moment_relative": rel[2],
-                   "scales": {"force_N": scale_v, "vertical_force_N": scale_fy, "moment_Nmm": scale_v * h},
+                   "scales": {"force_N": scale_v, "vertical_force_N": scale_fy, "moment_Nmm": scale_m,
+                              "basis": "fixed characteristic scales (observed maximum load 80.3 kN, its base moment, the gravity total); identical to the per-row gate"},
                    "limit_relative": 1e-6, "passes_1e-6": bool(max(rel) <= 1e-6),
                    "basis": "reactions (base pin, beam rollers) against the applied tip load and the two gravity loads; V acts at the tip, "
-                            "beam reactions at +-2119 mm; characteristic scales: max |V|, 2 P, max |V| H"}
+                            "beam reactions at +-2119 mm; characteristic scales: 80.3 kN, 2 P, 80.3 kN x H (one declared denominator)"}
     prefix = "ex" if meta["protocol"] == "example" else "mu"
     cycles = []
     spans = _cycles_from_phases(rows, prefix)
@@ -935,7 +939,7 @@ def compare(rows_a, rows_b, keys):
     out["global_budget"] = {"V_kN": out["absolute"].get("V", 0.0) / 1000.0, "u_tip_mm": out["absolute"].get("u_tip", 0.0),
                             "limit_kN": 0.3, "limit_mm": 0.3,
                             "passes": bool(out["absolute"].get("V", 0.0) / 1000.0 <= 0.3 and out["absolute"].get("u_tip", 0.0) <= 0.3),
-                            "basis": "review choice: 10 % of the digitization resolution (Codex 2026-09-28)"}
+                            "basis": "review choice: 10 % of the digitization resolution (review 2026-09-28)"}
     return out
 
 

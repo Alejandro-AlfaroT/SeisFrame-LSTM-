@@ -374,6 +374,8 @@ def run_ntha_batch(args, checkpoint=None):
             command.extend(["--scale-factor", str(scale_factor)])
         if args.catalog_summary:
             command.append("--catalog-summary")
+        if getattr(args, "profile", None):
+            command.extend(["--profile", args.profile])
         command.extend(geometry_cli_args_for_command(args))
 
         print(f"Running NTHA {run_name} ({npts} points) -> {out_dir}")
@@ -467,6 +469,8 @@ def parse_args():
     parser.add_argument("--rayleigh-mode-j", type=int, default=2)
     parser.add_argument("--dt-factor", type=float, default=1.0)
     parser.add_argument("--python-exe", default=sys.executable)
+    parser.add_argument("--profile", default=None,
+                        help="Analysis profile (Model/Analysis_Profile) handed to every Ground_Motion_Main run.")
     parser.add_argument("--ntha-root", default=str(default_ntha_root))
     parser.add_argument("--dataset-dir", default=str(default_dataset_dir))
     parser.add_argument(
@@ -539,6 +543,7 @@ def main():
         "max_npts": args.max_npts if args.max_npts and args.max_npts > 0 else None,
         "geometry_variant": geometry_name or "baseline",
         "geometry_overrides": geometry_overrides_from_args(args),
+        "analysis_profile": getattr(args, "profile", None),
         "ntha_runs": [],
         "compiled_samples": [],
     }

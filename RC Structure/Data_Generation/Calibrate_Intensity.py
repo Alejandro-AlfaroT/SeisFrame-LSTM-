@@ -252,6 +252,11 @@ def _design_schema_version(design_path):
 # does not match the running code unless told otherwise.
 MODEL_IDENTITY_KEYS = (
     "design_schema_version",
+    # 2026-10-01: the risk basis, the joint model and the named model profile change the designs and
+    # the response an intensity calibration was fitted on; a calibration of another basis is stale.
+    "risk_category",
+    "joint_model",
+    "analysis_profile_id",
     "element_formulation",
     "imk_material_type",
     "imk_deterioration_mode",
@@ -273,6 +278,9 @@ def current_model_identity():
     match = re.search(r'^DESIGN_SCHEMA_VERSION\s*=\s*"([^"]+)"', source, re.M)
     return {
         "design_schema_version": match.group(1) if match else None,
+        "risk_category": getattr(sp, "ASCE_RISK_CATEGORY", None),
+        "joint_model": getattr(sp, "JOINT_MODEL", "rigid_centerline"),
+        "analysis_profile_id": getattr(sp, "ANALYSIS_PROFILE_ID", None),
         "element_formulation": sp.ELEMENT_FORMULATION,
         "imk_material_type": sp.IMK_MATERIAL_TYPE,
         "imk_deterioration_mode": getattr(sp, "IMK_DETERIORATION_MODE", "direct"),

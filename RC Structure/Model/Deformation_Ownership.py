@@ -1,6 +1,6 @@
 """Per-end ownership of the deformation mechanisms at member ends (2026-09-27).
 
-Codex's slip-calibration resolution replaced the global slip-removal switch with accounting at
+The slip-calibration resolution replaced the global slip-removal switch with accounting at
 each physical member end: every mechanism (flexure, bar/anchorage slip, panel shear) has exactly
 one owner at each end, a declared joint scope is not an owner, and a column base that has no
 replacement interface never loses its slip contribution silently.
@@ -14,7 +14,7 @@ The panel spring (Model/Joint_Springs) owns panel shear only, whatever its decla
 Nothing here supplies calibration: registering an interface is what the diagnostic subassembly does
 in-process; the production frame registers none, so every production hinge keeps a_sl = 1.
 
-Domain scope (Codex Unit 1 review, 2026-09-28, commit blocker 1): the registry belongs to one OpenSees
+Domain scope (Unit 1 review, 2026-09-28, commit blocker 1): the registry belongs to one OpenSees
 domain. Every builder calls begin_domain() right after ops.wipe() and before any member is created, which
 discards (and counts) registrations left from a previous domain; a registration names the element that
 realises the interface, and it is honoured only while that element is in the current domain. A builder

@@ -116,6 +116,25 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), before)
             self.assertFalse(list(Path(directory).glob("*.lock")))
 
+    def test_generation_drops_the_iteration_history_and_verification_keeps_it(self):
+        """User decision 2026-10-02: only the verification run holds the per-iteration entries."""
+        import inspect
+        import Ground_Motion_Main as main
+        kept = artifact()
+        kept["history"] = [{"iteration": 1}, {"iteration": 2}]
+        kept["search"] = {"history_retained": True}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "design.json"
+            with mock.patch.object(driver, "design_structure", return_value=kept) as design:
+                driver.load_or_create_design(path, verbose=False, keep_history=False)
+            self.assertEqual(design.call_args.kwargs["keep_history"], False)
+            with mock.patch.object(driver, "design_structure", return_value=kept) as design:
+                driver.load_or_create_design(Path(directory) / "other.json", verbose=False)
+            self.assertEqual(design.call_args.kwargs["keep_history"], True)
+        self.assertIn("keep_history=False", inspect.getsource(main.main))
+        from Design import Verify_Designs
+        self.assertNotIn("keep_history=False", inspect.getsource(Verify_Designs))
+
     def test_existing_lock_prevents_double_design(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "design.json"
@@ -149,7 +168,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(len(resize.call_args.args[0]), 18)
         self.assertEqual(update.call_count, 1)
         self.assertEqual(floor.call_count, 1)
-        self.assertEqual(worst, {"column": 0.4, "beam": 0.7})
+        # The stub results carry no limit states, so the governing beam moment (beam growth rule) is zero.
+        self.assertEqual(worst, {"column": 0.4, "beam": 0.7, "beam_flexure_demand_kip_in": 0.0})
         self.assertEqual(len(actions), 18)
         self.assertTrue(all(item["axial_reference"] == "joint_faces" for item in actions))
         self.assertIs(joint_scwb, joints)
@@ -321,7 +341,11 @@ class IntegrationTests(unittest.TestCase):
         try:
             result = driver.design_structure(max_section_iter=1, max_steel_iter=1, verbose=False)
             self.assertEqual(result["schema_version"], driver.DESIGN_SCHEMA_VERSION)
-            self.assertEqual(result["iterations"], 1)
+            # One escalation evaluation; it passes the candidate screen, so the column step-down pass
+            # (2026-10-02) adds its bisection trials, which the escalation budget does not bound.
+            reduction = result["search"]["column_reduction"]
+            self.assertEqual(result["iterations"], 1 + len(reduction["trials"]))
+            self.assertLessEqual(reduction["selected_column"][0], reduction["first_passing_column"][0])
             self.assertFalse(result["dcr"]["accepted"])
             self.assertGreater(result["qualification"]["counts"]["not_evaluated"], 0)
             self.assertEqual(len(result["drift_screen"]["stories"]), 2)
@@ -449,9 +473,16 @@ class IntegrationTests(unittest.TestCase):
                                families["x_interior"]["rectangular"]["negative"]["mn_kip_in"])
             sample = next(iter(verified["beam_slab_strengths"].values()))
             self.assertEqual(sample["slab_basis"], "developed_effective_width")
-            # Governing joint: one roof column against Mnb- + Mnb+ of the strongest family.
-            self.assertAlmostEqual(verified["scwb"]["beam_nominal_moment_kip_in"],
-                                   max(f["mn_negative_kip_in"] + f["mn_positive_kip_in"] for f in families.values()))
+            # A one-story frame has only roof connections, and its columns carry far less than Ag f'c / 10:
+            # the 18.7.3.1 exception leaves no joint the strong-column rule applies to (2026-10-02), so the
+            # sizing screen asks for no column moment. Without the exception the governing joint is one roof
+            # column against Mnb- + Mnb+ of the strongest family.
+            self.assertTrue(verified["scwb"]["roof_exception_18_7_3_1_screen"])
+            self.assertEqual(verified["scwb"]["beam_nominal_moment_kip_in"], 0.0)
+            from Design import SMRF_Joints
+            with mock.patch.object(SMRF_Joints, "SCWB_DISCONTINUOUS_COLUMN_EXCEPTION", False):
+                self.assertAlmostEqual(driver._scwb_required_column_moment() / sp.SCWB_RATIO_MIN,
+                                       max(f["mn_negative_kip_in"] + f["mn_positive_kip_in"] for f in families.values()))
             statuses = {c["id"]: c["status"] for c in verified["qualification"]["checks"]}
             self.assertEqual(statuses["qualification.slab_contribution"], "pass")
             self.assertEqual(statuses["floor.qualified_slab_actions"], "pass")

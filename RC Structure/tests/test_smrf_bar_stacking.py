@@ -243,7 +243,7 @@ class RecordRoundTrip(unittest.TestCase):
 
 
 class ActualRows(unittest.TestCase):
-    """Codex items 1 and 3 (2026-09-27): every bar row is its own steel layer in the strength module, and
+    """Review items 1 and 3 (2026-09-27): every bar row is its own steel layer in the strength module, and
     malformed row metadata is rejected rather than silently truncated."""
     beam = {"b_in": 26.0, "h_in": 28.0, "fc_ksi": 5.0, "fy_ksi": 60.0, "bar_size": 11, "top_bars": 5, "bot_bars": 5}
     geometry = {"bay_x_in": 144.0, "bay_y_in": 180.0, "h_col_in": 40.0, "b_col_in": 40.0}

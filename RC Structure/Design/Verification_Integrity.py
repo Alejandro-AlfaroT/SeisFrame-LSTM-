@@ -52,11 +52,13 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
-def expected_identity(case, cfg):
-    """Reproduce worker inputs without leaving global geometry/site changes.
+def expected_identity(case, cfg, profile_id=None):
+    """Reproduce worker inputs without leaving global geometry/site/profile changes.
 
     Only identity construction touches globals here, serialized across launch
-    threads. This does not run a design or an OpenSees analysis.
+    threads. This does not run a design or an OpenSees analysis. ``profile_id``
+    is the analysis profile the worker applies (Model/Analysis_Profile); the
+    identity carries it, so a design made under another profile is refused.
     """
     import Structure_Parameters as sp
     import Geometry_Overrides as go
@@ -70,6 +72,9 @@ def expected_identity(case, cfg):
                 "BAY_X": 12.0 * case["bay_x_width_ft"], "BAY_Y": 12.0 * case["bay_y_width_ft"],
             }, variant_name=case["geometry_name"], emit=False)
             sp.apply_seismic_site(case["seismic_site"])
+            if profile_id:
+                from Model.Analysis_Profile import apply_profile
+                apply_profile(profile_id)
             return design_request_identity(cfg)
         finally:
             for key in set(vars(sp)) - set(snapshot):

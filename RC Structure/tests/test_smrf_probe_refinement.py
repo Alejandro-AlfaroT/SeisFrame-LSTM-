@@ -85,7 +85,7 @@ class GradedFaceRecipeTests(unittest.TestCase):
         for (nx, ny, bay), expected in cases.items():
             with self.subTest(nx=nx, ny=ny):
                 r = resolve_recipe_plan({"num_bay_x": nx, "num_bay_y": ny, "bay_x_in": bay, "bay_y_in": bay},
-                                        {"b_beam_in": 14.}, recipe_policy())
+                                        {"b_beam_in": 14.}, recipe_policy(max_shells=45000))
                 self.assertEqual(r["status"], "resolved")
                 self.assertEqual([m["cells_per_bay"][0] for m in r["resolved_levels"]], expected)
                 self.assertEqual(len(r["resolved_levels"]) + len(r["dropped_levels"]), 4)
@@ -96,6 +96,15 @@ class GradedFaceRecipeTests(unittest.TestCase):
         self.assertEqual(r["status"], "unresolved_budget")
         self.assertEqual(len(r["meshes"]), 0)
         self.assertIn("needs two", r["detail"])
+
+    def test_probe_budget_retains_all_levels_for_the_largest_pilot_floor(self):
+        r = resolve_recipe_plan({"num_bay_x": 6, "num_bay_y": 6, "bay_x_in": 288., "bay_y_in": 288.},
+                                {"b_beam_in": 10.}, recipe_policy())
+        self.assertEqual([m["cells_per_bay"] for m in r["resolved_levels"]], [[12,12],[24,24],[48,48],[60,60]])
+        self.assertEqual(r["resolved_levels"][-1]["shell_count"], 129600)
+        self.assertEqual(r["dropped_levels"], [])
+        self.assertEqual(PROBE_SLAB_REFINEMENT["moment_tolerance"], .05)
+        self.assertEqual(PROBE_SLAB_REFINEMENT["shear_tolerance"], .05)
 
     def test_beam_size_change_rebuilds_the_resolved_coordinates(self):
         geometry = {"num_bay_x": 2, "num_bay_y": 2, "bay_x_in": 240., "bay_y_in": 240.}

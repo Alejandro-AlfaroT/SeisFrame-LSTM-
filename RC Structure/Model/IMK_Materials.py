@@ -19,6 +19,12 @@ ENERGY_CONVENTION = "opensees_ref_energy_equals_lamda_times_fy"
 SCHEMA_VERSION = "rotational_imk_v2_explicit_energy_metadata"
 MATERIAL_TYPES = ("IMKBilin", "IMKPeakOriented", "IMKPinching")
 MAPPING_VERSION = "explicit_reference_energy_v1"
+# Provisional research anchor (pre-generation review, 2026-10-04): the reference energy of every active mode
+# is the base Lamda times the SMALLER of the two physical yield moments of the spring. It does not depend on
+# which physical direction is the positive input branch. It is a modelling convention for a declared research
+# batch: not an experimental calibration, not an ACI requirement and not a proven bound on response.
+PROVISIONAL_ANCHOR_VERSION = "provisional_min_yield_anchor_v1"
+PROVISIONAL_ANCHOR_STATUS = "provisional_research_not_experimentally_calibrated"
 
 
 def active_energy_modes(material_type):
@@ -177,11 +183,8 @@ def define_rotational_imk(material_type, mat_tag, ke, positive, negative, cyclic
     return metadata
 
 
-def define_mapped_rotational_imk(material_type, mat_tag, ke, positive, negative, cyclic, *,
-                                calibration, reverse=False, physical_directions=("positive", "negative"),
-                                provenance, verification_only=False):
-    """Map complete physical branches, directional D and mode energies together."""
-    profile = validate_energy_calibration(calibration, material_type, verification_only=verification_only)
+def _map_physical_branches(material_type, positive, negative, cyclic, reverse, physical_directions):
+    """Validate two physical branches and place them, with their directional D, on the input coordinates."""
     if not isinstance(reverse, bool):
         raise ValueError("reverse must be a boolean coordinate mapping")
     if (len(physical_directions) != 2 or len(set(physical_directions)) != 2
@@ -191,17 +194,68 @@ def define_mapped_rotational_imk(material_type, mat_tag, ke, positive, negative,
     negative.arguments()
     cyclic.arguments(material_type)
     mapped_pos, mapped_neg = (negative, positive) if reverse else (positive, negative)
+    labels = tuple(reversed(physical_directions)) if reverse else tuple(physical_directions)
+    directional = {"d_pos": cyclic.d_neg if reverse else cyclic.d_pos,
+                   "d_neg": cyclic.d_pos if reverse else cyclic.d_neg}
+    record = {"coordinate_reversed": reverse,
+              "positive_input_direction": labels[0], "negative_input_direction": labels[1],
+              "physical_positive": asdict(positive), "physical_negative": asdict(negative),
+              "physical_d_pos": cyclic.d_pos, "physical_d_neg": cyclic.d_neg}
+    return mapped_pos, mapped_neg, directional, record
+
+
+def define_mapped_rotational_imk(material_type, mat_tag, ke, positive, negative, cyclic, *,
+                                calibration, reverse=False, physical_directions=("positive", "negative"),
+                                provenance, verification_only=False):
+    """Map complete physical branches, directional D and mode energies together."""
+    profile = validate_energy_calibration(calibration, material_type, verification_only=verification_only)
+    mapped_pos, mapped_neg, directional, record = _map_physical_branches(
+        material_type, positive, negative, cyclic, reverse, physical_directions)
     mapped_cyclic = replace(cyclic,
         **{f"lamda_{mode.lower()}": value / mapped_pos.fy
            for mode, value in profile["energies_kip_in_rad"].items()},
-        d_pos=cyclic.d_neg if reverse else cyclic.d_pos,
-        d_neg=cyclic.d_pos if reverse else cyclic.d_neg)
-    labels = tuple(reversed(physical_directions)) if reverse else tuple(physical_directions)
+        **directional)
     mapped_provenance = {**provenance, "energy_calibration": profile,
-        "energy_mapping": {"version": MAPPING_VERSION, "coordinate_reversed": reverse,
-                           "positive_input_direction": labels[0], "negative_input_direction": labels[1],
-                           "physical_positive": asdict(positive), "physical_negative": asdict(negative),
-                           "physical_d_pos": cyclic.d_pos, "physical_d_neg": cyclic.d_neg,
-                           "verification_only": verification_only}}
+        "energy_mapping": {"version": MAPPING_VERSION, **record, "verification_only": verification_only}}
+    return define_rotational_imk(material_type, mat_tag, ke, mapped_pos, mapped_neg, mapped_cyclic,
+                                 provenance=mapped_provenance)
+
+
+def define_anchored_rotational_imk(material_type, mat_tag, ke, positive, negative, cyclic, *,
+                                  reverse=False, physical_directions=("positive", "negative"), provenance):
+    """Install a spring whose mode energies are anchored to its smaller physical yield moment.
+
+    ``positive`` and ``negative`` are the PHYSICAL branches and ``cyclic`` carries the base Lamda of
+    every mode (already the OpenSees deformation parameter; never multiplied by a rotation here). For
+    each active mode, the suppressed large-capacity modes included,
+
+        M_ref = min(My_physical_positive, My_physical_negative)
+        E_ref = Lamda_base * M_ref
+        Lamda_installed = Lamda_base * (M_ref / My_positive_input)
+
+    so E_ref is the same whichever physical branch is the positive input, and equal strengths install
+    the base Lamda unchanged. The record carries the policy and its status; nothing here is, or is
+    labelled as, an experimental calibration.
+    """
+    mapped_pos, mapped_neg, directional, record = _map_physical_branches(
+        material_type, positive, negative, cyclic, reverse, physical_directions)
+    modes = active_energy_modes(material_type)
+    base = {mode: getattr(cyclic, f"lamda_{mode.lower()}") for mode in modes}
+    reference_moment = min(positive.fy, negative.fy)
+    ratio = reference_moment / mapped_pos.fy
+    mapped_cyclic = replace(cyclic, **{f"lamda_{mode.lower()}": base[mode] * ratio for mode in modes}, **directional)
+    mapped_provenance = {**provenance, "energy_mapping_status": PROVISIONAL_ANCHOR_VERSION,
+        "energy_mapping": {"version": PROVISIONAL_ANCHOR_VERSION, "status": PROVISIONAL_ANCHOR_STATUS,
+                           "anchor_policy": "reference moment is the smaller physical yield moment of the spring",
+                           "reference_moment_kip_in": reference_moment,
+                           "base_lamda_rad": base,
+                           "reference_energies_kip_in_rad": {mode: base[mode] * reference_moment for mode in modes},
+                           "installed_lamda_rad": {mode: base[mode] * ratio for mode in modes},
+                           "equations": ["M_ref = min(My_physical_positive, My_physical_negative)",
+                                         "E_ref,m = Lamda_base,m * M_ref",
+                                         "Lamda_installed,m = E_ref,m / My_positive_input"],
+                           **record,
+                           "limits": ("modelling convention for a declared research batch; not an experimental "
+                                      "calibration, not an ACI requirement, not a proven bound on response")}}
     return define_rotational_imk(material_type, mat_tag, ke, mapped_pos, mapped_neg, mapped_cyclic,
                                  provenance=mapped_provenance)

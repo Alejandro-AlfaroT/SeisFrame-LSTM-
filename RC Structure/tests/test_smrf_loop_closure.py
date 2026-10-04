@@ -67,7 +67,7 @@ class PlannerTests(unittest.TestCase):
         self.assertIsNone(driver._next_wider_beam_index(self.beams, widest))
 
     def test_drift_failure_takes_the_next_beam_depth_and_holds_the_column(self):
-        ci = next(i for i, r in enumerate(self.columns) if r == (30., 30., 4.))
+        ci = next(i for i, r in enumerate(self.columns) if r == (30., 30., 5.))
         bi = next(i for i, r in enumerate(self.beams) if r == (10., 18., 6.))
         worst = {"beam": 0.87, "column": 0.75}       # in band; column well under its ceiling
         next_column, next_beam, reasons = driver._plan_next_rungs(
@@ -110,11 +110,17 @@ class PlannerTests(unittest.TestCase):
             self.columns, self.beams, ci, bi, worst, 0.75, 1.0, scwb_index=ci,
             flags=flags(scwb_ok=False, joint_scwb_failed=True))
         self.assertIn("joint_scwb", reasons)
-        self.assertEqual(self.columns[next_column][0], 28.)
+        # strength before geometry (2026-10-03): the same size at the top grade first ...
+        self.assertEqual(self.columns[next_column], (26., 26., 10.))
         self.assertGreaterEqual(next_beam, bi)        # strength may still move the beam; never down
+        # ... and only a column already at the top grade takes the next size, at the top grade
+        again, _b, _r = driver._plan_next_rungs(
+            self.columns, self.beams, next_column, bi, worst, 0.75, 1.0, scwb_index=next_column,
+            flags=flags(scwb_ok=False, joint_scwb_failed=True))
+        self.assertEqual(self.columns[again], (28., 28., 10.))
 
     def test_step_down_allowed_only_when_every_requirement_is_met(self):
-        ci = next(i for i, r in enumerate(self.columns) if r == (TOP, TOP, 4.))
+        ci = next(i for i, r in enumerate(self.columns) if r == (TOP, TOP, 5.))
         bi = next(i for i, r in enumerate(self.beams) if r == (10., 18., 6.))
         worst = {"beam": 0.85, "column": 0.6}
         met, _b, reasons = driver._plan_next_rungs(self.columns, self.beams, ci, bi, worst, 0.75, 1.0,
@@ -126,21 +132,21 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(held, ci)                    # top of the ladder: drift grows the beam instead
 
     def test_joint_shear_jumps_to_the_rung_whose_joint_area_covers_the_shortfall(self):
-        ci = next(i for i, r in enumerate(self.columns) if r == (24., 24., 4.))
-        bi = next(i for i, r in enumerate(self.beams) if r == (10., 20., 4.))
+        ci = next(i for i, r in enumerate(self.columns) if r == (24., 24., 5.))
+        bi = next(i for i, r in enumerate(self.beams) if r == (10., 20., 5.))
         worst = {"beam": 0.89, "column": 0.5}
         next_column, _b, reasons = driver._plan_next_rungs(
             self.columns, self.beams, ci, bi, worst, 0.75, 1.0, scwb_index=0,
             flags=flags(joints_all_pass=False, joint_shear_ratio=1.6))
         self.assertIn("joint_shear_or_anchorage", reasons)
         b, h, fc = self.columns[next_column]
-        self.assertGreaterEqual(b * h * fc ** .5, 24. * 24. * 2. * 1.6 - 1e-9)
+        self.assertGreaterEqual(b * h * fc ** .5, 24. * 24. * 5. ** .5 * 1.6 - 1e-9)
         # and not further than the first rung that covers it
         b0, h0, fc0 = self.columns[next_column - 1]
-        self.assertLess(b0 * h0 * fc0 ** .5, 24. * 24. * 2. * 1.6)
+        self.assertLess(b0 * h0 * fc0 ** .5, 24. * 24. * 5. ** .5 * 1.6)
 
     def test_top_of_beam_ladder_falls_back_to_the_column(self):
-        ci = next(i for i, r in enumerate(self.columns) if r == (30., 30., 4.))
+        ci = next(i for i, r in enumerate(self.columns) if r == (30., 30., 5.))
         bi = len(self.beams) - 1
         worst = {"beam": 0.5, "column": 0.5}
         next_column, next_beam, _r = driver._plan_next_rungs(
@@ -151,10 +157,11 @@ class PlannerTests(unittest.TestCase):
     def test_next_stronger_index_keeps_the_dimensions(self):
         ci = next(i for i, r in enumerate(self.columns) if r == (36., 36., 6.))
         self.assertEqual(self.columns[driver._next_stronger_index(self.columns, ci)], (36., 36., 8.))
-        self.assertIsNone(driver._next_stronger_index(self.columns, ci + 1))          # 36x36 fc-8: top strength
+        self.assertEqual(self.columns[driver._next_stronger_index(self.columns, ci + 1)], (36., 36., 10.))
+        self.assertIsNone(driver._next_stronger_index(self.columns, ci + 2))          # 36x36 fc-10: top column grade
         beams = beam_ladder(span_in=168., story_height_in=156.)                       # case_0013 ladder
-        bi = next(i for i, r in enumerate(beams) if r == (20., 32., 4.))
-        self.assertEqual(beams[driver._next_stronger_index(beams, bi)], (20., 32., 5.))
+        bi = next(i for i, r in enumerate(beams) if r == (20., 32., 5.))
+        self.assertEqual(beams[driver._next_stronger_index(beams, bi)], (20., 32., 6.))
         self.assertIsNone(driver._next_stronger_index(beams, next(i for i, r in enumerate(beams) if r == (20., 32., 8.))))
 
     def test_beam_shear_at_the_top_dimensions_takes_the_next_concrete_strength(self):
@@ -163,14 +170,14 @@ class PlannerTests(unittest.TestCase):
         beams = beam_ladder(span_in=168., story_height_in=156.)
         ci = next(i for i, r in enumerate(self.columns) if r == (36., 36., 6.))
         top_width = max(r[0] for r in beams if r[1] == 32.)
-        bi = next(i for i, r in enumerate(beams) if r == (top_width, 32., 4.))
+        bi = next(i for i, r in enumerate(beams) if r == (top_width, 32., 5.))
         self.assertIsNone(driver._next_deeper_beam_index(beams, bi))
         self.assertIsNone(driver._next_wider_beam_index(beams, bi))
         next_column, next_beam, reasons = driver._plan_next_rungs(
             self.columns, beams, ci, bi, {"beam": 0.84, "column": 0.44}, 0.85, 1.0, scwb_index=0,
             flags=flags(beam_section_adequate=False, capacity_accepted=False))
         self.assertEqual(reasons, ["beam_capacity_shear"])
-        self.assertEqual(beams[next_beam], (top_width, 32., 5.))
+        self.assertEqual(beams[next_beam], (top_width, 32., 6.))
         self.assertEqual(next_column, ci)                                             # the column is not the lever
 
     def test_column_shear_at_the_largest_size_takes_the_next_concrete_strength(self):
@@ -182,7 +189,7 @@ class PlannerTests(unittest.TestCase):
             self.columns, self.beams, ci, bi, {"beam": 0.85, "column": 0.55}, 0.85, 1.0, scwb_index=0,
             flags=flags(column_section_adequate=False, capacity_accepted=False))
         self.assertEqual(reasons, ["column_capacity_shear"])
-        self.assertEqual(self.columns[next_column], (TOP, TOP, 8.))
+        self.assertEqual(self.columns[next_column], (TOP, TOP, 10.))                   # the top grade (2026-10-03)
         self.assertEqual(next_beam, bi)
 
 
@@ -222,12 +229,12 @@ class CandidatePlanTests(unittest.TestCase):
         visited = {(self.c36, self.b22)}
         plan = self.plan(self.c36, self.b22, visited, joints_all_pass=False, capacity_accepted=False)
         self.assertIsNotNone(plan["candidate"])
-        self.assertEqual(self.columns[plan["candidate"]["column"]], (TOP, TOP, 8.))   # same size, next f'c
+        self.assertEqual(self.columns[plan["candidate"]["column"]], (TOP, TOP, 10.))  # same size, top grade
         self.assertEqual(plan["candidate"]["beam"], self.b22)                           # the deeper proposal cannot fit
         self.assertTrue(plan["substitutions"])
         self.assertLessEqual({s["stage"] for s in plan["substitutions"]}, {"clear_span_compatibility", "visited_pair"})
         # With the strength rung already visited too, the next unvisited pair is one column rung further.
-        visited.add((self.c36 + 1, self.b22))
+        visited.update({(self.c36 + 1, self.b22), (self.c36 + 2, self.b22)})
         plan = self.plan(self.c36, self.b22, visited, joints_all_pass=False, capacity_accepted=False)
         self.assertIsNone(plan["candidate"])                                            # the ladder top at fc-8
         self.assertEqual(plan["stop_reason"], "candidate_set_exhausted")

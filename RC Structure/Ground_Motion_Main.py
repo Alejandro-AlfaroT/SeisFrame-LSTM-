@@ -65,6 +65,19 @@ OUTPUT_IDENTITY_KEYS = (
     "beam_top_bars",
     "beam_bot_bars",
     "beam_side_bars",
+    # The analysis profile the run was built under (Model/Analysis_Profile; screening repair item 6, 2026-10-02):
+    # outputs of different profiles never share a directory.
+    "analysis_profile_id",
+    # A grouped design (2026-10-02) has no one section or cage: the entries above are null and the frame is
+    # identified by the digest of its member groups (absent, hence equal, in every uniform output).
+    "design_mode",
+    "member_groups_sha256",
+    # Design basis and nonlinear-model profile (2026-10-01): Risk Category III with Ie = 1.25 and the
+    # named profile are part of what a response means, so an output folder of another basis or
+    # profile is refused rather than resumed into.
+    "risk_category",
+    "seismic_importance_factor",
+    "analysis_profile_id",
     "element_formulation",
     "imk_apply_to_columns",
     "imk_apply_to_beams",
@@ -146,7 +159,7 @@ def validate_ntha_output_compatibility(output_dir, overwrite_existing=False):
 
     with parameters_path.open(encoding="utf-8") as file:
         previous = json.load(file)
-    current = collect_global_parameters()
+    current = global_parameters_with_profile()
     differences = {
         key: {"existing": previous.get(key), "requested": current.get(key)}
         for key in OUTPUT_IDENTITY_KEYS
@@ -318,6 +331,10 @@ def _hinge_backbone_rows(results):
                 "past_capping": 1 if theta_p > 0 and plastic >= theta_p else 0,
             }
         )
+        if backbone.get("group_id") is not None:
+            # A grouped design: the member's design group and position follow the uniform columns.
+            rows[-1].update({key: backbone.get(key, "") for key in ("group_id", "band", "location_class", "story_or_floor",
+                                                                    "grid_i", "grid_j")})
     return rows
 
 
@@ -339,6 +356,12 @@ def _write_response_arrays(output_dir, results):
             dtype=np.float32,
         ).T,
         "hinge_rotation": np.asarray(hinge_history, dtype=np.float32),
+        # The conjugate spring moments on the same rows (same committed state), with the explicit
+        # time and commit count of each row. The compact float32 copies travel to the hybrid
+        # sample; the float64 originals with their schema are in hinge_moment_rotation.npz.
+        "hinge_moment": np.asarray(results.get("hinge_moment_history") or [], dtype=np.float32),
+        "hinge_history_time": np.asarray(results.get("hinge_history_time") or [], dtype=np.float64),
+        "hinge_history_commit_count": np.asarray(results.get("hinge_history_commit_count") or [], dtype=np.int32),
         "hinge_rotation_steps": np.asarray(
             results.get("hinge_rotation_steps") or [], dtype=np.int32
         ),
@@ -454,9 +477,13 @@ def save_ntha_outputs(output_dir, results, gravity_results, modal_results):
         _write_json(output_dir / "record_summary_y.json", results["record_summary_y"])
     _write_json(output_dir / "gravity_results.json", gravity_results)
     _write_json(output_dir / "modal_results.json", modal_results)
-    _write_json(output_dir / "global_parameters.json", collect_global_parameters())
+    _write_json(output_dir / "global_parameters.json", global_parameters_with_profile())
     _write_json(output_dir / "hinge_envelope.json", results["hinge_envelope"])
     _write_response_arrays(output_dir, results)
+    # The synchronized hinge moment-rotation histories with their schema and spring table
+    # (Analysis/Hinge_Moment_Rotation): written here so they survive the production export route.
+    from Analysis.Hinge_Moment_Rotation import write_hinge_moment_rotation
+    hinge_history_counts = write_hinge_moment_rotation(output_dir, results)
     if hinge_rows:
         _write_csv(output_dir / "hinge_backbone.csv", list(hinge_rows[0].keys()), hinge_rows)
 
@@ -480,6 +507,7 @@ def save_ntha_outputs(output_dir, results, gravity_results, modal_results):
         "num_elements": len(element_rows),
         "num_edges": len(edge_rows),
         "num_element_end_force_envelope_rows": len(end_force_rows),
+        **hinge_history_counts,
     }
 
 
@@ -497,9 +525,24 @@ def asce_period_check_from_modal_results(modes, modal_source):
         modal_source=modal_source,
     )
 
+def global_parameters_with_profile():
+    """The exporter's global parameters plus the active analysis profile (id and identity digest)."""
+    from Model.Analysis_Profile import active_profile_id, profile_identity
+    parameters = collect_global_parameters()
+    identity = profile_identity()
+    parameters["analysis_profile_id"] = active_profile_id()
+    parameters["analysis_profile_sha256"] = identity.get("sha256")
+    return parameters
+
+
 def build_gravity_modal_state():
     ops.wipe()
     build_model()
+    # The built domain must be what the profile declares (member hinges on every member, no joint spring, no
+    # face interface, the profile's material); a mismatch stops the run before any analysis.
+    from Model.Analysis_Profile import UNPROFILED, active_profile_id, verify_installed_domain
+    if active_profile_id() != UNPROFILED:
+        verify_installed_domain(raise_on_failure=True)
     reference_modal_results = run_modal_analysis()
     reference_period_check = asce_period_check_from_modal_results(
         reference_modal_results,
@@ -632,6 +675,10 @@ def parse_args():
         default=str(Path(__file__).resolve().parent / "outputs" / "ntha"),
     )
     parser.add_argument("--catalog-summary", action="store_true")
+    parser.add_argument("--profile", default=None,
+                        help="Analysis profile (Model/Analysis_Profile) applied after the geometry and site and before the "
+                             "design is loaded or created, so the design identity carries it; the built model is verified "
+                             "against it. The generation chain passes the V2 profile explicitly.")
     parser.add_argument("--design-only", action="store_true",
                         help="Create/review a design candidate only; never run ground-motion analysis.")
     parser.add_argument(
@@ -667,6 +714,10 @@ def main():
     geometry_name = apply_geometry_from_args(args)
     if args.design_only and args.skip_design:
         raise ValueError("--design-only cannot be combined with --skip-design.")
+    if getattr(args, "profile", None):
+        from Model.Analysis_Profile import apply_profile
+        profile = apply_profile(args.profile)
+        print(f"[profile] {args.profile} applied (identity {profile['sha256'][:12]})")
 
     if args.catalog_summary:
         print(json.dumps(ground_motion_catalog_summary(), indent=2))
@@ -696,7 +747,9 @@ def main():
             if args.design_file
             else base_output_dir.parent / DESIGN_ARTIFACT_NAME
         )
-        design_record, created = load_or_create_design(design_path, verbose=True)
+        # Data generation keeps only the final design (user decision 2026-10-02); the verification runs
+        # (Design/Verify_Designs, Design/Grouped_Runner) keep the iteration history.
+        design_record, created = load_or_create_design(design_path, verbose=True, keep_history=False)
         sections = design_record['sections']
         dcr = design_record['dcr']
         print()

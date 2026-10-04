@@ -28,10 +28,14 @@ from __future__ import annotations
 import copy
 import math
 
+from Design import SMRF_Floor_Sections as floor_sections
 from Design.SMRF_Floor_Analysis import (METHOD_VERSION_FLEXIBLE, analyze_floor,
                                         transfer_mesh_per_bay)
 
 TRANSFER_SCHEMA = "smrf_floor_transfer_v3_force_and_couple_export"
+# One transfer per mechanically distinct floor of a grouped design (2026-10-02): the container names, for
+# every elevated floor, the signature of its by-line description and holds one v3 transfer per signature.
+BY_FLOOR_SCHEMA = "smrf_floor_transfer_by_floor_v1"
 LOAD_MODEL_NAME = "slab_transfer"
 
 
@@ -67,7 +71,9 @@ def build_floor_transfer(slab_record, geometry, sections, live_load_ksf, mesh_pe
                          live_patterns=()):
     """Unit dead and unit live slab-to-frame transfers for one common floor.
 
-    ``sections`` needs b/h/fc of the beam and b/h of the column (footprint).
+    ``sections`` needs b/h/fc of the beam and b/h of the column (footprint), or
+    is a floor described line by line (Design.SMRF_Floor_Sections), whose
+    signature the transfer then carries.
     ``live_patterns`` (SMRF_Demands.live_load_patterns) adds one unit live
     case per arrangement, keyed ``live_pattern_<id>``, with live pressure on
     that arrangement's panels only. Raises on any solve or equilibrium
@@ -107,7 +113,9 @@ def build_floor_transfer(slab_record, geometry, sections, live_load_ksf, mesh_pe
         "schema": TRANSFER_SCHEMA, "method_version": METHOD_VERSION_FLEXIBLE,
         "load_model": LOAD_MODEL_NAME, "mesh_per_bay": mesh,
         "geometry": {key: geometry[key] for key in ("num_bay_x", "num_bay_y", "bay_x_in", "bay_y_in")},
-        "sections": {key: sections[key] for key in ("b_beam_in", "h_beam_in", "fc_beam_ksi", "b_col_in", "h_col_in")},
+        "sections": (copy.deepcopy(sections) if floor_sections.is_by_line(sections) else
+                     {key: sections[key] for key in ("b_beam_in", "h_beam_in", "fc_beam_ksi", "b_col_in", "h_col_in")}),
+        **({"floor_sections_sha256": floor_sections.signature(sections)} if floor_sections.is_by_line(sections) else {}),
         "slab_thickness_in": slab_record["thickness_in"],
         "dead_pressure_ksf": slab_record["concrete_unit_weight_kcf"] * slab_record["thickness_in"] / 12.0
         + slab_record["superimposed_dead_load_ksf"],
@@ -155,9 +163,16 @@ def validate_floor_transfer(transfer, geometry, sections, slab_thickness_in, exp
     for key in ("num_bay_x", "num_bay_y", "bay_x_in", "bay_y_in"):
         if transfer["geometry"].get(key) != geometry[key]:
             raise ValueError(f"Floor transfer geometry.{key} disagrees with the current model.")
-    for key in ("b_beam_in", "h_beam_in", "fc_beam_ksi", "b_col_in", "h_col_in"):
-        if transfer["sections"].get(key) != sections[key]:
-            raise ValueError(f"Floor transfer sections.{key} disagrees with the current model.")
+    if floor_sections.is_by_line(sections) or floor_sections.is_by_line(transfer.get("sections")):
+        # A floor described line by line: the saved description must be exactly the current floor's.
+        if transfer.get("sections") != sections:
+            raise ValueError("Floor transfer was solved for other beam lines or supports than the current floor's.")
+        if transfer.get("floor_sections_sha256") != floor_sections.signature(sections):
+            raise ValueError("Floor transfer signature does not match its beam lines and supports.")
+    else:
+        for key in ("b_beam_in", "h_beam_in", "fc_beam_ksi", "b_col_in", "h_col_in"):
+            if transfer["sections"].get(key) != sections[key]:
+                raise ValueError(f"Floor transfer sections.{key} disagrees with the current model.")
     if transfer.get("slab_thickness_in") != slab_thickness_in:
         raise ValueError("Floor transfer slab thickness disagrees with the current model.")
     nx, ny = geometry["num_bay_x"], geometry["num_bay_y"]
@@ -279,6 +294,88 @@ def validate_floor_transfer(transfer, geometry, sections, slab_thickness_in, exp
             if abs(actual - target) > 1e-8 * max(abs(target), expected * length, 1e-9):
                 raise ValueError(f"Floor transfer {name} {axis} moment balance carries {actual:.9g}, expected {target:.9g} kip-in.")
     return transfer
+
+
+def is_by_floor(record):
+    return isinstance(record, dict) and record.get("schema") == BY_FLOOR_SCHEMA
+
+
+def build_floor_transfers_by_floor(slab_record, geometry, description, live_load_ksf, mesh_per_bay=None,
+                                   live_patterns=(), reuse=None):
+    """One transfer per mechanically distinct floor of a grouped design.
+
+    ``description`` is Design.SMRF_Floor_Sections.by_floor(): every elevated floor with the signature of
+    its beam lines and supports. Floors with one signature share one solution; nothing is shared by band
+    or by position. ``reuse`` is an earlier container: a transfer whose signature, slab, loads, patterns
+    and mesh are all unchanged is kept (validated by the caller as usual), anything else is solved again.
+    A failed solve raises, as for the uniform transfer: there is no tributary fallback.
+    """
+    floor_sections.validate_by_floor(description, geometry["num_bay_x"], geometry["num_bay_y"], geometry["num_floor"])
+    mesh = mesh_per_bay or transfer_mesh_per_bay(geometry["num_bay_x"], geometry["num_bay_y"])
+    patterns = [{"id": p["id"], "rule": p.get("rule"), "panels": [list(x) for x in p["panels"]]} for p in live_patterns]
+    kept = (reuse or {}).get("transfers", {}) if is_by_floor(reuse) else {}
+    transfers, reused = {}, []
+    for sha, sections, _floors in floor_sections.distinct_floors(description):
+        old = kept.get(sha)
+        if (old is not None and old.get("sections") == sections and old.get("mesh_per_bay") == mesh
+                and old.get("slab_thickness_in") == slab_record["thickness_in"]
+                and old.get("live_pressure_ksf") == live_load_ksf and old.get("live_patterns") == patterns
+                and old.get("geometry") == {key: geometry[key] for key in ("num_bay_x", "num_bay_y", "bay_x_in", "bay_y_in")}
+                and old.get("slab_record_sha256") == _slab_identity(slab_record)):
+            transfers[sha] = old
+            reused.append(sha)
+            continue
+        transfer = build_floor_transfer(slab_record, geometry, sections, live_load_ksf, mesh_per_bay=mesh,
+                                        live_patterns=live_patterns)
+        transfer["slab_record_sha256"] = _slab_identity(slab_record)
+        transfers[sha] = transfer
+    return {"schema": BY_FLOOR_SCHEMA, "method_version": METHOD_VERSION_FLEXIBLE, "load_model": LOAD_MODEL_NAME,
+            "mesh_per_bay": mesh, "floors": dict(description["floors"]), "transfers": transfers,
+            "distinct_floor_count": len(transfers), "reused_signatures": reused,
+            "basis": ("One flexible-beam floor solution for every mechanically distinct floor (beam lines, supports, slab, "
+                      "loads, patterns and mesh); floors are matched by the signature of those inputs, never by band or "
+                      "position. Each transfer is the v3 force-and-couple export, validated on its own.")}
+
+
+def _slab_identity(slab_record):
+    """What of the slab record the floor solution depends on."""
+    import hashlib
+    import json
+    payload = {key: slab_record[key] for key in ("thickness_in", "concrete_fc_ksi", "concrete_unit_weight_kcf",
+                                                 "superimposed_dead_load_ksf")}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def validate_floor_transfers_by_floor(record, geometry, description, slab_thickness_in, expected_dead_kip, expected_live_kip):
+    """Validate a by-floor container against the CURRENT floors and return {floor: transfer}.
+
+    ``description`` is the by-floor description of the model as it stands (built from the installed
+    design, not read from the record). Every floor must be served by a transfer solved for exactly its
+    own beam lines and supports; a container left from another design, a floor without a transfer, an
+    unused transfer and a uniform (one-floor) transfer are all refused. Each transfer is then put through
+    the full force, couple and first-moment validation of ``validate_floor_transfer``.
+    """
+    if not is_by_floor(record):
+        raise ValueError("A grouped design needs a floor transfer solved floor by floor; this record is not one "
+                         f"(schema {None if not isinstance(record, dict) else record.get('schema')!r}).")
+    if record.get("method_version") != METHOD_VERSION_FLEXIBLE or record.get("load_model") != LOAD_MODEL_NAME:
+        raise ValueError("Floor transfer method or load model is stale or unknown.")
+    floor_sections.validate_by_floor(description, geometry["num_bay_x"], geometry["num_bay_y"], geometry["num_floor"])
+    if record.get("floors") != description["floors"]:
+        stale = sorted(k for k in description["floors"] if (record.get("floors") or {}).get(k) != description["floors"][k])
+        raise ValueError(f"Floor transfer was solved for other floors than the current design's (floors {stale} differ).")
+    transfers = record.get("transfers")
+    if not isinstance(transfers, dict) or set(transfers) != set(description["distinct"]):
+        raise ValueError("Floor transfer does not hold exactly one solution per distinct floor of the current design.")
+    result = {}
+    for sha, sections, floors in floor_sections.distinct_floors(description):
+        transfer = validate_floor_transfer(transfers[sha], geometry, sections, slab_thickness_in,
+                                           expected_dead_kip, expected_live_kip)
+        if transfer.get("mesh_per_bay") != record.get("mesh_per_bay"):
+            raise ValueError("Floor transfers of one design must share one mesh.")
+        for floor in floors:
+            result[floor] = transfer
+    return result
 
 
 def transfer_totals(transfer, dead_factor, live_factor):

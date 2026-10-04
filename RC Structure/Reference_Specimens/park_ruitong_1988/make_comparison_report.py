@@ -1,5 +1,5 @@
 """Write UNIT1_COMPARISON_REPORT.md: the four-case untuned input comparison against the version-2 observations
-under Codex's fit criteria (2026-09-28), with the observation and drawing audits, the coupon check, the
+under the fit criteria (2026-09-28), with the observation and drawing audits, the coupon check, the
 numerical acceptance and the completeness status of every run. No parameter is fitted here.
 
 usage: python make_comparison_report.py <output root> [<coupon dir>] [<observation audit dir>]
@@ -87,7 +87,7 @@ L = []
 w = L.append
 w("# Park and Ruitong (1988) Unit 1: untuned input comparison under the declared fit criteria")
 w("")
-w("2026-09-29. Second delivery of the reference reproduction, after Codex's Unit 1 review of 2026-09-28. Everything below "
+w("2026-09-29. Second delivery of the reference reproduction, after the Unit 1 review of 2026-09-28. Everything below "
   "was produced without fitting any bond, pinching, damage or stiffness parameter: the four cases differ only in the "
   "measured beam steel and the drawn transverse-steel stations. The production flags (`GENERATION_RELEASE_READY`, "
   "`story_strength_model_verified`) are unchanged; no frame rerun, pilot or campaign was run.")
@@ -98,7 +98,7 @@ w("- **Commit blocker 1 (ownership survives a new domain)**: `Model/Deformation_
   "registry to one OpenSees domain (`begin_domain` at every builder's wipe, registrations name their interface element, "
   "`validate_installed` refuses stale or unrealised claims); `Build_Model.build_model` opens the domain before any member "
   "exists and refuses any registration once its members exist; the subassembly registers and installs inside the same build. "
-  "Codex's probe now returns a theta_p ratio of exactly 1.0 with the stale record listed under the new domain. Tests: "
+  "The domain probe now returns a theta_p ratio of exactly 1.0 with the stale record listed under the new domain. Tests: "
   "`tests/test_deformation_ownership.py::DomainLifecycle` (consecutive builds with a base end and an elevated end, "
   "registration honoured only while its element is installed).")
 w("- **Commit blocker 2 (failed runs lose their history)**: `pr1_unit1.run` exports the completed states, the failing phase and "
@@ -164,7 +164,7 @@ w("Each unloading branch was followed from its reversal by a heading-based walke
   "traced zero-force crossing is *resolved* when an independently detected axis crossing lies within 3 mm of it, *unconfirmed* "
   "otherwise, and *unavailable* where the walker lost the branch (the negative-side unloading branches merge with the positive "
   "reloading branches near zero force) or crossed to the wrong side. Chords are the 80 % to 20 % force levels on the traced "
-  "branch with Codex's bounds K_low = max(0, dF - 6)/(dU + 6), K_high = (dF + 6)/(dU - 6) (needs dU > 6 mm).")
+  "branch with the bounds K_low = max(0, dF - 6)/(dU + 6), K_high = (dF + 6)/(dU - 6) (needs dU > 6 mm).")
 w("")
 w("| run | dir | trace | zero-force crossing (mm) | status | zero-displacement force (kN) | chord k (kN/mm) over dU (mm) | K_low / K_high |")
 w("|---|---|---|---|---|---|---|---|")

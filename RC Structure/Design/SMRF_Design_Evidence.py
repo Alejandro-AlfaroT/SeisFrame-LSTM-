@@ -157,6 +157,15 @@ def capacity_design_recomputation(record):
 
 def analysis_input_signature(record):
     """Bind solved actions to the selected frame, not merely the search request."""
+    if record.get("member_groups") is not None:
+        # A grouped record has no one section or cage: the frame is its assignments and group designs,
+        # which the grouped block's own digest covers (Model.Member_Groups.GroupedDesign.identity).
+        inputs = {key: record[key] for key in ("geometry", "materials", "floor_loads", "seismic", "demand")}
+        inputs["member_groups_sha256"] = record["member_groups"]["sha256"]
+        for key in ("gravity_load_model", "floor_transfer", "demand_basis"):
+            inputs[key] = record.get(key)
+        return hashlib.sha256(json.dumps(inputs, sort_keys=True, separators=(",", ":"),
+                                         allow_nan=False).encode("utf-8")).hexdigest()
     fields = ("geometry", "sections", "reinforcement", "materials", "floor_loads", "seismic", "demand")
     inputs = {key: record[key] for key in fields}
     # Equal total weight is not equal loading: a changed transfer, panel
@@ -167,22 +176,14 @@ def analysis_input_signature(record):
                                      allow_nan=False).encode("utf-8")).hexdigest()
 
 
-def joint_evidence(record, capacity=None, beam_slab_strengths=None):
-    """Validate load IDs AND factors against the declared canonical demand rule.
+def validated_combinations(record):
+    """The saved combination actions, after their IDs AND factors are checked against the canonical demand rule.
 
     The frame-input signature cannot detect changed action descriptors: the
     action rows are deliberately outside that signature. An unchanged case
     name alone is therefore insufficient evidence of its load combination.
-
-    ``capacity`` and ``beam_slab_strengths`` are the objects whose groups
-    and slab contributions the joints use; qualification passes the ones it
-    recomputed from the record so that no saved nested copy is consumed.
-    Without them the record's own copies are used (design time).
+    Returns (combinations, canonical ids in order); raises ValueError.
     """
-    if capacity is None:
-        capacity = record.get("capacity_design") or {}
-    if beam_slab_strengths is not None:
-        record = {**record, "beam_slab_strengths": beam_slab_strengths}
     if record.get("design_actions", {}).get("analysis_input_sha256") != analysis_input_signature(record):
         raise ValueError("Solved member actions do not match the current selected frame inputs.")
     geometry = record["geometry"]
@@ -206,7 +207,23 @@ def joint_evidence(record, capacity=None, beam_slab_strengths=None):
                     or not math.isfinite(value)
                     or not math.isclose(value, required[key], rel_tol=0., abs_tol=1e-12)):
                 raise ValueError(f"Solved combination {item['id']} has a missing or inconsistent {key} coefficient.")
-    evidence = build_joint_evidence(record, combinations, expected_combination_ids=list(canonical))
+    return combinations, list(canonical)
+
+
+def joint_evidence(record, capacity=None, beam_slab_strengths=None):
+    """Joint evidence from the validated combination actions (see ``validated_combinations``).
+
+    ``capacity`` and ``beam_slab_strengths`` are the objects whose groups
+    and slab contributions the joints use; qualification passes the ones it
+    recomputed from the record so that no saved nested copy is consumed.
+    Without them the record's own copies are used (design time).
+    """
+    if capacity is None:
+        capacity = record.get("capacity_design") or {}
+    if beam_slab_strengths is not None:
+        record = {**record, "beam_slab_strengths": beam_slab_strengths}
+    combinations, canonical_ids = validated_combinations(record)
+    evidence = build_joint_evidence(record, combinations, expected_combination_ids=canonical_ids)
     # Probable-strength evidence (beam capacity shear, joint shear) comes from
     # the capacity design; the joint checks read it.
     groups = (capacity or {}).get("joint_evidence") or {}

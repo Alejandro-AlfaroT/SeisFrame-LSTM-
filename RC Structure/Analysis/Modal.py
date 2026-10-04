@@ -3,7 +3,8 @@ import math
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
-from Model.Build_Model import apply_analysis_constraints, floor_master_node, node_tag, roof_master_node
+from Model.Build_Model import (apply_analysis_constraints, floor_master_node, installed_node_seismic_mass, node_tag,
+                               roof_master_node)
 
 
 def _massed_nodes():
@@ -12,7 +13,7 @@ def _massed_nodes():
     for k in range(1, sp.NUM_FLOOR + 1):
         for j in range(sp.NUM_BAY_Y + 1):
             for i in range(sp.NUM_BAY_X + 1):
-                entries.append((node_tag(k, i, j), sp.node_seismic_mass(i, j)))
+                entries.append((node_tag(k, i, j), installed_node_seismic_mass(k, i, j)))
     return entries
 
 

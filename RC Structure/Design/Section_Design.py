@@ -34,14 +34,25 @@ import math
 # capped at 36 in until 2026-09-27; the user raised the cap to 42 in (with a
 # 40-in rung) after the joint-assembly rules showed that at 36 in a cage
 # strong enough for the strong-column check leaves the beam bars only three
-# lanes per layer on the faces the y beams meet.
-COLUMN_SIZES_IN = (14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 36.0, 40.0, 42.0)
+# lanes per layer on the faces the y beams meet. Steps (user decision
+# 2026-10-02, V2): 1 in from 14 to 24, then 2 in from 24 to 42.
+COLUMN_SIZES_IN = tuple(float(size) for size in (*range(14, 25), *range(26, 43, 2)))
 
 # ACI 318-19 18.6.2.1(b) uses min(0.3h, 10 in). The ladder's
 # max(0.3h, 10 in) is a stricter PRACTICAL sizing preference, not that rule.
 BEAM_DEPTHS_IN = (16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 36.0)
 
-CONCRETE_STRENGTHS_KSI = (4.0, 5.0, 6.0, 8.0)
+# Concrete grades by element (user decision 2026-10-03): the range moves from 4-8 ksi to 5-10 ksi, with
+# separate ladders. Columns reach 10 ksi, where joint shear strength (sqrt f'c) and the 25.4.1.4 development
+# credit both still count in full; beams and slab stop at 8 ksi (the slab is cast with the beams). Column
+# concrete stronger than 1.4 times the floor's is carried through the joint by placing column-strength
+# concrete in the floor at the column (ACI 318-19 15.5(a)), which is also what the joint strength assumes.
+COLUMN_CONCRETE_STRENGTHS_KSI = (5.0, 6.0, 8.0, 10.0)
+BEAM_CONCRETE_STRENGTHS_KSI = (5.0, 6.0, 8.0)
+CONCRETE_STRENGTHS_KSI = tuple(sorted(set(COLUMN_CONCRETE_STRENGTHS_KSI) | set(BEAM_CONCRETE_STRENGTHS_KSI)))
+# Large geometry is the last resort (user decision 2026-10-03; the tallest frames are nine stories): a column
+# past this size is selected only after the top grade failed at or below it, and is reported as an exception.
+COLUMN_SIZE_LAST_RESORT_IN = 32.0
 
 COLUMN_MIN_DIMENSION_IN = 12.0
 BEAM_MIN_WIDTH_IN = 10.0
@@ -51,12 +62,13 @@ BEAM_MIN_WIDTH_RATIO = 0.30
 # short clear spans (18.6.2.1(a) ln >= 4d caps the depth) and, since
 # 2026-09-27, the threading of the beam bars between the column bars in one
 # layer (SMRF_Capacity_Design.design_bar_threading) answer to width, not
-# depth. Four variants reach three quarters of a 32 in column at the
-# common depths, where the transverse beams also confine the joint (15.2.8).
+# depth. The fifth variant supplies 32/34-in webs at the deeper rungs;
+# the former four-variant cap stopped at 30 in while columns could reach
+# 42 in, excluding cages that need a wider beam for clearance/confinement.
 # 18.6.2.1(c) (projection beyond the column) is checked per rung against
 # the columns in SMRF_Detailing.
 BEAM_WIDTH_STEP_IN = 4.0
-BEAM_WIDTH_VARIANTS = 4
+BEAM_WIDTH_VARIANTS = 5
 # A stated proportioning preference (not a code rule; 18.6.2.1(b) allows
 # up to 3h): no offered variant is wider than it is deep, so the ladder does
 # not fill with band beams that outrank deeper rungs on the capacity proxy.
@@ -90,7 +102,7 @@ def column_ladder():
     return [
         (size, size, fc)
         for size in COLUMN_SIZES_IN
-        for fc in CONCRETE_STRENGTHS_KSI
+        for fc in COLUMN_CONCRETE_STRENGTHS_KSI
     ]
 
 
@@ -112,7 +124,7 @@ def beam_ladder(span_in=None, story_height_in=None):
             if depth > BEAM_MAX_DEPTH_FRACTION_OF_STORY * story_height_in:
                 continue
         for width in beam_widths_for_depth(depth):
-            for fc in CONCRETE_STRENGTHS_KSI:
+            for fc in BEAM_CONCRETE_STRENGTHS_KSI:
                 rungs.append((width, depth, fc))
 
     if not rungs:
@@ -158,6 +170,36 @@ def suggest_rung_index(ladder, current_index, governing_dcr, target_dcr):
     if not feasible:
         return len(ladder) - 1
     return min(feasible)
+
+
+# Beam growth rule (user decision 2026-10-02). A search heuristic, not a code limit: the strength jump
+# lands on the lightest rung that carries the governing factored moment with this tension steel ratio
+# (ACI 318-19 18.6.3.1 allows 0.025; the steel pass still selects the bars). The effective depth is
+# estimated as h less this offset (cover, hoop, stacked orthogonal cage, half a bar).
+BEAM_GROWTH_STEEL_RATIO = 0.015
+BEAM_GROWTH_DEPTH_OFFSET_IN = 3.5
+
+
+def beam_rung_carries_moment(rung, mu_kip_in, fy_ksi, steel_ratio=BEAM_GROWTH_STEEL_RATIO, phi=0.9):
+    """Whether a singly reinforced b x d section at ``steel_ratio`` reaches phi Mn >= Mu (rectangular stress block)."""
+    b, h, fc = rung
+    d = h - BEAM_GROWTH_DEPTH_OFFSET_IN
+    if d <= 0:
+        return False
+    area = steel_ratio * b * d
+    a = area * fy_ksi / (0.85 * fc * b)
+    return phi * area * fy_ksi * (d - a / 2.0) >= mu_kip_in
+
+
+def suggest_beam_rung_for_moment(ladder, current_index, mu_kip_in, fy_ksi, steel_ratio=BEAM_GROWTH_STEEL_RATIO):
+    """First rung at or above ``current_index`` that carries ``mu_kip_in`` at ``steel_ratio``; the top rung when none does."""
+    if not ladder:
+        raise ValueError("Section ladder is empty.")
+    current_index = max(0, min(current_index, len(ladder) - 1))
+    for index in range(current_index, len(ladder)):
+        if beam_rung_carries_moment(ladder[index], mu_kip_in, fy_ksi, steel_ratio):
+            return index
+    return len(ladder) - 1
 
 
 def rung_summary(rung, member_type):

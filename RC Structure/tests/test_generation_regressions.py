@@ -209,15 +209,7 @@ class TargetDriftBandTests(unittest.TestCase):
 
 
 class GravityEscalationTests(unittest.TestCase):
-    """A section that cannot carry gravity escalates instead of aborting.
-
-    Columns use a PDelta transform, so a tall slender frame on a small column
-    goes unstable under its own weight -- case_0013 (9 stories, 117 ft, 18x18)
-    failed at 85% of applied gravity. The design loop used to let that
-    RuntimeError kill the case. Because only tall slender frames fail this way,
-    that silently biased the dataset against its tallest buildings: 8.9% of the
-    27,000-combination geometry pool sits at height/width >= 4.
-    """
+    """Column ladder helpers and the distinction between solver failure and strength failure."""
 
     def test_escalation_skips_concrete_strength_variants(self):
         # The ladder interleaves f'c within a size, and f'c is the wrong lever
@@ -255,23 +247,21 @@ class GravityEscalationTests(unittest.TestCase):
         # Strictly increasing, one entry per distinct size above the start.
         self.assertEqual(sizes, sorted(set(sizes)))
 
-    def test_gravity_escalation_does_not_consume_the_design_budget(self):
-        # case_0013 spent 4 of 6 iterations on gravity escalations and finished
-        # with an overstressed column at DCR 1.10. The two budgets are separate.
-        import inspect
-        from Design import Design_Driver
-
-        source = inspect.getsource(Design_Driver.design_structure)
-        self.assertIn("while iteration < max_section_iter", source)
-        self.assertIn("gravity_escalations", source)
-        # The escalation path must reach `continue` without incrementing the
-        # design counter. Slice only as far as that continue -- the normal path
-        # after it legitimately does increment.
-        _head, _, tail = source.partition("gravity_failures.append")
-        escalation = tail[:tail.index("continue")]
-        self.assertNotIn("iteration += 1", escalation)
-        # And the normal path must increment exactly once.
-        self.assertEqual(source.count("iteration += 1"), 1)
+    def test_gravity_nonconvergence_is_unresolved_and_does_not_grow_the_column(self):
+        from Design import Design_Driver as driver
+        baseline = driver._capture_state()
+        try:
+            search = {"first_fitted_beam_index": 0, "beam_rung_steps": [], "steps": 0}
+            with mock.patch.object(driver, "_slab_search", return_value=(0, {"thickness_in": 5.0}, [], search)), \
+                 mock.patch.object(driver, "_model_period", side_effect=RuntimeError("Gravity analysis failed: injected")), \
+                 mock.patch.object(driver, "_next_larger_column_index") as grow, \
+                 mock.patch.object(driver, "_steel_pass") as steel:
+                with self.assertRaisesRegex(RuntimeError, "analysis unresolved.*No strength failure inferred"):
+                    driver.design_structure(max_section_iter=2, verbose=False)
+                grow.assert_not_called()
+                steel.assert_not_called()
+        finally:
+            driver._restore_state(baseline)
 
 
 class DesignConfigSyncTests(unittest.TestCase):

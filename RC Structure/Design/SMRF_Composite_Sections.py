@@ -178,6 +178,8 @@ def recover_floor_cut(result, floor, axis, position_in, *, reference_in=None, nu
     """
     if result.get('status') != 'diagnostic_complete' or result.get('section_action_schema') not in ACCEPTED_SCHEMAS:
         raise ValueError('A completed coupled solve with native section-action records is required')
+    from .SMRF_Floor_Sections import require_uniform
+    require_uniform(result['inputs']['sections'],'The whole-floor cut recovery (SMRF_Composite_Sections)')
     geometry, mesh = result['inputs']['geometry'], result['mesh_per_bay']
     if isinstance(floor, bool) or not isinstance(floor,int) or not 1<=floor<=geometry['num_floor']:
         raise ValueError('Floor must identify an existing positive integer story')

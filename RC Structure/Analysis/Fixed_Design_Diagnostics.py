@@ -73,14 +73,30 @@ def git_head():
 
 
 def read_record(root, case):
-    """The saved record, its raw bytes and its path; the bytes are hashed by the callers."""
-    record_path = Path(root) / case / "design.json"
+    """The saved record, its raw bytes and its path; the bytes are hashed by the callers.
+
+    A case directory holds either a uniform record (design.json) or a grouped one (grouped_design.json);
+    a directory with both is ambiguous and is refused.
+    """
+    candidates = [Path(root) / case / name for name in ("design.json", "grouped_design.json")]
+    present = [path for path in candidates if path.exists()]
+    if len(present) != 1:
+        raise RuntimeError(f"{Path(root) / case} must hold exactly one design record (design.json or grouped_design.json); "
+                           f"found {[path.name for path in present]}.")
+    record_path = present[0]
     raw = record_path.read_bytes()
     return record_path, raw, json.loads(raw)
 
 
-def install_record(record, case_label):
+def install_record(record, case_label, profile_id=None):
     """Apply the record's own geometry and site (values checked), then install the saved design.
+
+    The record's risk basis is checked against the configured one: a record that names another
+    category or importance factor is refused, never relabelled. ``profile_id`` applies an analysis
+    profile (Model/Analysis_Profile) after the design is installed; the record must have been
+    designed for that profile and must carry its risk basis, so a Risk II or other-profile record
+    cannot be run as a V2 case. Without a profile a record that predates the explicit risk basis is
+    still installable for a legacy diagnostic, and the check says so.
 
     Returns the geometry overrides and the site check so the manifest can state both.
     """
@@ -97,7 +113,31 @@ def install_record(record, case_label):
                   for k, attr in (("sds", "ASCE_SDS"), ("sd1", "ASCE_SD1"), ("s1", "ASCE_S1"), ("r", "ASCE_R"))}
     if not all(v["match"] for v in site_check.values()):
         raise RuntimeError(f"the named site entry does not reproduce the record's seismic values: {site_check}")
-    driver.apply_design(record)
+    if seismic.get("risk_category") is not None or seismic.get("importance_factor") is not None:
+        try:
+            basis = sp.seismic_design_basis(risk_category=seismic.get("risk_category"), importance_factor=seismic.get("importance_factor"))
+        except ValueError as exc:
+            raise RuntimeError(f"the record's risk basis is not the configured one: {exc} Redesign the case; do not relabel it.") from exc
+        site_check["risk_basis"] = {"record": {"risk_category": seismic.get("risk_category"), "importance_factor": seismic.get("importance_factor")},
+                                    "installed": {"risk_category": basis["risk_category"], "importance_factor": basis["importance_factor"]},
+                                    "match": True}
+    else:
+        if profile_id:
+            raise RuntimeError(f"the record carries no risk basis (designed before the explicit Risk Category / Ie basis); it cannot be "
+                               f"run under profile {profile_id}. Redesign the case; do not relabel it.")
+        site_check["risk_basis"] = {"record": None, "installed": {"risk_category": sp.ASCE_RISK_CATEGORY, "importance_factor": sp.ASCE_IE},
+                                    "match": None,
+                                    "note": "legacy record without a risk basis; a diagnostic of the saved design under the current sources, "
+                                            "not a design of the configured risk category"}
+    from Design.Grouped_Record import apply_record
+    apply_record(record)                                    # a uniform or a grouped record, each by its own rules
+    if profile_id:
+        from Model.Analysis_Profile import apply_profile
+        designed_for = ((((record.get("request_identity") or {}).get("policy") or {}).get("model_profile")) or {}).get("id")
+        if designed_for != profile_id:
+            raise RuntimeError(f"the record was designed for profile {designed_for!r}, not {profile_id!r}; use the profile it was designed "
+                               "for, or redesign the case.")
+        site_check["analysis_profile"] = {"record": designed_for, "installed": apply_profile(profile_id)["id"], "match": True}
     return overrides, site_check
 
 
@@ -114,7 +154,7 @@ def run_pushover(args):
     from Analysis.Pushover_Diagnostic import DiagnosticSettings, run_diagnostic
 
     record_path, raw, record = read_record(args.root, args.case)
-    overrides, site_check = install_record(record, args.case)
+    overrides, site_check = install_record(record, args.case, getattr(args, "profile", None))
     period = driver._model_period()
     out_root = Path(args.output_root) / args.case
     out_root.mkdir(parents=True, exist_ok=True)
@@ -123,7 +163,7 @@ def run_pushover(args):
                          "geometry_applied_from": "record['geometry']", "site_applied_from": "record['seismic']['site_label'], values checked"},
                 "record": str(record_path), "record_sha256": hashlib.sha256(raw).hexdigest(), "record_bytes": len(raw),
                 "schema_version": record.get("schema_version"), "request_identity_sha256": (record.get("request_identity") or {}).get("sha256"),
-                "model_period_sec": period, "source_identity": driver.design_request_identity()["source_sha256"], "git_head": git_head(),
+                "model_period_sec": period, "source_identity": driver.source_sha256(), "git_head": git_head(),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "runs": {}}
     for direction, sign in args.runs:
         name = f"{direction}{'+' if sign > 0 else '-'}"
@@ -176,13 +216,30 @@ def run_ground_motion(args):
 
     try:
         # --- geometry and site from the record itself, then the saved design ------------------------------
-        overrides, site_check = install_record(record, args.case)
+        from Model import Analysis_Profile as ap
+        from Analysis import Hinge_Moment_Rotation as hmr
+        profile_id = getattr(args, "profile", None)
+        overrides, site_check = install_record(record, args.case, profile_id)
         # An explicit diagnostic choice, never a mutation of the saved design. The default is the
         # production material, so the runner exercises what generation would install.
         from Data_Generation.Graph_Exporter import installed_deterioration_policy
-        sp.IMK_MATERIAL_TYPE = args.member_material
+        sp.IMK_MATERIAL_TYPE = args.member_material if args.member_material is not None else sp.IMK_MATERIAL_TYPE
+        if profile_id:
+            problems = ap.configuration_problems(profile_id)
+            if problems:
+                raise RuntimeError(f"the requested settings contradict profile {profile_id}: " + "; ".join(problems))
+        if getattr(args, "hinge_history_stride", None) is not None:
+            if args.hinge_history_stride < 1:
+                raise RuntimeError("--hinge-history-stride must be at least 1")
+            if profile_id and args.hinge_history_stride != sp.NTHA_HINGE_HISTORY_STRIDE:
+                raise RuntimeError(f"--hinge-history-stride {args.hinge_history_stride} contradicts profile {profile_id} "
+                                   f"(stride {sp.NTHA_HINGE_HISTORY_STRIDE})")
+        hinge_stride = int(args.hinge_history_stride if getattr(args, "hinge_history_stride", None) is not None
+                           else sp.NTHA_HINGE_HISTORY_STRIDE)
+        manifest["analysis_profile"] = ap.profile_identity()
+        manifest["hinge_history_stride"] = hinge_stride
         deterioration_mode = getattr(sp, "IMK_DETERIORATION_MODE", "direct")
-        diagnostic_a_mode = args.member_material == "IMKPeakOriented" and deterioration_mode == "direct"
+        diagnostic_a_mode = sp.IMK_MATERIAL_TYPE == "IMKPeakOriented" and deterioration_mode == "direct"
         if diagnostic_a_mode:
             # The 2026-09-22 provisional A-mode values belong to the direct convention only. Under
             # haselton_2008 the A and K modes are suppressed (1e12) whatever these constants say,
@@ -197,12 +254,14 @@ def run_ground_motion(args):
             "calibration_id": sp.IMK_CYCLIC_CALIBRATION_ID, "status": sp.IMK_CYCLIC_CALIBRATION_STATUS,
             "lamda_a": sp.IMK_LAMBDA_A if diagnostic_a_mode else None,
             "c_a": sp.IMK_C_A if diagnostic_a_mode else None,
-            "joint_springs_installed": False,
+            "energy_mapping_mode": sp.IMK_ENERGY_MAPPING_MODE,
+            "joint_model_configured": sp.JOINT_MODEL,
+            # Stated from the installed model once it is built (below), not from the configuration.
+            "joint_springs_installed": None,
         }
-        current_identity = driver.design_request_identity()
         record_identity = record.get("request_identity") or {}
         record_sources = record_identity.get("source_sha256") or {}
-        current_sources = current_identity["source_sha256"]
+        current_sources = driver.source_sha256()
         changed_sources = sorted(k for k in set(record_sources) | set(current_sources) if record_sources.get(k) != current_sources.get(k))
         manifest.update({
             "geometry_applied_from": "record['geometry']", "geometry": overrides, "site_applied_from": "record['seismic']['site_label'], values checked",
@@ -217,6 +276,13 @@ def run_ground_motion(args):
 
         # --- model, gravity, verification, recorders --------------------------------------------------------
         gravity, reference_modal, post_modal, reference_check, tangent_check = gm.build_gravity_modal_state()
+        # What the domain and the registries actually hold: member hinges, joint springs, face interfaces.
+        topology = ap.verify_installed_domain(profile_id)
+        manifest["installed_topology"] = topology
+        manifest["member_material_profile"]["joint_springs_installed"] = bool(topology["joint_springs_installed"])
+        manifest["member_material_profile"]["face_slip_interfaces_registered"] = topology["face_slip_interfaces_registered"]
+        if profile_id and not topology["consistent"]:
+            raise RuntimeError(f"the installed model does not match profile {profile_id}: " + "; ".join(topology["problems"]))
         verification = hd.verify_installed_design(record)
         audit, inventory, hinges = hd.run_audit()
         gravity_measured = hd.measured_gravity_state(inventory)
@@ -278,7 +344,7 @@ def run_ground_motion(args):
         try:
             results = run_ntha(record_x, record_y=record_y, damping_ratio=args.damping_ratio, modal_results=reference_modal,
                                rayleigh_mode_i=args.rayleigh_mode_i, rayleigh_mode_j=args.rayleigh_mode_j, dt_factor=args.dt_factor,
-                               log_path=out / "opensees_ntha.log")
+                               log_path=out / "opensees_ntha.log", hinge_history_stride=hinge_stride)
         finally:
             solve_seconds = time.time() - t0
             hd.close_recorders()
@@ -299,7 +365,13 @@ def run_ground_motion(args):
                               "truncated": bool(status["failed"]) or status["completed_steps"] < scheduled_steps,
                               "truncation_basis": "completed steps below the scheduled dt x npts steps, or a failed step"}
         print(f"[{args.case}] NTHA: {status['completed_steps']}/{status['npts_requested']} steps, failed={status['failed']}, {solve_seconds:.0f} s", flush=True)
-        file_counts = gm.save_ntha_outputs(out / "ntha", results, gravity, reference_modal) if time_history else {"note": "no completed step: production outputs not written"}
+        if time_history:
+            file_counts = gm.save_ntha_outputs(out / "ntha", results, gravity, reference_modal)
+        else:
+            # No completed step: the production tables have no rows to write, but the hinge schema, the
+            # spring table and the gravity state the run started from are still evidence of the failure.
+            file_counts = {"note": "no completed step: production outputs not written; hinge schema, spring table and gravity state written",
+                           **hmr.write_hinge_moment_rotation(out / "ntha", results)}
         ops.wipe()
         manifest["production_outputs"] = {"dir": str(out / "ntha"), **file_counts}
 
@@ -338,6 +410,14 @@ def run_ground_motion(args):
                             "rows_match_snapshots_plus_substeps": recorded[axis]["rows"] == len(time_history) + 9 * subdivide_steps}
                      for axis in ("y", "z")}
         (out / "hinge_evaluation.json").write_text(json.dumps(rows_eval, indent=1), encoding="utf-8")
+        # The stored moment-rotation snapshots against the full-rate recorders, matched by time.
+        exported, _spring_rows, export_schema = hmr.read_hinge_moment_rotation(out / "ntha")
+        manifest["hinges"]["moment_rotation_export"] = {
+            "schema_version": export_schema.get("schema_version"), "available": export_schema.get("available"),
+            "counts": export_schema.get("counts"), "missing": export_schema.get("missing"), "sampling": export_schema.get("sampling"),
+            "reference_state": export_schema.get("reference_state"),
+            "agreement_with_full_rate_recorders": hmr.compare_with_recorders(exported, recorded) if exported is not None else None,
+            "files": [str(out / "ntha" / name) for name in (hmr.NPZ_NAME, hmr.SCHEMA_NAME, hmr.SPRINGS_NAME)]}
         manifest["hinges"].update({"recorder_alignment": alignment, "summary": summary, "stride_justification": strides,
                                    "yielded": [r for r in rows_eval if r.get("yielded")],
                                    "criteria_disagreements": [r for r in rows_eval if r.get("criteria_disagree")][:50],
@@ -376,6 +456,9 @@ def build_parser():
         sub.add_argument("--case", required=True)
         sub.add_argument("--output-root", required=True)
         sub.add_argument("--label", default="")
+        sub.add_argument("--profile", default=None,
+                         help="analysis profile (Model/Analysis_Profile) to apply after the design is installed, e.g. "
+                              "v2_nonlinear_flexure_screening_v1; the record must have been designed for it and carry its risk basis")
 
     push = commands.add_parser("pushover", help="direction-explicit pushover diagnostic on the saved design")
     common(push)
@@ -407,9 +490,13 @@ def build_parser():
                          "diagnostic only, never a production output)")
     import Structure_Parameters as sp          # plain data; the OpenSees imports stay inside the run functions
     gm.add_argument("--member-material", choices=("IMKBilin", "IMKPeakOriented"), default=sp.IMK_MATERIAL_TYPE,
-                    help="member flexural law (default: the production setting in Structure_Parameters). Under the "
+                    help="member flexural law (default: the production setting in Structure_Parameters; a profile "
+                         "that sets another material refuses the contradiction). Under the "
                          "direct deterioration convention PeakOriented uses the provisional diagnostic A-mode "
                          "values 10 and 1; under haselton_2008 A and K are suppressed and nothing is overridden")
+    gm.add_argument("--hinge-history-stride", type=int, default=None,
+                    help="store the hinge moment-rotation history every N scheduled steps (default: the configured "
+                         "NTHA_HINGE_HISTORY_STRIDE, which the V2 profile sets to 1)")
     gm.set_defaults(func=run_ground_motion)
     return parser
 

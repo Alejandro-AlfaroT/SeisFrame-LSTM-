@@ -353,6 +353,12 @@ G = 386.4
 CONCRETE_UNIT_WEIGHT_KCF = 0.150              # kip/ft³
 CONCRETE_UNIT_WEIGHT_KCI = CONCRETE_UNIT_WEIGHT_KCF / 1728.0  # kip/in³
 
+# Roof column extension (ACI 318-19 15.2.6; user decision 2026-10-03): every column line is carried one
+# column depth above the roof joint with its bars and hoops. The joint classification credits it, and its
+# weight and mass are carried at the roof nodes (Model/Roof_Extension). False restores the terminating
+# roof column of every design made before 2026-10-03, in the joint table and in the weights alike.
+ROOF_COLUMN_EXTENSION = True
+
 # Legacy floor area loads are retained for existing analyses. The dead-load
 # allowance already includes slab weight: never add computed slab weight to it.
 # A selected SLAB_THICKNESS_IN opts into separately accounted slab + SDL and
@@ -450,12 +456,11 @@ IMK_HINGE_ELEMENT_TAG_BASE = 4000000
 # can degrade faster than any other and soft-story mechanisms cannot form.
 IMK_USE_CALIBRATED_BACKBONE = True
 
-# RC member flexure uses peak-oriented reloading (the intended split:
-# IMKPeakOriented for flexure, IMKPinching for joint shear through its own
-# adapter and topology, Model/Joint_Panel, which is a diagnostic prototype
-# accepting shear-only inputs; the member/joint slip partition is unresolved
-# and no pinching spring is installed in the frame). IMKBilin remains
-# selectable for reproducing legacy runs, with its own argument signature.
+# RC member flexure uses peak-oriented reloading. IMKPinching is a joint law
+# with its own adapter and topology (Model/Joint_Springs; installed in the
+# frame only when JOINT_MODEL below says so, and not at all under the V2
+# nonlinear-flexure profile, which shelves it). IMKBilin remains selectable
+# for reproducing legacy runs, with its own argument signature.
 IMK_MATERIAL_TYPE = "IMKPeakOriented"
 
 # Cyclic deterioration capacities handed to the member materials.
@@ -481,6 +486,10 @@ IMK_CYCLIC_CALIBRATION_STATUS = "provisional_not_experimentally_calibrated"
 IMK_ENERGY_MAPPING_MODE = "legacy_unmapped"
 # Corrected mode: "explicit_reference_energy_v1". Profiles are keyed by string
 # physical element tag, then i/j, then y/z; each contains its own evidence.
+# Research mode: "provisional_min_yield_anchor_v1" (pre-generation review,
+# 2026-10-04) anchors every mode energy to the smaller physical yield moment
+# of the spring, so it does not depend on the spring's sign convention. It is
+# a labelled convention, not a calibration; only a research profile sets it.
 IMK_MEMBER_ENERGY_CALIBRATIONS = {}
 
 # IMK rotational spring stiffness calibration.
@@ -533,7 +542,18 @@ IMK_D_NEG = 1.0
 #                            rotation) joined by IMKPinching springs in the two vertical shear
 #                            planes. Centreline geometry is kept. IMK formulation only; the
 #                            elastic design model is unchanged. See Model/Joint_Springs.py.
+# V2 (user decision 2026-10-01) shelves IMKPinching: the V2 screening profile
+# (Model/Analysis_Profile, "v2_nonlinear_flexure_screening_v1") sets "rigid_centerline" explicitly in
+# every process that builds or identifies a model. This repository default is unchanged by that
+# decision and still installs the provisional scissors springs when no profile is applied.
 JOINT_MODEL = "imk_pinching_scissors"
+# The nonlinear-model profile in force (Model/Analysis_Profile.apply_profile stamps it; it is part
+# of the design request identity). The default names the unprofiled repository settings.
+ANALYSIS_PROFILE_ID = "unprofiled_repository_defaults"
+# True while a grouped design is installed (Model/Member_Groups.install sets it, clear resets it): the
+# one-section values B_COL, H_BEAM, COL_TOP_BARS, ... are then withdrawn and any use of them raises.
+# Every member's section and cage come from Model.Member_Groups.resolve(tag).
+UNIFORM_SECTIONS_WITHDRAWN = False
 # What the joint spring's rotation stands for: panel shear only. Bar slip is owned per member end
 # (Model/Deformation_Ownership): the member hinge keeps Haselton's a_sl = 1 unless a face slip
 # interface is registered for that end. The 2026-09-27 value "joint_shear_and_slip" (which set
@@ -714,7 +734,32 @@ ASCE_SDS = 1.00     # design spectral response acceleration, short period
 ASCE_SD1 = 0.60     # design spectral response acceleration, 1 second
 ASCE_S1 = 0.60      # mapped MCE spectral acceleration at 1 second
 ASCE_R = 8.0        # response modification factor, special RC moment frame
-ASCE_IE = 1.0       # importance factor, risk category II
+# Risk category, seismic importance factor and allowable story drift: ONE source (user decision
+# 2026-10-01: Risk Category III for the V2 research archetype; existing Risk II designs are
+# redesigned, never relabelled). ASCE 7-22 Table 1.5-2 gives Ie; Table 12.12-1, "all other
+# structures", gives the allowable story drift, which 12.12.1.1 divides by rho for moment frames
+# in SDC D through F. The Table 12.12-1 allowance for structures of four stories or fewer whose
+# interior walls, partitions, ceilings and exterior wall systems accommodate the story drifts is
+# NOT asserted: its conditions are not verified for this archetype, so four-story cases use the
+# same row (the conservative scope of the first V2 screen). The risk category does not choose an
+# occupancy, a gravity loading or a hazard; those stay declared in Design/Config.DemandPolicy.
+# The table values are transcribed from the standard; the NIST GCR 16-917-40 drift table the
+# user reviewed rests on ASCE 7-16 and agrees with them.
+ASCE_RISK_CATEGORY = "III"
+SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY = {"I": 1.0, "II": 1.0, "III": 1.25, "IV": 1.5}
+ALLOWABLE_STORY_DRIFT_RATIO_BY_RISK_CATEGORY = {"I": 0.020, "II": 0.020, "III": 0.015, "IV": 0.010}
+DRIFT_LOW_RISE_ALLOWANCE_ASSERTED = False
+ASCE_IE = SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY[ASCE_RISK_CATEGORY]   # derived, never set on its own
+# Site class: ONE source (user decision 2026-10-02: Site Class C of ASCE 7-22 Table 20.2-1 for the whole generated
+# population, the class in use since the demand declarations were introduced, kept rather than changed). The
+# hazard presets below are declared design values SDS/SD1/S1 for this class, not geodatabase values (7-22 11.4.3
+# takes SMS and SM1 from the USGS geodatabase per site class; the edition has no Fa/Fv tables). A site response
+# analysis is required for Site Class F only (11.4.7), so none is implied. The ground-motion catalog stations are
+# Site Class CD and D by Table 20.2-1 (Vs30 254 to 443 m/s); using them for a Site Class C design is a declared
+# simplification of the record set, not a site match. A policy naming another class is refused by the design
+# driver (seismic_design_basis), as for the risk category.
+ASCE_SITE_CLASSES = ("A", "B", "BC", "C", "CD", "D", "DE", "E", "F")   # ASCE 7-22 11.4.2, Table 20.2-1
+ASCE_SITE_CLASS = "C"
 ASCE_CU = 1.4       # upper-limit coefficient on the calculated period
 ASCE_TL = 8.0       # long-period transition period, seconds
 
@@ -765,6 +810,73 @@ def apply_seismic_site(label):
     label, sds, sd1, s1 = seismic_site_by_label(label)
     SEISMIC_SITE_LABEL, ASCE_SDS, ASCE_SD1, ASCE_S1 = label, sds, sd1, s1
     return label
+
+
+def apply_risk_category(category):
+    """Set the risk category and the importance factor it implies, together."""
+    global ASCE_RISK_CATEGORY, ASCE_IE
+    if category not in SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY:
+        raise ValueError(f"risk category {category!r} is not exactly one of {tuple(SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY)}.")
+    ASCE_RISK_CATEGORY, ASCE_IE = category, SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY[category]
+    return category
+
+
+def seismic_design_basis(risk_category=None, importance_factor=None, redundancy_factor=None, seismic_design_category=None,
+                         site_class=None):
+    """The one risk and site basis: category, Ie, the story-drift criterion and the site class, checked for consistency.
+
+    Called with no arguments it describes the module state. A caller that holds its own category,
+    factor or site class (a DemandPolicy, a saved record, an evaluator argument) passes it and a
+    contradiction raises instead of letting a stale default through: the category must be the module's,
+    the factor must be the one Table 1.5-2 gives for that category, and the site class must be the
+    declared ASCE_SITE_CLASS. ``redundancy_factor`` and ``seismic_design_category`` add the effective
+    limit of 12.12.1.1 (base limit / rho in SDC D-F).
+    """
+    if site_class is not None and site_class != ASCE_SITE_CLASS:
+        raise ValueError(f"site_class {site_class!r} contradicts the declared basis {ASCE_SITE_CLASS!r} "
+                         "(Structure_Parameters.ASCE_SITE_CLASS, user decision 2026-10-02); the population has one site class.")
+    category = ASCE_RISK_CATEGORY if risk_category is None else risk_category
+    if category not in SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY:
+        raise ValueError(f"risk category {category!r} is not exactly one of {tuple(SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY)}.")
+    if category != ASCE_RISK_CATEGORY:
+        raise ValueError(f"risk category {category!r} contradicts the configured basis {ASCE_RISK_CATEGORY!r} "
+                         "(Structure_Parameters.ASCE_RISK_CATEGORY); change it with apply_risk_category, not in one place.")
+    table_ie = SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY[category]
+    for name, value in (("Structure_Parameters.ASCE_IE", ASCE_IE), ("importance_factor", importance_factor)):
+        if value is not None and abs(float(value) - table_ie) > 1e-12:
+            raise ValueError(f"{name} = {value!r} contradicts Risk Category {category} (Ie = {table_ie}, ASCE 7-22 Table 1.5-2).")
+    base = ALLOWABLE_STORY_DRIFT_RATIO_BY_RISK_CATEGORY[category]
+    basis = {
+        "risk_category": category, "importance_factor": table_ie,
+        "importance_factor_source": "ASCE 7-22 Table 1.5-2",
+        "allowable_story_drift_ratio": base,
+        "allowable_story_drift_source": "ASCE 7-22 Table 12.12-1, all other structures",
+        "low_rise_allowance_asserted": bool(DRIFT_LOW_RISE_ALLOWANCE_ASSERTED),
+        "low_rise_allowance_note": ("not asserted: the Table 12.12-1 conditions for structures of four stories or fewer are not "
+                                    "verified for this archetype, so every story count uses the same row"),
+        "drift_amplification": "Cd / Ie on elastic drift (ASCE 7-22 12.8.6)",
+        "scope_note": "design drift criterion; not a nonlinear intensity target and not a ground-motion scaling instruction",
+        "code_edition": "ASCE 7-22",
+        "site_class": ASCE_SITE_CLASS,
+        "site_class_source": ("ASCE 7-22 11.4.2 and Table 20.2-1; user decision 2026-10-02: one site class for the population; "
+                              "SDS/SD1/S1 are declared design values for it, not geodatabase values"),
+        "site_response_analysis": "not required: ASCE 7-22 11.4.7 requires it for Site Class F only",
+        "source_access_note": ("Table 1.5-2 (p. 5) and Table 12.12-1 (p. 134) read from ASCE/SEI 7-22 on 2026-10-02 and agree with "
+                               "the transcribed values; the basis was first written on 2026-10-01 from transcriptions"),
+    }
+    if DRIFT_LOW_RISE_ALLOWANCE_ASSERTED:
+        raise ValueError("The low-rise drift allowance is not implemented; DRIFT_LOW_RISE_ALLOWANCE_ASSERTED must stay False.")
+    if redundancy_factor is not None:
+        rho = float(redundancy_factor)
+        if rho < 1.0:
+            raise ValueError("redundancy_factor must be at least 1.")
+        sdc = None if seismic_design_category is None else str(seismic_design_category).upper()
+        divided = sdc in ("D", "E", "F")
+        basis.update({"redundancy_factor": rho, "seismic_design_category": sdc,
+                      "limit_divided_by_rho": divided,
+                      "effective_story_drift_ratio": base / rho if divided else base,
+                      "effective_limit_source": "ASCE 7-22 12.12.1.1 (moment frames in SDC D through F: allowable drift / rho)"})
+    return basis
 
 
 def building_height_ft():
@@ -955,18 +1067,21 @@ def _validate_slab_load_state():
     if SLAB_THICKNESS_IN is None:
         return
     positive = {
-        "SLAB_THICKNESS_IN": SLAB_THICKNESS_IN, "H_BEAM": H_BEAM,
-        "STORY_H": STORY_H, "B_BEAM": B_BEAM, "B_COL": B_COL,
-        "H_COL": H_COL, "BAY_X": BAY_X, "BAY_Y": BAY_Y,
+        "SLAB_THICKNESS_IN": SLAB_THICKNESS_IN, "STORY_H": STORY_H, "BAY_X": BAY_X, "BAY_Y": BAY_Y,
         "CONCRETE_UNIT_WEIGHT_KCF": CONCRETE_UNIT_WEIGHT_KCF,
     }
+    # Under a grouped design there is no single beam or column section to validate here: the area
+    # loads below need none, and Model.Member_Properties validates every member it weighs.
+    if not UNIFORM_SECTIONS_WITHDRAWN:
+        positive.update({"H_BEAM": H_BEAM, "B_BEAM": B_BEAM, "B_COL": B_COL, "H_COL": H_COL})
     for name, value in positive.items():
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive in slab-aware mode.")
-    if not SLAB_THICKNESS_IN < H_BEAM < STORY_H:
-        raise ValueError("Slab-aware loads require SLAB_THICKNESS_IN < H_BEAM < STORY_H.")
-    if H_COL >= BAY_X or B_COL >= BAY_Y:
-        raise ValueError("Slab-aware beam self-weight requires positive clear spans in X and Y.")
+    if not UNIFORM_SECTIONS_WITHDRAWN:
+        if not SLAB_THICKNESS_IN < H_BEAM < STORY_H:
+            raise ValueError("Slab-aware loads require SLAB_THICKNESS_IN < H_BEAM < STORY_H.")
+        if H_COL >= BAY_X or B_COL >= BAY_Y:
+            raise ValueError("Slab-aware beam self-weight requires positive clear spans in X and Y.")
     for name, value in (("FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF", FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF),
                         ("FLOOR_LIVE_LOAD_KSF", FLOOR_LIVE_LOAD_KSF)):
         if not math.isfinite(value) or value < 0:
@@ -1055,6 +1170,20 @@ def col_self_weight_kip_per_in():
         return (CONCRETE_UNIT_WEIGHT_KCF / 1728.0 * B_COL * H_COL
                 * (STORY_H - SLAB_THICKNESS_IN) / STORY_H)
     return CONCRETE_UNIT_WEIGHT_KCI * B_COL * H_COL
+
+
+def roof_column_extension_in(b_col=None, h_col=None):
+    """Length of the column extension above the roof joint: one column depth; 0 when it is not declared."""
+    if not ROOF_COLUMN_EXTENSION:
+        return 0.0
+    return float(max(B_COL if b_col is None else b_col, H_COL if h_col is None else h_col))
+
+
+def roof_column_extension_weight_kip(b_col=None, h_col=None):
+    """Weight of one column extension above the roof joint (kip); the full section over its length."""
+    b = B_COL if b_col is None else b_col
+    h = H_COL if h_col is None else h_col
+    return CONCRETE_UNIT_WEIGHT_KCI * b * h * roof_column_extension_in(b, h)
 
 
 def beam_drop_weight_kip_per_in():
@@ -1153,6 +1282,13 @@ def floor_load_metadata():
         "beam_y_self_weight_per_floor_kip": beam_weight_y,
         "member_self_weight_per_floor_kip": column_weight + beam_weight_x + beam_weight_y,
         "total_floor_seismic_weight_kip": total_floor_seismic_weight(),
+        # The column extensions above the roof joints (Model/Roof_Extension): roof only, outside the per-floor values.
+        "roof_column_extension_in": roof_column_extension_in(),
+        "roof_column_extension_weight_kip": (NUM_BAY_X + 1) * (NUM_BAY_Y + 1) * roof_column_extension_weight_kip(),
+        "roof_column_extension_seismic_weight_kip": ((NUM_BAY_X + 1) * (NUM_BAY_Y + 1) * roof_column_extension_weight_kip()
+                                                     if selected else 0.0),
+        "total_seismic_weight_kip": (NUM_FLOOR * total_floor_seismic_weight()
+                                     + ((NUM_BAY_X + 1) * (NUM_BAY_Y + 1) * roof_column_extension_weight_kip() if selected else 0.0)),
         "load_accounting_basis": (
             "Uniform slab over centerline floor footprint; beam drops over clear spans between column faces; "
             "columns over story height minus slab thickness. Equivalent member weights distributed over "

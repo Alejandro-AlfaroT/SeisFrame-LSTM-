@@ -13,6 +13,7 @@ Analysis/Constraints.py; no numbering or ordering changed.
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
+from Model import Member_Groups as mg
 from Model.IMK_Hinges import create_imk_member, reset_hinge_registry
 from Model.Joint_Springs import install_joint_springs, joint_beam_node, reset_joint_registry
 from Model.Sections import define_sections
@@ -99,6 +100,11 @@ def _create_frame_member(ele_tag, n_i, n_j, member_type, transf_tag, integ_tag):
         return
 
     if sp.ELEMENT_FORMULATION in {"fiber", "imk"}:
+        if mg.is_grouped():
+            raise mg.GroupedStateError(
+                f"Member {ele_tag} ({member_type}) would be a fiber element: the fiber sections are defined once per "
+                "member type and are not wired for a grouped design. Grouped designs run with IMK hinges on beams and "
+                "columns (Model/Analysis_Profile v2_nonlinear_flexure_screening_v1).")
         ops.element(
             "forceBeamColumn",
             ele_tag,
@@ -201,8 +207,18 @@ def assign_nodal_masses():
         for j in range(sp.NUM_BAY_Y + 1):
             for i in range(sp.NUM_BAY_X + 1):
                 n = node_tag(k, i, j)
-                m = sp.node_seismic_mass(i, j)
+                m = installed_node_seismic_mass(k, i, j)
                 ops.mass(n, m, m, 1.0e-8, 0.0, 0.0, 0.0)
+
+
+def installed_node_seismic_mass(k, i, j):
+    """Seismic mass at grid node (i, j) of floor k: one value per plan position in the uniform mode,
+    the weights of that floor's own members under a grouped design (Model.Member_Properties)."""
+    from Model import Roof_Extension as roof
+    if mg.is_grouped():
+        from Model import Member_Properties as mp
+        return mp.node_seismic_mass(k, i, j)                   # the grouped ledger carries the roof extension
+    return sp.node_seismic_mass(i, j) + roof.node_seismic_mass(k, i, j)
 
 
 # ---- constraint handler -----------------------------------------------------------------------------
@@ -216,6 +232,21 @@ def apply_analysis_constraints():
 
 
 # ---- assembly ---------------------------------------------------------------------------------------
+def _require_grouped_model_scope():
+    """What the nonlinear frame supports under a grouped design; anything else is refused, not approximated.
+
+    The fiber sections (one per member type) are not defined: every member must be an IMK member built
+    from its own group's design. The scissors joint springs are calibrated from one beam and one column
+    section and are not wired for groups; grouped designs use rigid centerline joints (the V2 profile).
+    """
+    if not (sp.ELEMENT_FORMULATION == "imk" and sp.IMK_APPLY_TO_COLUMNS and sp.IMK_APPLY_TO_BEAMS):
+        raise mg.GroupedStateError("A grouped design needs ELEMENT_FORMULATION 'imk' with IMK hinges on beams and columns; "
+                                   "the fiber sections are one per member type and are not wired for groups.")
+    if getattr(sp, "JOINT_MODEL", "rigid_centerline") != "rigid_centerline":
+        raise mg.GroupedStateError(f"JOINT_MODEL {sp.JOINT_MODEL!r} is not wired for a grouped design: the joint springs are "
+                                   "calibrated from one beam and one column section. Use 'rigid_centerline'.")
+
+
 def build_model():
     ops.wipe()
     ops.model("basic", "-ndm", 3, "-ndf", 6)
@@ -227,13 +258,16 @@ def build_model():
     reset_joint_registry()
     # The slip-interface registry is scoped to this domain: a registration left from a previous build
     # would otherwise take bar slip away from a member hinge here while this build installs no
-    # replacement interface (Codex Unit 1 review, 2026-09-28, commit blocker 1).
+    # replacement interface (Unit 1 review, 2026-09-28, commit blocker 1).
     from Model.Deformation_Ownership import begin_domain, validate_installed
     begin_domain("Build_Model.build_model")
 
     create_nodes()
     fix_base_nodes()
-    define_sections()
+    if mg.is_grouped():
+        _require_grouped_model_scope()
+    else:
+        define_sections()
     # Joint springs (beam cores) must exist before the beams that frame into them.
     install_joint_springs(node_tag)
     create_elements()

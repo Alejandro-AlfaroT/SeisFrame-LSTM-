@@ -36,6 +36,8 @@ def column_stiffness(section,length):
 
 class CompatibleFloor:
     def __init__(self,slab,geometry,sections,mesh_per_bay=4,*,slab_perimeter='centerlines',mesh_spec=None):
+        from Design.SMRF_Floor_Sections import require_uniform
+        require_uniform(sections,'The compatible-floor diagnostic (SMRF_Floor_Compatibility)')
         self.slab=copy.deepcopy(slab);self.geometry=copy.deepcopy(geometry);self.sections=copy.deepcopy(sections)
         self.mesh=mesh_per_bay
         self.mesh_spec=copy.deepcopy(mesh_spec)

@@ -99,11 +99,16 @@ def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, 
             "beta1": b1, "steel_forces_kip": [(y, f) for y, f in forces]}
 
 
+class BeamBarRowsError(ValueError):
+    """The beam's bar rows do not fit its depth (a layer past mid-depth): the section is too shallow for the
+    layered cage. The design search treats it as a failed candidate and steps the beam depth."""
+
+
 def validate_bar_rows(face_rows, count, name="beam bars", depth_in=None):
     """The actual bar rows of one face as [(bars, elevation_from_that_face_in), ...], checked.
 
     ``face_rows`` is one face of Structure_Parameters.beam_bar_layers (per_layer, offsets_in and,
-    when present, layers and centroid_in). Rejected (2026-09-27, Codex item 3): per_layer and
+    when present, layers and centroid_in). Rejected (2026-09-27, review item 3): per_layer and
     offsets_in of different lengths (a zip would silently drop bars), a declared layer count that
     does not match, counts that do not add up to ``count``, non-positive or non-increasing
     elevations, an elevation outside the section, or a declared centroid the rows do not give.
@@ -124,7 +129,7 @@ def validate_bar_rows(face_rows, count, name="beam bars", depth_in=None):
     if any(not math.isfinite(o) or o <= 0.0 for o in offs) or any(b <= a for a, b in zip(offs, offs[1:])):
         raise ValueError(f"{name}: elevations must be positive and strictly increasing from the face")
     if depth_in is not None and offs[-1] >= float(depth_in) / 2.0:
-        raise ValueError(f"{name}: an elevation of {offs[-1]:g} in reaches past mid-depth of a {depth_in:g} in section")
+        raise BeamBarRowsError(f"{name}: an elevation of {offs[-1]:g} in reaches past mid-depth of a {depth_in:g} in section")
     if "centroid_in" in face_rows:
         centroid = sum(n * o for n, o in zip(per, offs)) / sum(per)
         if not math.isclose(centroid, float(face_rows["centroid_in"]), abs_tol=1e-6):
@@ -143,18 +148,20 @@ def _slab_layers_from_top(slab_h, layout, axis, flange_width):
     return result
 
 
-def composite_beam_strengths(beam, slab, layout, geometry, axis, position):
-    """Rectangular and beam-plus-slab Mn for one beam family.
+def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flange=None):
+    """Rectangular and beam-plus-slab Mn for one beam family, or for one resolved member.
 
     beam: b_in, h_in, fc_ksi, fy_ksi, bar_size, top_bars, bot_bars, centroid_offset_in and,
     when the bars sit in more than one row, ``layers`` = {"top": rows, "bottom": rows} (one
     direction of Structure_Parameters.beam_bar_layers): every row is then its own steel layer
-    (Codex item 1, 2026-09-27), so a second row of the compression face that lies below the
+    (review item 1, 2026-09-27), so a second row of the compression face that lies below the
     neutral axis is counted in tension where it belongs. Without ``layers`` each face is one
     row at its centroid offset (a number, or {"top", "bottom"} for the stacked orthogonal cages).
     slab: thickness_in. layout: the slab reinforcement layout record.
     geometry: bay_x_in, bay_y_in, h_col_in, b_col_in. axis 'x'/'y';
     position 'edge' or 'interior'.
+    flange: the member's own ACI 6.3.2 flange (Model.Member_Properties.effective_flange: unequal
+    end columns and the actual neighbouring webs); ``geometry`` is then not used.
     """
     bw, h, fc, fy = beam["b_in"], beam["h_in"], beam["fc_ksi"], beam["fy_ksi"]
     ab = _BAR_AREA[beam["bar_size"]]
@@ -180,12 +187,17 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position):
         return [(o, n * ab) for n, o in near] + [(h - o, n * ab) for n, o in far]
 
     t = slab["thickness_in"]
-    if axis == "x":
-        clear_span, clear_web = geometry["bay_x_in"] - geometry["h_col_in"], geometry["bay_y_in"] - bw
+    if flange is not None:
+        clear_span, sides = flange["clear_span_in"], flange["slab_sides"]
+        clear_web = min(o["clear_to_adjacent_web_in"] for o in flange["overhangs"])
+        bf, overhang = flange["flange_width_in"], max(o["overhang_in"] for o in flange["overhangs"])
     else:
-        clear_span, clear_web = geometry["bay_y_in"] - geometry["b_col_in"], geometry["bay_x_in"] - bw
-    sides = 2 if position == "interior" else 1
-    bf, overhang = effective_flange_width(bw, t, clear_span, clear_web, sides)
+        if axis == "x":
+            clear_span, clear_web = geometry["bay_x_in"] - geometry["h_col_in"], geometry["bay_y_in"] - bw
+        else:
+            clear_span, clear_web = geometry["bay_y_in"] - geometry["b_col_in"], geometry["bay_x_in"] - bw
+        sides = 2 if position == "interior" else 1
+        bf, overhang = effective_flange_width(bw, t, clear_span, clear_web, sides)
     top_area, bot_area = beam["top_bars"] * ab, beam["bot_bars"] * ab
     slab_layers = _slab_layers_from_top(t, layout, axis, bf) if layout is not None else []
     slab_area = sum(area for _, area, _ in slab_layers)

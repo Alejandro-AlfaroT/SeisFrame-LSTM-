@@ -1,5 +1,5 @@
 """Reference specimen runner (Reference_Specimens/park_ruitong_1988/pr1_unit1.py): a failed run keeps its
-history (Codex Unit 1 review, 2026-09-28, commit blocker 2), and mirrored histories are compared by phase.
+history (Unit 1 review, 2026-09-28, commit blocker 2), and mirrored histories are compared by phase.
 
 The injected failures test preservation only; they are not physical-analysis failures.
 """

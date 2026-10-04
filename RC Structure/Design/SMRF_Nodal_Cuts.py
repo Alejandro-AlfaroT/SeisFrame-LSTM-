@@ -19,6 +19,8 @@ METHOD_VERSION='consistent_nodal_line_cut_projection_v1'
 
 def _validate_inventory(response,geometry,sections,slab_perimeter):
     """Require the complete declared shell and web geometry, including unloaded cells."""
+    from .SMRF_Floor_Sections import require_uniform
+    require_uniform(sections,'The nodal-cut diagnostic (SMRF_Nodal_Cuts)')
     meta=response.get('mesh_metadata') or {}
     spec=dict(x_offsets_in=meta.get('x_offsets_in'),y_offsets_in=meta.get('y_offsets_in'),max_shells=meta.get('shell_budget'))
     nx,ny,lx,ly=(geometry[k] for k in ('num_bay_x','num_bay_y','bay_x_in','bay_y_in'))

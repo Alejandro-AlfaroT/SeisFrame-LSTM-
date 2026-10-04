@@ -42,7 +42,8 @@ import copy
 import math
 
 import openseespy.opensees as ops
-from Design.SMRF_Floor_Mesh import floor_mesh
+from Design import SMRF_Floor_Sections as floor_sections
+from Design.SMRF_Floor_Mesh import floor_mesh, span_offsets
 
 
 METHOD_VERSION = "shellmitc4_rigid_beam_line_floor_diagnostic_v1"
@@ -156,6 +157,8 @@ def _beam_inputs(sections, support_model, slab_h, lx, ly):
     if support_model == "rigid_lines":
         return None
     from Design.SMRF_Slab import _beam_inertia
+    if floor_sections.is_by_line(sections):
+        return _beam_inputs_by_line(sections, slab_h, lx, ly)
     try:
         b = _number(sections["b_beam_in"], "b_beam_in")
         h = _number(sections["h_beam_in"], "h_beam_in")
@@ -188,6 +191,48 @@ def _beam_inputs(sections, support_model, slab_h, lx, ly):
             "basis": ("ACI 318-19 8.4.1.8 gross T/L-section per beam line (SMRF_Slab._beam_inertia), "
                       "less the flange mid-plane term carried by the shells; centroidal element on the "
                       "slab mid-plane, no beam/slab centroid offset.")}
+
+
+def _beam_inputs_by_line(sections, slab_h, lx, ly):
+    """The same beam model for a floor described line by line: every line its own section and stiffness."""
+    from Design.SMRF_Slab import _beam_inertia
+    nx, ny = len(sections["beam_lines"]["y"]) - 1, len(sections["beam_lines"]["x"]) - 1
+    floor_sections.validate(sections, nx, ny)
+    modifier = _number(sections.get("beam_stiffness_modifier", 1.0), "beam_stiffness_modifier")
+    torsion = _number(sections.get("beam_torsion_modifier", 1.0), "beam_torsion_modifier")
+
+    def line(beam, axis, index, last, transverse):
+        b, h, fc = (_number(beam[key], key) for key in ("b_in", "h_in", "fc_ksi"))
+        if h <= slab_h:
+            raise ValueError("Flexible beam support requires a beam deeper than the slab.")
+        position = "edge" if index in (0, last) else "interior"
+        gross, projection, flange_width = _beam_inertia(b, h, slab_h, 1 if position == "edge" else 2, transverse)
+        ec = 57.0 * math.sqrt(fc * 1000.0)
+        return {"axis": axis, "line_index": index, "position": position, "b_in": b, "h_in": h, "fc_ksi": fc,
+                "ec_ksi": ec, "g_ksi": 0.4 * ec, "area_in2": b * h, "iz_in4": modifier * h * b**3 / 12.0,
+                "j_in4": torsion * (b * h**3 + h * b**3) / 12.0,
+                "t_section_gross_in4": gross, "flange_width_in": flange_width, "flange_projection_in": projection,
+                "flange_midplane_term_in4": flange_width * slab_h**3 / 12.0,
+                "iy_in4": modifier * (gross - flange_width * slab_h**3 / 12.0)}
+
+    lines = {"x": [line(beam, "x", j, ny, ly) for j, beam in enumerate(sections["beam_lines"]["x"])],
+             "y": [line(beam, "y", i, nx, lx) for i, beam in enumerate(sections["beam_lines"]["y"])]}
+    footprints = [[_number(column["h_in"], "h_in") * _number(column["b_in"], "b_in") for column in row]
+                  for row in sections["supports"]]
+    return {"by_line": True, "lines": lines, "stiffness_modifier": modifier, "torsion_modifier": torsion,
+            "column_footprint_in2": footprints, "floor_sections_sha256": floor_sections.signature(sections),
+            "basis": ("ACI 318-19 8.4.1.8 gross T/L-section of every beam line on its own web (SMRF_Slab._beam_inertia), "
+                      "less the flange mid-plane term carried by the shells; centroidal element on the "
+                      "slab mid-plane, no beam/slab centroid offset.")}
+
+
+def _line_properties(beam, axis, line, last):
+    """(A, E, G, J, Iy, Iz) of the beam segments on one line."""
+    if beam.get("by_line"):
+        p = beam["lines"][axis][line]
+        return p["area_in2"], p["ec_ksi"], p["g_ksi"], p["j_in4"], p["iy_in4"], p["iz_in4"]
+    iy = beam["line_inertia"][f"{axis}_edge" if line in (0, last) else f"{axis}_interior"]["iy_in4"]
+    return beam["area_in2"], beam["ec_ksi"], beam["g_ksi"], beam["j_in4"], iy, beam["iz_in4"]
 
 
 def _constrain_plate_node(node, held):
@@ -321,21 +366,19 @@ def analyze_floor(slab_record, geometry, sections, loadcase, mesh_per_bay=4,
             segment = ex * ey
             for line in range(ny + 1):
                 row = line * my
-                iy = beam["line_inertia"]["x_edge" if line in (0, ny) else "x_interior"]["iy_in4"]
+                area, e_mod, g_mod, j_tor, iy, iz = _line_properties(beam, "x", line, ny)
                 for i in range(ex):
                     segment += 1
                     ops.element("elasticBeamColumn", segment, tag(i, row), tag(i + 1, row),
-                                beam["area_in2"], beam["ec_ksi"], beam["g_ksi"], beam["j_in4"],
-                                iy, beam["iz_in4"], 1)
+                                area, e_mod, g_mod, j_tor, iy, iz, 1)
                     beam_segments.append((segment, "x", line, i // mx, i % mx, tag(i, row), tag(i + 1, row)))
             for line in range(nx + 1):
                 col = line * mx
-                iy = beam["line_inertia"]["y_edge" if line in (0, nx) else "y_interior"]["iy_in4"]
+                area, e_mod, g_mod, j_tor, iy, iz = _line_properties(beam, "y", line, nx)
                 for j in range(ey):
                     segment += 1
                     ops.element("elasticBeamColumn", segment, tag(col, j), tag(col, j + 1),
-                                beam["area_in2"], beam["ec_ksi"], beam["g_ksi"], beam["j_in4"],
-                                iy, beam["iz_in4"], 1)
+                                area, e_mod, g_mod, j_tor, iy, iz, 1)
                     beam_segments.append((segment, "y", line, j // my, j % my, tag(col, j), tag(col, j + 1)))
         ops.timeSeries("Linear", 1)
         ops.pattern("Plain", 1, 1)
@@ -492,7 +535,7 @@ def _extract_beam_transfer(result, beam_segments, reaction_by_node, mesh, nx, ny
         segments.sort()
         length = lx if axis == "x" else ly
         node_loads, node_couples = [], []
-        offsets = grid["x_offsets_in" if axis == "x" else "y_offsets_in"]
+        offsets = span_offsets(grid, axis, span)
         for k in range(1, len(offsets) - 1):
             left, right = forces[segments[k - 1][1]], forces[segments[k][1]]
             node_loads.append({"x_fraction": offsets[k] / length, "load_kip": -(left[8] + right[2])})
@@ -520,7 +563,8 @@ def _extract_beam_transfer(result, beam_segments, reaction_by_node, mesh, nx, ny
     for node, reaction in reaction_by_node.items():
         index = node - 1
         gi, gj = (index % (ex + 1)) // mesh_x, (index // (ex + 1)) // mesh_y
-        quadrant = (footprint_in2 or 0.0) / 4.0
+        # One footprint for every support, or (a floor described line by line) each support's own column.
+        quadrant = (footprint_in2[gj][gi] if isinstance(footprint_in2, list) else (footprint_in2 or 0.0)) / 4.0
         share = sum(pressures[(pi, pj)] / 144.0 * quadrant
                     for pi in (gi - 1, gi) for pj in (gj - 1, gj) if (pi, pj) in pressures)
         direct = reaction - end_shear_at_node.get(node, 0.0)

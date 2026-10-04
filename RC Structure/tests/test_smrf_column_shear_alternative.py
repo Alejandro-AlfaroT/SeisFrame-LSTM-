@@ -716,7 +716,7 @@ class StationaryPointEnvelopeTests(unittest.TestCase):
 
 
 class DesignBasisDefaults(unittest.TestCase):
-    """2026-09-27 (Codex repair review, item 2): the column-own probable envelope on the physical base clear
+    """2026-09-27 (repair review, item 2): the column-own probable envelope on the physical base clear
     height is the requested design basis; records without a method key are still read as joint-limited."""
 
     def test_new_designs_request_column_own_on_the_physical_base_height(self):

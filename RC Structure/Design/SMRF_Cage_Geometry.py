@@ -25,6 +25,9 @@ from Design.SMRF_Cage_Layout import beam_cage, column_cage, face_bar_positions
 BAR_DIAMETER = {3: 0.375, 4: 0.5, 5: 0.625, 6: 0.75, 7: 0.875, 8: 1.0, 9: 1.128, 10: 1.27, 11: 1.41, 14: 1.693, 18: 2.257}
 SEISMIC_HOOK_MIN_EXTENSION_IN = 3.0          # ACI 318-19 2.3, seismic hook: 6db and 3 in
 INTERLAYER_CLEAR_MIN_IN = 1.0                # 25.2.2
+# Retain the earlier 1-in displacement proposals as diagnostics. No bar path or
+# revised elevation was installed by that convention, so an overlap still fails.
+SLAB_BOTTOM_MAT_DISPLACEMENT_MAX_IN = 1.0
 STACKING_CONVENTIONS = ("x_over_y", "y_over_x")
 
 
@@ -316,13 +319,21 @@ def joint_assembly(record, stacking="x_over_y", pass_clearance_in=None, max_laye
                     "direction": axis, "centroid_from_top_in": offset, "db_in": beam_db}
                    for axis, offsets in ((upper, upper_offsets), (lower, lower_offsets))
                    for k, offset in enumerate(offsets)]
-    clashes, tight = [], []
+    clashes, tight, displaced = [], [], []
     for mat in mats:
         for bl in beam_layers:
             if mat["runs_along"] == bl["direction"]:
                 continue                                   # parallel mat: omitted within the beam width
             gap = abs(mat["centroid_from_top_in"] - bl["centroid_from_top_in"]) - (mat["db_in"] + bl["db_in"]) / 2.0
-            if gap < 0.0:
+            if gap < 0.0 and mat["mat"].endswith("bottom") and -gap <= SLAB_BOTTOM_MAT_DISPLACEMENT_MAX_IN:
+                proposal = {"between": [mat["mat"], bl["layer"]], "displacement_in": -gap,
+                            "status": "unresolved", "applied": False,
+                            "note": "a displacement magnitude is not a resolved bar path; the stored mat elevation "
+                                    "still overlaps the beam bar and remains a failed geometry check"}
+                displaced.append(proposal)
+                clashes.append({"between": proposal["between"], "overlap_in": -gap,
+                                "note": proposal["note"]})
+            elif gap < 0.0:
                 clashes.append({"between": [mat["mat"], bl["layer"]], "overlap_in": -gap,
                                 "note": "crossing slab bar and beam bar occupy the same elevation"})
             elif gap < INTERLAYER_CLEAR_MIN_IN:
@@ -366,6 +377,8 @@ def joint_assembly(record, stacking="x_over_y", pass_clearance_in=None, max_laye
                              "not reflected in the record's strengths", "requires_strength_update": lever_ratio < 0.999})
     for cl in clashes:
         checks.append({"rule": "crossing slab mats against beam top bars", "passes": False, "detail": cl})
+    for item in displaced:
+        checks.append({"rule": "crossing slab bottom mat displacement unresolved", "passes": False, "detail": item})
     if not clashes:
         checks.append({"rule": "crossing slab mats against beam top bars", "passes": True,
                        "detail": f"no overlap; {len(tight)} tight crossing(s) under 1 in clear" if tight else "no overlap, 1 in clear kept"})
@@ -373,7 +386,7 @@ def joint_assembly(record, stacking="x_over_y", pass_clearance_in=None, max_laye
                    "detail": f"tail reaches {tail_bottom:.1f} in from the top face; joint depth {hb:g} in"})
     return {"column_bars_plan_in": column_bars, "directions": directions, "stacking": stacking_result,
             "slab_mats": mats, "slab_mats_placed": mats_placed, "beam_top_layers": beam_layers,
-            "slab_clashes": clashes, "slab_tight_crossings": tight,
+            "slab_clashes": clashes, "slab_tight_crossings": tight, "slab_bottom_mat_displacements": displaced,
             "exterior_hooks": hooks, "checks": checks, "passes": all(c["passes"] for c in checks)}
 
 
@@ -442,7 +455,10 @@ def evaluate_cage_geometry(record, stacking=None):
     beam = beam_cage_geometry(record)
     joints = {name: joint_assembly(record, stacking=name) for name in STACKING_CONVENTIONS}
     if stacking is None:
+        # Fewer failed checks first, then fewer displaced bottom-mat crossings (a mat left where it is drawn
+        # is preferred to one moved by the placement convention), then the declared order.
         stacking = min(STACKING_CONVENTIONS, key=lambda n: (sum(1 for c in joints[n]["checks"] if not c["passes"]),
+                                                           len(joints[n]["slab_bottom_mat_displacements"]),
                                                            STACKING_CONVENTIONS.index(n)))
     joint = joints[stacking]
     return {"schema_version": "smrf_cage_geometry_v1", "column": column, "beam": beam, "joint": joint,

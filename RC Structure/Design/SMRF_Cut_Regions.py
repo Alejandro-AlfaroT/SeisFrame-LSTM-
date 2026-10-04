@@ -33,6 +33,8 @@ def effective_flange_regions(geometry, sections, slab, *, axis, slab_perimeter='
     Regions describe a cut in one direction only, not 2D slab steel ownership.
     """
     from Structure_Parameters import effective_flange_width_in
+    from .SMRF_Floor_Sections import require_uniform
+    require_uniform(sections,'The cut-region diagnostic (SMRF_Cut_Regions)')
     if axis not in ('x','y'):raise ValueError('Axis must be x or y')
     if slab_perimeter not in ('centerlines','beam_outer_faces'):raise ValueError('Unknown slab perimeter')
     transverse='y' if axis=='x' else 'x'

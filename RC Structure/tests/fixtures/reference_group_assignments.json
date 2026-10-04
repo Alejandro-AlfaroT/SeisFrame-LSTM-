@@ -1,0 +1,8283 @@
+{
+  "schema_version": "seisframe_group_assignment_proposal_v1",
+  "status": "bookkeeping_verified_against_reference_connectivity; grouped_solver_not_implemented",
+  "source_design": "C:\\Users\\andro\\Documents\\Codex\\SeisFrame_V2_Screening_2026-10-02\\case_0001\\design.json",
+  "source_design_sha256": "680b5c433a9f901f661cf61c9dd69f8292720876c928896deb23b0803a0f4ee2",
+  "source_elements": "C:\\Users\\andro\\Documents\\Codex\\SeisFrame_V2_NTHA_2026-10-02\\case_0001\\peer_11_scale_1\\ntha\\elements.csv",
+  "geometry": {
+    "num_bay_x": 2,
+    "num_bay_y": 6,
+    "num_floor": 6,
+    "bay_x_in": 240.0,
+    "bay_y_in": 240.0,
+    "story_h_in": 168.0
+  },
+  "story_bands": [
+    [
+      1,
+      2
+    ],
+    [
+      3,
+      4
+    ],
+    [
+      5,
+      6
+    ]
+  ],
+  "basis": {
+    "selection": "iterative design; no dimensions or reinforcement prescribed by grouping",
+    "column_story": "segment from floor k-1 to floor k belongs to story k",
+    "beam_floor": "beam at floor k belongs to the band containing k",
+    "x_boundary_edge": "column at i=0 or i=nx, with j strictly interior",
+    "y_boundary_edge": "column at j=0 or j=ny, with i strictly interior",
+    "symmetry": "mirrored positions share groups; earthquake signs and load patterns still enveloped",
+    "odd_story_count": "merge a final one-story band into the band below; a search policy, not a code rule"
+  },
+  "groups": [
+    {
+      "group_id": "s01_02__beam_x__edge",
+      "member_type": "beam_x",
+      "stories_or_floors": [
+        1,
+        2
+      ],
+      "location_class": "edge",
+      "member_count": 8,
+      "member_tags": [
+        127,
+        128,
+        139,
+        140,
+        141,
+        142,
+        153,
+        154
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s01_02__beam_x__interior",
+      "member_type": "beam_x",
+      "stories_or_floors": [
+        1,
+        2
+      ],
+      "location_class": "interior",
+      "member_count": 20,
+      "member_tags": [
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s01_02__beam_y__edge",
+      "member_type": "beam_y",
+      "stories_or_floors": [
+        1,
+        2
+      ],
+      "location_class": "edge",
+      "member_count": 24,
+      "member_tags": [
+        211,
+        213,
+        214,
+        216,
+        217,
+        219,
+        220,
+        222,
+        223,
+        225,
+        226,
+        228,
+        229,
+        231,
+        232,
+        234,
+        235,
+        237,
+        238,
+        240,
+        241,
+        243,
+        244,
+        246
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s01_02__beam_y__interior",
+      "member_type": "beam_y",
+      "stories_or_floors": [
+        1,
+        2
+      ],
+      "location_class": "interior",
+      "member_count": 12,
+      "member_tags": [
+        212,
+        215,
+        218,
+        221,
+        224,
+        227,
+        230,
+        233,
+        236,
+        239,
+        242,
+        245
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s01_02__column__corner",
+      "member_type": "column",
+      "stories_or_floors": [
+        1,
+        2
+      ],
+      "location_class": "corner",
+      "member_count": 8,
+      "member_tags": [
+        1,
+        3,
+        19,
+        21,
+        22,
+        24,
+        40,
+        42
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s01_02__column__interior",
+      "member_type": "column",
+      "stories_or_floors": [
+        1,
+        2
+      ],
+      "location_class": "interior",
+      "member_count": 10,
+      "member_tags": [
+        5,
+        8,
+        11,
+        14,
+        17,
+        26,
+        29,
+        32,
+        35,
+        38
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s01_02__column__x_boundary_edge",
+      "member_type": "column",
+      "stories_or_floors": [
+        1,
+        2
+      ],
+      "location_class": "x_boundary_edge",
+      "member_count": 20,
+      "member_tags": [
+        4,
+        6,
+        7,
+        9,
+        10,
+        12,
+        13,
+        15,
+        16,
+        18,
+        25,
+        27,
+        28,
+        30,
+        31,
+        33,
+        34,
+        36,
+        37,
+        39
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s01_02__column__y_boundary_edge",
+      "member_type": "column",
+      "stories_or_floors": [
+        1,
+        2
+      ],
+      "location_class": "y_boundary_edge",
+      "member_count": 4,
+      "member_tags": [
+        2,
+        20,
+        23,
+        41
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s03_04__beam_x__edge",
+      "member_type": "beam_x",
+      "stories_or_floors": [
+        3,
+        4
+      ],
+      "location_class": "edge",
+      "member_count": 8,
+      "member_tags": [
+        155,
+        156,
+        167,
+        168,
+        169,
+        170,
+        181,
+        182
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s03_04__beam_x__interior",
+      "member_type": "beam_x",
+      "stories_or_floors": [
+        3,
+        4
+      ],
+      "location_class": "interior",
+      "member_count": 20,
+      "member_tags": [
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s03_04__beam_y__edge",
+      "member_type": "beam_y",
+      "stories_or_floors": [
+        3,
+        4
+      ],
+      "location_class": "edge",
+      "member_count": 24,
+      "member_tags": [
+        247,
+        249,
+        250,
+        252,
+        253,
+        255,
+        256,
+        258,
+        259,
+        261,
+        262,
+        264,
+        265,
+        267,
+        268,
+        270,
+        271,
+        273,
+        274,
+        276,
+        277,
+        279,
+        280,
+        282
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s03_04__beam_y__interior",
+      "member_type": "beam_y",
+      "stories_or_floors": [
+        3,
+        4
+      ],
+      "location_class": "interior",
+      "member_count": 12,
+      "member_tags": [
+        248,
+        251,
+        254,
+        257,
+        260,
+        263,
+        266,
+        269,
+        272,
+        275,
+        278,
+        281
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s03_04__column__corner",
+      "member_type": "column",
+      "stories_or_floors": [
+        3,
+        4
+      ],
+      "location_class": "corner",
+      "member_count": 8,
+      "member_tags": [
+        43,
+        45,
+        61,
+        63,
+        64,
+        66,
+        82,
+        84
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s03_04__column__interior",
+      "member_type": "column",
+      "stories_or_floors": [
+        3,
+        4
+      ],
+      "location_class": "interior",
+      "member_count": 10,
+      "member_tags": [
+        47,
+        50,
+        53,
+        56,
+        59,
+        68,
+        71,
+        74,
+        77,
+        80
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s03_04__column__x_boundary_edge",
+      "member_type": "column",
+      "stories_or_floors": [
+        3,
+        4
+      ],
+      "location_class": "x_boundary_edge",
+      "member_count": 20,
+      "member_tags": [
+        46,
+        48,
+        49,
+        51,
+        52,
+        54,
+        55,
+        57,
+        58,
+        60,
+        67,
+        69,
+        70,
+        72,
+        73,
+        75,
+        76,
+        78,
+        79,
+        81
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s03_04__column__y_boundary_edge",
+      "member_type": "column",
+      "stories_or_floors": [
+        3,
+        4
+      ],
+      "location_class": "y_boundary_edge",
+      "member_count": 4,
+      "member_tags": [
+        44,
+        62,
+        65,
+        83
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s05_06__beam_x__edge",
+      "member_type": "beam_x",
+      "stories_or_floors": [
+        5,
+        6
+      ],
+      "location_class": "edge",
+      "member_count": 8,
+      "member_tags": [
+        183,
+        184,
+        195,
+        196,
+        197,
+        198,
+        209,
+        210
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s05_06__beam_x__interior",
+      "member_type": "beam_x",
+      "stories_or_floors": [
+        5,
+        6
+      ],
+      "location_class": "interior",
+      "member_count": 20,
+      "member_tags": [
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        199,
+        200,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207,
+        208
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s05_06__beam_y__edge",
+      "member_type": "beam_y",
+      "stories_or_floors": [
+        5,
+        6
+      ],
+      "location_class": "edge",
+      "member_count": 24,
+      "member_tags": [
+        283,
+        285,
+        286,
+        288,
+        289,
+        291,
+        292,
+        294,
+        295,
+        297,
+        298,
+        300,
+        301,
+        303,
+        304,
+        306,
+        307,
+        309,
+        310,
+        312,
+        313,
+        315,
+        316,
+        318
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s05_06__beam_y__interior",
+      "member_type": "beam_y",
+      "stories_or_floors": [
+        5,
+        6
+      ],
+      "location_class": "interior",
+      "member_count": 12,
+      "member_tags": [
+        284,
+        287,
+        290,
+        293,
+        296,
+        299,
+        302,
+        305,
+        308,
+        311,
+        314,
+        317
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s05_06__column__corner",
+      "member_type": "column",
+      "stories_or_floors": [
+        5,
+        6
+      ],
+      "location_class": "corner",
+      "member_count": 8,
+      "member_tags": [
+        85,
+        87,
+        103,
+        105,
+        106,
+        108,
+        124,
+        126
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s05_06__column__interior",
+      "member_type": "column",
+      "stories_or_floors": [
+        5,
+        6
+      ],
+      "location_class": "interior",
+      "member_count": 10,
+      "member_tags": [
+        89,
+        92,
+        95,
+        98,
+        101,
+        110,
+        113,
+        116,
+        119,
+        122
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s05_06__column__x_boundary_edge",
+      "member_type": "column",
+      "stories_or_floors": [
+        5,
+        6
+      ],
+      "location_class": "x_boundary_edge",
+      "member_count": 20,
+      "member_tags": [
+        88,
+        90,
+        91,
+        93,
+        94,
+        96,
+        97,
+        99,
+        100,
+        102,
+        109,
+        111,
+        112,
+        114,
+        115,
+        117,
+        118,
+        120,
+        121,
+        123
+      ],
+      "selected_design": null
+    },
+    {
+      "group_id": "s05_06__column__y_boundary_edge",
+      "member_type": "column",
+      "stories_or_floors": [
+        5,
+        6
+      ],
+      "location_class": "y_boundary_edge",
+      "member_count": 4,
+      "member_tags": [
+        86,
+        104,
+        107,
+        125
+      ],
+      "selected_design": null
+    }
+  ],
+  "members": [
+    {
+      "member_tag": 1,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 1,
+      "node_j": 22,
+      "group_id": "s01_02__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 2,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 2,
+      "node_j": 23,
+      "group_id": "s01_02__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 3,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 3,
+      "node_j": 24,
+      "group_id": "s01_02__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 4,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 4,
+      "node_j": 25,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 5,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 5,
+      "node_j": 26,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 6,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 6,
+      "node_j": 27,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 7,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 7,
+      "node_j": 28,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 8,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 8,
+      "node_j": 29,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 9,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 9,
+      "node_j": 30,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 10,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 10,
+      "node_j": 31,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 11,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 11,
+      "node_j": 32,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 12,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 12,
+      "node_j": 33,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 13,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 13,
+      "node_j": 34,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 14,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 14,
+      "node_j": 35,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 15,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 15,
+      "node_j": 36,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 16,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 16,
+      "node_j": 37,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 17,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 17,
+      "node_j": 38,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 18,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 18,
+      "node_j": 39,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 19,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 19,
+      "node_j": 40,
+      "group_id": "s01_02__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 20,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 20,
+      "node_j": 41,
+      "group_id": "s01_02__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 21,
+      "member_type": "column",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 6,
+      "node_i": 21,
+      "node_j": 42,
+      "group_id": "s01_02__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 22,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 22,
+      "node_j": 43,
+      "group_id": "s01_02__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 23,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 23,
+      "node_j": 44,
+      "group_id": "s01_02__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 24,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 24,
+      "node_j": 45,
+      "group_id": "s01_02__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 25,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 25,
+      "node_j": 46,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 26,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 26,
+      "node_j": 47,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 27,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 27,
+      "node_j": 48,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 28,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 28,
+      "node_j": 49,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 29,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 29,
+      "node_j": 50,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 30,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 30,
+      "node_j": 51,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 31,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 31,
+      "node_j": 52,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 32,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 32,
+      "node_j": 53,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 33,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 33,
+      "node_j": 54,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 34,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 34,
+      "node_j": 55,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 35,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 35,
+      "node_j": 56,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 36,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 36,
+      "node_j": 57,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 37,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 37,
+      "node_j": 58,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 38,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 38,
+      "node_j": 59,
+      "group_id": "s01_02__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 39,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 39,
+      "node_j": 60,
+      "group_id": "s01_02__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 40,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 40,
+      "node_j": 61,
+      "group_id": "s01_02__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 41,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 41,
+      "node_j": 62,
+      "group_id": "s01_02__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 42,
+      "member_type": "column",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 6,
+      "node_i": 42,
+      "node_j": 63,
+      "group_id": "s01_02__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 43,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 43,
+      "node_j": 64,
+      "group_id": "s03_04__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 44,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 44,
+      "node_j": 65,
+      "group_id": "s03_04__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 45,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 45,
+      "node_j": 66,
+      "group_id": "s03_04__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 46,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 46,
+      "node_j": 67,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 47,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 47,
+      "node_j": 68,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 48,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 48,
+      "node_j": 69,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 49,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 49,
+      "node_j": 70,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 50,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 50,
+      "node_j": 71,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 51,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 51,
+      "node_j": 72,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 52,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 52,
+      "node_j": 73,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 53,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 53,
+      "node_j": 74,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 54,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 54,
+      "node_j": 75,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 55,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 55,
+      "node_j": 76,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 56,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 56,
+      "node_j": 77,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 57,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 57,
+      "node_j": 78,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 58,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 58,
+      "node_j": 79,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 59,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 59,
+      "node_j": 80,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 60,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 60,
+      "node_j": 81,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 61,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 61,
+      "node_j": 82,
+      "group_id": "s03_04__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 62,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 62,
+      "node_j": 83,
+      "group_id": "s03_04__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 63,
+      "member_type": "column",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 6,
+      "node_i": 63,
+      "node_j": 84,
+      "group_id": "s03_04__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 64,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 64,
+      "node_j": 85,
+      "group_id": "s03_04__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 65,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 65,
+      "node_j": 86,
+      "group_id": "s03_04__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 66,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 66,
+      "node_j": 87,
+      "group_id": "s03_04__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 67,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 67,
+      "node_j": 88,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 68,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 68,
+      "node_j": 89,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 69,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 69,
+      "node_j": 90,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 70,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 70,
+      "node_j": 91,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 71,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 71,
+      "node_j": 92,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 72,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 72,
+      "node_j": 93,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 73,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 73,
+      "node_j": 94,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 74,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 74,
+      "node_j": 95,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 75,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 75,
+      "node_j": 96,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 76,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 76,
+      "node_j": 97,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 77,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 77,
+      "node_j": 98,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 78,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 78,
+      "node_j": 99,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 79,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 79,
+      "node_j": 100,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 80,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 80,
+      "node_j": 101,
+      "group_id": "s03_04__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 81,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 81,
+      "node_j": 102,
+      "group_id": "s03_04__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 82,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 82,
+      "node_j": 103,
+      "group_id": "s03_04__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 83,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 83,
+      "node_j": 104,
+      "group_id": "s03_04__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 84,
+      "member_type": "column",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 6,
+      "node_i": 84,
+      "node_j": 105,
+      "group_id": "s03_04__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 85,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 85,
+      "node_j": 106,
+      "group_id": "s05_06__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 86,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 86,
+      "node_j": 107,
+      "group_id": "s05_06__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 87,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 87,
+      "node_j": 108,
+      "group_id": "s05_06__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 88,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 88,
+      "node_j": 109,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 89,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 89,
+      "node_j": 110,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 90,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 90,
+      "node_j": 111,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 91,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 91,
+      "node_j": 112,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 92,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 92,
+      "node_j": 113,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 93,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 93,
+      "node_j": 114,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 94,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 94,
+      "node_j": 115,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 95,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 95,
+      "node_j": 116,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 96,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 96,
+      "node_j": 117,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 97,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 97,
+      "node_j": 118,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 98,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 98,
+      "node_j": 119,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 99,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 99,
+      "node_j": 120,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 100,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 100,
+      "node_j": 121,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 101,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 101,
+      "node_j": 122,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 102,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 102,
+      "node_j": 123,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 103,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 103,
+      "node_j": 124,
+      "group_id": "s05_06__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 104,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 104,
+      "node_j": 125,
+      "group_id": "s05_06__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 105,
+      "member_type": "column",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 6,
+      "node_i": 105,
+      "node_j": 126,
+      "group_id": "s05_06__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 106,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 106,
+      "node_j": 127,
+      "group_id": "s05_06__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 107,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 107,
+      "node_j": 128,
+      "group_id": "s05_06__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 108,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 108,
+      "node_j": 129,
+      "group_id": "s05_06__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 109,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 109,
+      "node_j": 130,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 110,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 110,
+      "node_j": 131,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 111,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 111,
+      "node_j": 132,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 112,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 112,
+      "node_j": 133,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 113,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 113,
+      "node_j": 134,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 114,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 114,
+      "node_j": 135,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 115,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 115,
+      "node_j": 136,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 116,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 116,
+      "node_j": 137,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 117,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 117,
+      "node_j": 138,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 118,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 118,
+      "node_j": 139,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 119,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 119,
+      "node_j": 140,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 120,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 120,
+      "node_j": 141,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 121,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 121,
+      "node_j": 142,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 122,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 122,
+      "node_j": 143,
+      "group_id": "s05_06__column__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 123,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 123,
+      "node_j": 144,
+      "group_id": "s05_06__column__x_boundary_edge",
+      "location_class": "x_boundary_edge"
+    },
+    {
+      "member_tag": 124,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 124,
+      "node_j": 145,
+      "group_id": "s05_06__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 125,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 125,
+      "node_j": 146,
+      "group_id": "s05_06__column__y_boundary_edge",
+      "location_class": "y_boundary_edge"
+    },
+    {
+      "member_tag": 126,
+      "member_type": "column",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 6,
+      "node_i": 126,
+      "node_j": 147,
+      "group_id": "s05_06__column__corner",
+      "location_class": "corner"
+    },
+    {
+      "member_tag": 127,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 22,
+      "node_j": 23,
+      "group_id": "s01_02__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 128,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 23,
+      "node_j": 24,
+      "group_id": "s01_02__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 129,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 25,
+      "node_j": 26,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 130,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 26,
+      "node_j": 27,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 131,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 28,
+      "node_j": 29,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 132,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 29,
+      "node_j": 30,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 133,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 31,
+      "node_j": 32,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 134,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 32,
+      "node_j": 33,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 135,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 34,
+      "node_j": 35,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 136,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 35,
+      "node_j": 36,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 137,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 37,
+      "node_j": 38,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 138,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 38,
+      "node_j": 39,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 139,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 40,
+      "node_j": 41,
+      "group_id": "s01_02__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 140,
+      "member_type": "beam_x",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 41,
+      "node_j": 42,
+      "group_id": "s01_02__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 141,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 43,
+      "node_j": 44,
+      "group_id": "s01_02__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 142,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 44,
+      "node_j": 45,
+      "group_id": "s01_02__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 143,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 46,
+      "node_j": 47,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 144,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 47,
+      "node_j": 48,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 145,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 49,
+      "node_j": 50,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 146,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 50,
+      "node_j": 51,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 147,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 52,
+      "node_j": 53,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 148,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 53,
+      "node_j": 54,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 149,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 55,
+      "node_j": 56,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 150,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 56,
+      "node_j": 57,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 151,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 58,
+      "node_j": 59,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 152,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 59,
+      "node_j": 60,
+      "group_id": "s01_02__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 153,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 61,
+      "node_j": 62,
+      "group_id": "s01_02__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 154,
+      "member_type": "beam_x",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 62,
+      "node_j": 63,
+      "group_id": "s01_02__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 155,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 64,
+      "node_j": 65,
+      "group_id": "s03_04__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 156,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 65,
+      "node_j": 66,
+      "group_id": "s03_04__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 157,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 67,
+      "node_j": 68,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 158,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 68,
+      "node_j": 69,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 159,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 70,
+      "node_j": 71,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 160,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 71,
+      "node_j": 72,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 161,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 73,
+      "node_j": 74,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 162,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 74,
+      "node_j": 75,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 163,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 76,
+      "node_j": 77,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 164,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 77,
+      "node_j": 78,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 165,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 79,
+      "node_j": 80,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 166,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 80,
+      "node_j": 81,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 167,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 82,
+      "node_j": 83,
+      "group_id": "s03_04__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 168,
+      "member_type": "beam_x",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 83,
+      "node_j": 84,
+      "group_id": "s03_04__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 169,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 85,
+      "node_j": 86,
+      "group_id": "s03_04__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 170,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 86,
+      "node_j": 87,
+      "group_id": "s03_04__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 171,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 88,
+      "node_j": 89,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 172,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 89,
+      "node_j": 90,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 173,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 91,
+      "node_j": 92,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 174,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 92,
+      "node_j": 93,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 175,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 94,
+      "node_j": 95,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 176,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 95,
+      "node_j": 96,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 177,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 97,
+      "node_j": 98,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 178,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 98,
+      "node_j": 99,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 179,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 100,
+      "node_j": 101,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 180,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 101,
+      "node_j": 102,
+      "group_id": "s03_04__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 181,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 103,
+      "node_j": 104,
+      "group_id": "s03_04__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 182,
+      "member_type": "beam_x",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 104,
+      "node_j": 105,
+      "group_id": "s03_04__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 183,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 106,
+      "node_j": 107,
+      "group_id": "s05_06__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 184,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 107,
+      "node_j": 108,
+      "group_id": "s05_06__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 185,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 109,
+      "node_j": 110,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 186,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 110,
+      "node_j": 111,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 187,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 112,
+      "node_j": 113,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 188,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 113,
+      "node_j": 114,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 189,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 115,
+      "node_j": 116,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 190,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 116,
+      "node_j": 117,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 191,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 118,
+      "node_j": 119,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 192,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 119,
+      "node_j": 120,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 193,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 121,
+      "node_j": 122,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 194,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 122,
+      "node_j": 123,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 195,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 124,
+      "node_j": 125,
+      "group_id": "s05_06__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 196,
+      "member_type": "beam_x",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 125,
+      "node_j": 126,
+      "group_id": "s05_06__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 197,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 127,
+      "node_j": 128,
+      "group_id": "s05_06__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 198,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 128,
+      "node_j": 129,
+      "group_id": "s05_06__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 199,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 130,
+      "node_j": 131,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 200,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 131,
+      "node_j": 132,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 201,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 133,
+      "node_j": 134,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 202,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 134,
+      "node_j": 135,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 203,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 136,
+      "node_j": 137,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 204,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 137,
+      "node_j": 138,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 205,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 139,
+      "node_j": 140,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 206,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 140,
+      "node_j": 141,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 207,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 142,
+      "node_j": 143,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 208,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 143,
+      "node_j": 144,
+      "group_id": "s05_06__beam_x__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 209,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 6,
+      "node_i": 145,
+      "node_j": 146,
+      "group_id": "s05_06__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 210,
+      "member_type": "beam_x",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 6,
+      "node_i": 146,
+      "node_j": 147,
+      "group_id": "s05_06__beam_x__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 211,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 22,
+      "node_j": 25,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 212,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 23,
+      "node_j": 26,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 213,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 24,
+      "node_j": 27,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 214,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 25,
+      "node_j": 28,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 215,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 26,
+      "node_j": 29,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 216,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 27,
+      "node_j": 30,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 217,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 28,
+      "node_j": 31,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 218,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 29,
+      "node_j": 32,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 219,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 30,
+      "node_j": 33,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 220,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 31,
+      "node_j": 34,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 221,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 32,
+      "node_j": 35,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 222,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 33,
+      "node_j": 36,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 223,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 34,
+      "node_j": 37,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 224,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 35,
+      "node_j": 38,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 225,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 36,
+      "node_j": 39,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 226,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 37,
+      "node_j": 40,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 227,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 38,
+      "node_j": 41,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 228,
+      "member_type": "beam_y",
+      "story_or_floor": 1,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 39,
+      "node_j": 42,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 229,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 43,
+      "node_j": 46,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 230,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 44,
+      "node_j": 47,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 231,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 45,
+      "node_j": 48,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 232,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 46,
+      "node_j": 49,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 233,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 47,
+      "node_j": 50,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 234,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 48,
+      "node_j": 51,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 235,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 49,
+      "node_j": 52,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 236,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 50,
+      "node_j": 53,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 237,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 51,
+      "node_j": 54,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 238,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 52,
+      "node_j": 55,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 239,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 53,
+      "node_j": 56,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 240,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 54,
+      "node_j": 57,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 241,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 55,
+      "node_j": 58,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 242,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 56,
+      "node_j": 59,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 243,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 57,
+      "node_j": 60,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 244,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 58,
+      "node_j": 61,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 245,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 59,
+      "node_j": 62,
+      "group_id": "s01_02__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 246,
+      "member_type": "beam_y",
+      "story_or_floor": 2,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 60,
+      "node_j": 63,
+      "group_id": "s01_02__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 247,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 64,
+      "node_j": 67,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 248,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 65,
+      "node_j": 68,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 249,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 66,
+      "node_j": 69,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 250,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 67,
+      "node_j": 70,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 251,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 68,
+      "node_j": 71,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 252,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 69,
+      "node_j": 72,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 253,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 70,
+      "node_j": 73,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 254,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 71,
+      "node_j": 74,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 255,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 72,
+      "node_j": 75,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 256,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 73,
+      "node_j": 76,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 257,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 74,
+      "node_j": 77,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 258,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 75,
+      "node_j": 78,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 259,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 76,
+      "node_j": 79,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 260,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 77,
+      "node_j": 80,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 261,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 78,
+      "node_j": 81,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 262,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 79,
+      "node_j": 82,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 263,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 80,
+      "node_j": 83,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 264,
+      "member_type": "beam_y",
+      "story_or_floor": 3,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 81,
+      "node_j": 84,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 265,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 85,
+      "node_j": 88,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 266,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 86,
+      "node_j": 89,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 267,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 87,
+      "node_j": 90,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 268,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 88,
+      "node_j": 91,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 269,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 89,
+      "node_j": 92,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 270,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 90,
+      "node_j": 93,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 271,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 91,
+      "node_j": 94,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 272,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 92,
+      "node_j": 95,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 273,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 93,
+      "node_j": 96,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 274,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 94,
+      "node_j": 97,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 275,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 95,
+      "node_j": 98,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 276,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 96,
+      "node_j": 99,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 277,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 97,
+      "node_j": 100,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 278,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 98,
+      "node_j": 101,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 279,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 99,
+      "node_j": 102,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 280,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 100,
+      "node_j": 103,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 281,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 101,
+      "node_j": 104,
+      "group_id": "s03_04__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 282,
+      "member_type": "beam_y",
+      "story_or_floor": 4,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 102,
+      "node_j": 105,
+      "group_id": "s03_04__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 283,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 106,
+      "node_j": 109,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 284,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 107,
+      "node_j": 110,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 285,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 108,
+      "node_j": 111,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 286,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 109,
+      "node_j": 112,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 287,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 110,
+      "node_j": 113,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 288,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 111,
+      "node_j": 114,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 289,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 112,
+      "node_j": 115,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 290,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 113,
+      "node_j": 116,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 291,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 114,
+      "node_j": 117,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 292,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 115,
+      "node_j": 118,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 293,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 116,
+      "node_j": 119,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 294,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 117,
+      "node_j": 120,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 295,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 118,
+      "node_j": 121,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 296,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 119,
+      "node_j": 122,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 297,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 120,
+      "node_j": 123,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 298,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 121,
+      "node_j": 124,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 299,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 122,
+      "node_j": 125,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 300,
+      "member_type": "beam_y",
+      "story_or_floor": 5,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 123,
+      "node_j": 126,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 301,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 0,
+      "node_i": 127,
+      "node_j": 130,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 302,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 0,
+      "node_i": 128,
+      "node_j": 131,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 303,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 0,
+      "node_i": 129,
+      "node_j": 132,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 304,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 1,
+      "node_i": 130,
+      "node_j": 133,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 305,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 1,
+      "node_i": 131,
+      "node_j": 134,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 306,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 1,
+      "node_i": 132,
+      "node_j": 135,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 307,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 2,
+      "node_i": 133,
+      "node_j": 136,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 308,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 2,
+      "node_i": 134,
+      "node_j": 137,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 309,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 2,
+      "node_i": 135,
+      "node_j": 138,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 310,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 3,
+      "node_i": 136,
+      "node_j": 139,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 311,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 3,
+      "node_i": 137,
+      "node_j": 140,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 312,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 3,
+      "node_i": 138,
+      "node_j": 141,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 313,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 4,
+      "node_i": 139,
+      "node_j": 142,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 314,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 4,
+      "node_i": 140,
+      "node_j": 143,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 315,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 4,
+      "node_i": 141,
+      "node_j": 144,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 316,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 0,
+      "grid_j": 5,
+      "node_i": 142,
+      "node_j": 145,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    },
+    {
+      "member_tag": 317,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 1,
+      "grid_j": 5,
+      "node_i": 143,
+      "node_j": 146,
+      "group_id": "s05_06__beam_y__interior",
+      "location_class": "interior"
+    },
+    {
+      "member_tag": 318,
+      "member_type": "beam_y",
+      "story_or_floor": 6,
+      "grid_i": 2,
+      "grid_j": 5,
+      "node_i": 144,
+      "node_j": 147,
+      "group_id": "s05_06__beam_y__edge",
+      "location_class": "edge"
+    }
+  ],
+  "joint_or_base_incidence": {
+    "1": [
+      {
+        "member_tag": 1,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      }
+    ],
+    "2": [
+      {
+        "member_tag": 2,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__y_boundary_edge"
+      }
+    ],
+    "3": [
+      {
+        "member_tag": 3,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      }
+    ],
+    "4": [
+      {
+        "member_tag": 4,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "5": [
+      {
+        "member_tag": 5,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      }
+    ],
+    "6": [
+      {
+        "member_tag": 6,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "7": [
+      {
+        "member_tag": 7,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "8": [
+      {
+        "member_tag": 8,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      }
+    ],
+    "9": [
+      {
+        "member_tag": 9,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "10": [
+      {
+        "member_tag": 10,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "11": [
+      {
+        "member_tag": 11,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      }
+    ],
+    "12": [
+      {
+        "member_tag": 12,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "13": [
+      {
+        "member_tag": 13,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "14": [
+      {
+        "member_tag": 14,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      }
+    ],
+    "15": [
+      {
+        "member_tag": 15,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "16": [
+      {
+        "member_tag": 16,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "17": [
+      {
+        "member_tag": 17,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      }
+    ],
+    "18": [
+      {
+        "member_tag": 18,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      }
+    ],
+    "19": [
+      {
+        "member_tag": 19,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      }
+    ],
+    "20": [
+      {
+        "member_tag": 20,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__y_boundary_edge"
+      }
+    ],
+    "21": [
+      {
+        "member_tag": 21,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      }
+    ],
+    "22": [
+      {
+        "member_tag": 1,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 22,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 127,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 211,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "23": [
+      {
+        "member_tag": 2,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 23,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 127,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 128,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 212,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "24": [
+      {
+        "member_tag": 3,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 24,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 128,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 213,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "25": [
+      {
+        "member_tag": 4,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 25,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 129,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 211,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 214,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "26": [
+      {
+        "member_tag": 5,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 26,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 129,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 130,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 212,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 215,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "27": [
+      {
+        "member_tag": 6,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 27,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 130,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 213,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 216,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "28": [
+      {
+        "member_tag": 7,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 28,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 131,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 214,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 217,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "29": [
+      {
+        "member_tag": 8,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 29,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 131,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 132,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 215,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 218,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "30": [
+      {
+        "member_tag": 9,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 30,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 132,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 216,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 219,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "31": [
+      {
+        "member_tag": 10,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 31,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 133,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 217,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 220,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "32": [
+      {
+        "member_tag": 11,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 32,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 133,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 134,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 218,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 221,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "33": [
+      {
+        "member_tag": 12,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 33,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 134,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 219,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 222,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "34": [
+      {
+        "member_tag": 13,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 34,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 135,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 220,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 223,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "35": [
+      {
+        "member_tag": 14,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 35,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 135,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 136,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 221,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 224,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "36": [
+      {
+        "member_tag": 15,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 36,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 136,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 222,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 225,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "37": [
+      {
+        "member_tag": 16,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 37,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 137,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 223,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 226,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "38": [
+      {
+        "member_tag": 17,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 38,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 137,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 138,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 224,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 227,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "39": [
+      {
+        "member_tag": 18,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 39,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 138,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 225,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 228,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "40": [
+      {
+        "member_tag": 19,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 40,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 139,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 226,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "41": [
+      {
+        "member_tag": 20,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 41,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 139,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 140,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 227,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "42": [
+      {
+        "member_tag": 21,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 42,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 140,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 228,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "43": [
+      {
+        "member_tag": 22,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 43,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 141,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 229,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "44": [
+      {
+        "member_tag": 23,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 44,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 141,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 142,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 230,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "45": [
+      {
+        "member_tag": 24,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 45,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 142,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 231,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "46": [
+      {
+        "member_tag": 25,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 46,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 143,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 229,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 232,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "47": [
+      {
+        "member_tag": 26,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 47,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 143,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 144,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 230,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 233,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "48": [
+      {
+        "member_tag": 27,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 48,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 144,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 231,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 234,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "49": [
+      {
+        "member_tag": 28,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 49,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 145,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 232,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 235,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "50": [
+      {
+        "member_tag": 29,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 50,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 145,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 146,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 233,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 236,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "51": [
+      {
+        "member_tag": 30,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 51,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 146,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 234,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 237,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "52": [
+      {
+        "member_tag": 31,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 52,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 147,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 235,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 238,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "53": [
+      {
+        "member_tag": 32,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 53,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 147,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 148,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 236,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 239,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "54": [
+      {
+        "member_tag": 33,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 54,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 148,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 237,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 240,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "55": [
+      {
+        "member_tag": 34,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 55,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 149,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 238,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 241,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "56": [
+      {
+        "member_tag": 35,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 56,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 149,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 150,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 239,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 242,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "57": [
+      {
+        "member_tag": 36,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 57,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 150,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 240,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 243,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "58": [
+      {
+        "member_tag": 37,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 58,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 151,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 241,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 244,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "59": [
+      {
+        "member_tag": 38,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__interior"
+      },
+      {
+        "member_tag": 59,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 151,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 152,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 242,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      },
+      {
+        "member_tag": 245,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "60": [
+      {
+        "member_tag": 39,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 60,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 152,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__interior"
+      },
+      {
+        "member_tag": 243,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      },
+      {
+        "member_tag": 246,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "61": [
+      {
+        "member_tag": 40,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 61,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 153,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 244,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "62": [
+      {
+        "member_tag": 41,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 62,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 153,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 154,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 245,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__interior"
+      }
+    ],
+    "63": [
+      {
+        "member_tag": 42,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s01_02__column__corner"
+      },
+      {
+        "member_tag": 63,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 154,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s01_02__beam_x__edge"
+      },
+      {
+        "member_tag": 246,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s01_02__beam_y__edge"
+      }
+    ],
+    "64": [
+      {
+        "member_tag": 43,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 64,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 155,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 247,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "65": [
+      {
+        "member_tag": 44,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 65,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 155,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 156,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 248,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "66": [
+      {
+        "member_tag": 45,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 66,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 156,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 249,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "67": [
+      {
+        "member_tag": 46,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 67,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 157,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 247,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 250,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "68": [
+      {
+        "member_tag": 47,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 68,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 157,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 158,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 248,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 251,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "69": [
+      {
+        "member_tag": 48,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 69,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 158,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 249,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 252,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "70": [
+      {
+        "member_tag": 49,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 70,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 159,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 250,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 253,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "71": [
+      {
+        "member_tag": 50,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 71,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 159,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 160,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 251,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 254,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "72": [
+      {
+        "member_tag": 51,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 72,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 160,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 252,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 255,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "73": [
+      {
+        "member_tag": 52,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 73,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 161,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 253,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 256,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "74": [
+      {
+        "member_tag": 53,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 74,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 161,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 162,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 254,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 257,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "75": [
+      {
+        "member_tag": 54,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 75,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 162,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 255,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 258,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "76": [
+      {
+        "member_tag": 55,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 76,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 163,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 256,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 259,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "77": [
+      {
+        "member_tag": 56,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 77,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 163,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 164,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 257,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 260,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "78": [
+      {
+        "member_tag": 57,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 78,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 164,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 258,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 261,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "79": [
+      {
+        "member_tag": 58,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 79,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 165,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 259,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 262,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "80": [
+      {
+        "member_tag": 59,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 80,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 165,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 166,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 260,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 263,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "81": [
+      {
+        "member_tag": 60,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 81,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 166,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 261,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 264,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "82": [
+      {
+        "member_tag": 61,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 82,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 167,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 262,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "83": [
+      {
+        "member_tag": 62,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 83,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 167,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 168,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 263,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "84": [
+      {
+        "member_tag": 63,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 84,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 168,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 264,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "85": [
+      {
+        "member_tag": 64,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 85,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 169,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 265,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "86": [
+      {
+        "member_tag": 65,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 86,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 169,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 170,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 266,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "87": [
+      {
+        "member_tag": 66,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 87,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 170,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 267,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "88": [
+      {
+        "member_tag": 67,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 88,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 171,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 265,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 268,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "89": [
+      {
+        "member_tag": 68,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 89,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 171,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 172,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 266,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 269,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "90": [
+      {
+        "member_tag": 69,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 90,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 172,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 267,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 270,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "91": [
+      {
+        "member_tag": 70,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 91,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 173,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 268,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 271,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "92": [
+      {
+        "member_tag": 71,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 92,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 173,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 174,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 269,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 272,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "93": [
+      {
+        "member_tag": 72,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 93,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 174,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 270,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 273,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "94": [
+      {
+        "member_tag": 73,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 94,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 175,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 271,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 274,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "95": [
+      {
+        "member_tag": 74,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 95,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 175,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 176,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 272,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 275,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "96": [
+      {
+        "member_tag": 75,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 96,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 176,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 273,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 276,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "97": [
+      {
+        "member_tag": 76,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 97,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 177,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 274,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 277,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "98": [
+      {
+        "member_tag": 77,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 98,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 177,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 178,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 275,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 278,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "99": [
+      {
+        "member_tag": 78,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 99,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 178,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 276,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 279,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "100": [
+      {
+        "member_tag": 79,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 100,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 179,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 277,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 280,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "101": [
+      {
+        "member_tag": 80,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__interior"
+      },
+      {
+        "member_tag": 101,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 179,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 180,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 278,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      },
+      {
+        "member_tag": 281,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "102": [
+      {
+        "member_tag": 81,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 102,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 180,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__interior"
+      },
+      {
+        "member_tag": 279,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      },
+      {
+        "member_tag": 282,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "103": [
+      {
+        "member_tag": 82,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 103,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 181,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 280,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "104": [
+      {
+        "member_tag": 83,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 104,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 181,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 182,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 281,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__interior"
+      }
+    ],
+    "105": [
+      {
+        "member_tag": 84,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s03_04__column__corner"
+      },
+      {
+        "member_tag": 105,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 182,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s03_04__beam_x__edge"
+      },
+      {
+        "member_tag": 282,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s03_04__beam_y__edge"
+      }
+    ],
+    "106": [
+      {
+        "member_tag": 85,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 106,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 183,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 283,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "107": [
+      {
+        "member_tag": 86,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 107,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 183,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 184,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 284,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "108": [
+      {
+        "member_tag": 87,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 108,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 184,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 285,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "109": [
+      {
+        "member_tag": 88,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 109,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 185,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 283,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 286,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "110": [
+      {
+        "member_tag": 89,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 110,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 185,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 186,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 284,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 287,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "111": [
+      {
+        "member_tag": 90,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 111,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 186,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 285,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 288,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "112": [
+      {
+        "member_tag": 91,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 112,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 187,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 286,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 289,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "113": [
+      {
+        "member_tag": 92,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 113,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 187,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 188,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 287,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 290,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "114": [
+      {
+        "member_tag": 93,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 114,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 188,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 288,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 291,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "115": [
+      {
+        "member_tag": 94,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 115,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 189,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 289,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 292,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "116": [
+      {
+        "member_tag": 95,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 116,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 189,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 190,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 290,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 293,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "117": [
+      {
+        "member_tag": 96,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 117,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 190,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 291,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 294,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "118": [
+      {
+        "member_tag": 97,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 118,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 191,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 292,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 295,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "119": [
+      {
+        "member_tag": 98,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 119,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 191,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 192,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 293,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 296,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "120": [
+      {
+        "member_tag": 99,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 120,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 192,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 294,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 297,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "121": [
+      {
+        "member_tag": 100,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 121,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 193,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 295,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 298,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "122": [
+      {
+        "member_tag": 101,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 122,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 193,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 194,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 296,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 299,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "123": [
+      {
+        "member_tag": 102,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 123,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 194,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 297,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 300,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "124": [
+      {
+        "member_tag": 103,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 124,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 195,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 298,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "125": [
+      {
+        "member_tag": 104,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 125,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 195,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 196,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 299,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "126": [
+      {
+        "member_tag": 105,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 126,
+        "end": "i",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 196,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 300,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "127": [
+      {
+        "member_tag": 106,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 197,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 301,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "128": [
+      {
+        "member_tag": 107,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 197,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 198,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 302,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "129": [
+      {
+        "member_tag": 108,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 198,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 303,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "130": [
+      {
+        "member_tag": 109,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 199,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 301,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 304,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "131": [
+      {
+        "member_tag": 110,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 199,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 200,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 302,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 305,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "132": [
+      {
+        "member_tag": 111,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 200,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 303,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 306,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "133": [
+      {
+        "member_tag": 112,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 201,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 304,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 307,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "134": [
+      {
+        "member_tag": 113,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 201,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 202,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 305,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 308,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "135": [
+      {
+        "member_tag": 114,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 202,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 306,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 309,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "136": [
+      {
+        "member_tag": 115,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 203,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 307,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 310,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "137": [
+      {
+        "member_tag": 116,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 203,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 204,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 308,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 311,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "138": [
+      {
+        "member_tag": 117,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 204,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 309,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 312,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "139": [
+      {
+        "member_tag": 118,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 205,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 310,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 313,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "140": [
+      {
+        "member_tag": 119,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 205,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 206,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 311,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 314,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "141": [
+      {
+        "member_tag": 120,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 206,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 312,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 315,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "142": [
+      {
+        "member_tag": 121,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 207,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 313,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 316,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "143": [
+      {
+        "member_tag": 122,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__interior"
+      },
+      {
+        "member_tag": 207,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 208,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 314,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      },
+      {
+        "member_tag": 317,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "144": [
+      {
+        "member_tag": 123,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__x_boundary_edge"
+      },
+      {
+        "member_tag": 208,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__interior"
+      },
+      {
+        "member_tag": 315,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      },
+      {
+        "member_tag": 318,
+        "end": "i",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "145": [
+      {
+        "member_tag": 124,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 209,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 316,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ],
+    "146": [
+      {
+        "member_tag": 125,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__y_boundary_edge"
+      },
+      {
+        "member_tag": 209,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 210,
+        "end": "i",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 317,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__interior"
+      }
+    ],
+    "147": [
+      {
+        "member_tag": 126,
+        "end": "j",
+        "member_type": "column",
+        "group_id": "s05_06__column__corner"
+      },
+      {
+        "member_tag": 210,
+        "end": "j",
+        "member_type": "beam_x",
+        "group_id": "s05_06__beam_x__edge"
+      },
+      {
+        "member_tag": 318,
+        "end": "j",
+        "member_type": "beam_y",
+        "group_id": "s05_06__beam_y__edge"
+      }
+    ]
+  },
+  "production_release_ready": false
+}

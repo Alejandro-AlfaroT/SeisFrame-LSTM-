@@ -300,7 +300,8 @@ def write_evidence_summary(r, out_dir, elapsed=None):
     line(f"- Live-load arrangements (ACI 6.4.2): {len(dem['live_load_patterns'])} — " + ", ".join(p['id'] for p in dem['live_load_patterns']) + "; combinations in the strength envelope: " + str(len(r['design_actions']['combinations'])) + ".")
     line(f"- Seismic weight per floor {loads['total_floor_seismic_weight_kip']:.1f} kip = slab {loads['slab_self_weight_ksf']*1000:.1f} psf + SDL {loads['floor_superimposed_dead_load_ksf']*1000:.0f} psf (incl. ≥10 psf partitions) over {loads['floor_area_sqft']:.0f} ft² + members {loads['member_self_weight_per_floor_kip']:.1f} kip; live fraction {loads['seismic_live_load_fraction']:g} (office).")
     line(f"- Drift basis: 0.35/0.70 Ig, ρ = 1 forces at the capped period, Cd = 5.5, P-Δ included, full D+L gravity; SDC used {r['drift_screen']['assumptions']['seismic_design_category']}.")
-    line("- To declare: site class (default C — no 11.4.8 site-specific requirement), risk category II, office occupancy, partition allowance within the 50 psf SDL, roof live 20 psf enveloped by the 50 psf floor live applied to the roof, snow 0, wind not governing, rain/ponding excluded.")
+    line(f"- To declare: site class {sp.ASCE_SITE_CLASS} (ASCE 7-22 Table 20.2-1; a site response analysis is required for Site Class F only, 11.4.7), risk category {sp.ASCE_RISK_CATEGORY} "
+         f"(Ie = {sp.ASCE_IE:g}; the category fixes Ie and the drift row, not the occupancy), office occupancy, partition allowance within the 50 psf SDL, roof live 20 psf enveloped by the 50 psf floor live applied to the roof, snow 0, wind not governing, rain/ponding excluded.")
     line()
 
     # ---------------------------------------------------------------- 6. strengths and capacity design

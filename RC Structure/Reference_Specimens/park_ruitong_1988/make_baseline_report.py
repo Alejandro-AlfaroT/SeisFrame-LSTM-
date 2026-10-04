@@ -1,5 +1,5 @@
 """Write UNIT1_BASELINE_REPORT.md: the baseline reproduction against the digitized observations, the
-numerical checks and the discrepancy list (Codex next-calibration package, first delivery).
+numerical checks and the discrepancy list (next-calibration package, first delivery).
 
 usage: python make_baseline_report.py <output root with example_protocol/ and paper_protocol/>
 """
@@ -22,7 +22,7 @@ lines = []
 w = lines.append
 w("# Park and Ruitong (1988) Unit 1: baseline reproduction and discrepancy report")
 w("")
-w("2026-09-27. First delivery of the reference reproduction (Codex next-calibration package): the OpenSees PR1 example ported to OpenSeesPy "
+w("2026-09-27. First delivery of the reference reproduction (next-calibration package): the OpenSees PR1 example ported to OpenSeesPy "
   "(`pr1_unit1.py`, inputs in `UNIT1_INPUT_MANIFEST.md`) run through the example's protocol and the paper's protocol, compared with the observations "
   "digitized from Fig. 16(a) (`unit1_observed_digitized.json`). No parameter was fitted. A running script and agreement with the PEER model are not "
   "experimental validation; the comparison below is the evidence.")
@@ -174,7 +174,7 @@ w("- Retention: the second cycle at each amplitude carries a few percent less th
   "calibrated degradation.")
 w("")
 w("These are the quantities a fit would have to move; the fit metrics and tolerances are to be declared from the measurement quality above before any "
-  "parameter is tuned (Codex package item 4). Unit 1's small observed degradation cannot identify deterioration capacities on its own.")
+  "parameter is tuned (package item 4). Unit 1's small observed degradation cannot identify deterioration capacities on its own.")
 w("")
 w("## 8. Files")
 w("")

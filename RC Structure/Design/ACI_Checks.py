@@ -176,6 +176,16 @@ def build_pm_diagram(cfg: DesignConfig, n_pts: int = 120, axis: str = "y") -> Li
     else:
         raise ValueError("axis must be 'y' or 'z'")
 
+    return pm_diagram_for(b, h, fc, fy, Es, layers, n_pts)
+
+
+def pm_diagram_for(b, h, fc, fy, Es, layers, n_pts: int = 120) -> List[Tuple[float, float]]:
+    """The same phi-factored P-M sweep for an explicitly given section and layers.
+
+    ``b`` is the width of the compression face and ``h`` the depth through which the section bends;
+    ``layers`` = [(area, distance from the compression face)]. build_pm_diagram reads these from cfg and
+    Structure_Parameters; a grouped design passes each group's own section and cage (Design.Group_Checks).
+    """
     ecu = 0.003
     b1  = _beta1(fc)
     Ag  = b * h
@@ -240,6 +250,37 @@ def build_pm_diagrams(cfg: DesignConfig, n_pts: int = 120) -> Dict[str, List[Tup
     return {"y": build_pm_diagram(cfg, n_pts, "y"), "z": build_pm_diagram(cfg, n_pts, "z")}
 
 
+# The value a strength ratio takes when the demand lies where the section has no strength of that kind at
+# all (a moment at the pure-tension end of the surface, a tension load on a surface without a tension
+# branch). It is a named domain failure, not a measured ratio; callers read the failure name beside it.
+DOMAIN_FAILURE_DCR = 999.0
+
+
+def axial_limits(diagram_y, diagram_z=None):
+    """(phi Pn,max in compression, phi Pn in pure tension) of the surface: the two ends of its axial domain.
+
+    With two diagrams (bending about y and about z) the domain is their intersection. Compression is
+    positive, so the tension end is zero or negative.
+    """
+    diagram_z = diagram_y if diagram_z is None else diagram_z
+    compression = min(max(p for p, _m in diagram_y), max(p for p, _m in diagram_z))
+    tension = max(min(p for p, _m in diagram_y), min(p for p, _m in diagram_z))
+    return compression, tension
+
+
+def axial_demand_ratio(Pu: float, compression: float, tension: float) -> float:
+    """Non-negative ratio of an axial load to the axial capacity of its own sign.
+
+    A compression load is divided by phi Pn,max, a tension load by the pure-tension end of the surface;
+    a ratio above 1 is an axial load outside the surface. A tension load on a surface with no tension
+    branch has no capacity to be compared with and returns DOMAIN_FAILURE_DCR. Dividing a tension load by
+    the compression cap would give a negative "ratio" that passes every check.
+    """
+    if Pu >= 0.0:
+        return Pu / (compression if compression > 1e-6 else 1e-9)
+    return Pu / tension if tension < -1e-6 else DOMAIN_FAILURE_DCR
+
+
 def _interpolate_pm_capacity(Pu: float, diagram: List[Tuple[float, float]]) -> Optional[float]:
     """Return the interpolated φMn capacity at the given Pu.  None if out of range."""
     pts = sorted(diagram, key=lambda p: -p[0])
@@ -301,12 +342,21 @@ def check_column_pm(
 
     # The axial strength cap (22.4.2.1) applies whatever the moment: a column
     # above phi Pn,max fails on axial load, and the moment ratio never hides it.
-    phi_Pmax = min(max(p for p, _m in diagram_y), max(p for p, _m in diagram_z))
+    # The same holds at the other end: a tension load beyond the pure-tension
+    # end of the surface is an axial failure whatever the moment. Both ends are
+    # checked before the no-moment shortcut, and a load is always compared
+    # with the capacity of its own sign (axial_demand_ratio).
+    phi_Pmax, phi_Pt = axial_limits(diagram_y, diagram_z)
     axial_cap = phi_Pmax if phi_Pmax > 1e-6 else 1e-9
-    axial_dcr = Pu / axial_cap
+    axial_dcr = axial_demand_ratio(Pu, phi_Pmax, phi_Pt)
+    if Pu < phi_Pt:
+        return LimitStateResult(
+            name="PM", demand=Pu, capacity=phi_Pt,
+            dcr=axial_dcr, ok=False, min_controlled=min_controlled,
+        )
     if (abs(Muy) < 1e-4 and abs(Muz) < 1e-4) or Pu > axial_cap:
         return LimitStateResult(
-            name="PM", demand=Pu, capacity=axial_cap,
+            name="PM", demand=Pu, capacity=axial_cap if Pu >= 0.0 else phi_Pt,
             dcr=axial_dcr, ok=axial_dcr <= 1.0, min_controlled=min_controlled,
         )
 
@@ -315,7 +365,7 @@ def check_column_pm(
     if phi_y is None or phi_y < 1e-6 or phi_z is None or phi_z < 1e-6:
         return LimitStateResult(
             name="PM", demand=math.hypot(Muy, Muz), capacity=0.0,
-            dcr=999.0, ok=False, min_controlled=min_controlled,
+            dcr=DOMAIN_FAILURE_DCR, ok=False, min_controlled=min_controlled,
         )
 
     contour = ((abs(Muy) / phi_y) ** alpha + (abs(Muz) / phi_z) ** alpha) ** (1.0 / alpha)
@@ -461,7 +511,7 @@ def check_slenderness(
     The flag min_controlled is reused here as "scaffold_not_implemented".
     """
     # ACI §6.2.5 — for non-sway frames, slenderness negligible if klu/r ≤ 22
-    # r ≈ 0.3h for rectangular sections (ACI §10.10.1.2)
+    # r ≈ 0.3h for rectangular sections (ACI 318-19 6.2.5.2(b))
     r = 0.3 * min(b_in, h_in)
     klu_over_r = 1.0 * L_in / r   # k=1.0 conservative for non-sway
 
@@ -513,6 +563,71 @@ def check_development_length(
         ok=feasible,
         min_controlled=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# ACI 318-19 18.7.4.3 — development of the column bars over the clear height
+# ---------------------------------------------------------------------------
+# Special moment frame columns: 1.25 ld <= lu / 2 over the clear height, with ld from Eq. (25.4.2.4a) and the
+# actual bar position (design-basis rule 2026-10-02, from the code-book review). Ktr is taken as zero unless a
+# declared method names the crossing legs and the splitting plane; the confinement ratio is never assumed at
+# its cap. ACI 318-25 keeps the length limit and adds an alternative (Ktr >= 1.2 db) that is not admitted under
+# the 318-19 basis. Mechanical splices do not remove the requirement.
+BOND_RULE_CLAUSE = "ACI 318-19 18.7.4.3 with Eq. (25.4.2.4a), Ktr = 0"
+BOND_LENGTH_FACTOR = 1.25                  # 18.7.4.3: 1.25 ld <= lu / 2
+CONFINEMENT_RATIO_CAP = 2.5                # 25.4.2.4: (cb + Ktr) / db not more than 2.5
+SQRT_FC_CAP_PSI = 100.0                    # 25.4.1.4
+DEVELOPMENT_LENGTH_MIN_IN = 12.0           # 25.4.2.1(b)
+GRADE_FACTOR_PSI_G = {40.0: 1.0, 60.0: 1.0, 80.0: 1.15, 100.0: 1.3}   # Table 25.4.2.5, psi_g
+
+
+def column_bar_cb_in(b_in, h_in, clear_cover_in, hoop_bar_size, bar_size, n_top, n_side_per_face):
+    """cb of a column cage (ACI 318-19 2.2): the lesser of the bar centroid's distance to the nearest concrete
+    surface and half the least center-to-center spacing of the bars, for the perimeter cage convention (the
+    corners in the top and bottom rows of ``n_top`` bars, ``n_side_per_face`` bars between them on each side)."""
+    db = sp.rebar_diameter(bar_size)
+    edge = clear_cover_in + sp.rebar_diameter(hoop_bar_size) + 0.5 * db
+    pitch_b = (b_in - 2.0 * edge) / (n_top - 1) if n_top > 1 else float("inf")
+    pitch_h = (h_in - 2.0 * edge) / (n_side_per_face + 1)
+    spacing = min(pitch_b, pitch_h)
+    return {"cb_in": min(edge, 0.5 * spacing), "edge_distance_in": edge, "min_center_spacing_in": spacing,
+            "governed_by": "edge distance" if edge <= 0.5 * spacing else "half the bar spacing"}
+
+
+def column_bar_bond_18_7_4_3(bar_size, fc_ksi, fy_ksi, cb_in, clear_height_in, ktr_in=0.0, *,
+                             normalweight=True, epoxy_coated=False, fresh_concrete_below_in=0.0):
+    """ACI 318-19 18.7.4.3: 1.25 ld <= lu / 2 for the column bars, ld by Eq. (25.4.2.4a).
+
+    Every factor is returned beside the result: lambda (25.4.2.5), psi_t (horizontal bars with more than 12 in
+    of fresh concrete below; vertical column bars take 1.0), psi_e (coating), psi_s (bar size), psi_g (grade,
+    refused when undeclared), sqrt(f'c) capped at 100 psi (25.4.1.4), the confinement ratio (cb + Ktr) / db
+    capped at 2.5 (25.4.2.4) and ld not less than 12 in (25.4.2.1). ``ktr_in`` defaults to zero.
+    """
+    fy = float(fy_ksi)
+    if fy not in GRADE_FACTOR_PSI_G:
+        raise ValueError(f"No psi_g (Table 25.4.2.5) is declared for fy = {fy_ksi} ksi.")
+    db = sp.rebar_diameter(bar_size)
+    psi_t = 1.3 if fresh_concrete_below_in > 12.0 else 1.0
+    psi_e = (1.5 if False else 1.2) if epoxy_coated else 1.0        # coated bars: 1.2 unless cover/spacing say 1.5 (not modelled)
+    psi_s = 0.8 if int(bar_size) <= 6 else 1.0
+    psi_g = GRADE_FACTOR_PSI_G[fy]
+    lam = 1.0 if normalweight else 0.75
+    root = min(math.sqrt(fc_ksi * 1000.0), SQRT_FC_CAP_PSI)
+    raw_ratio = (cb_in + ktr_in) / db
+    ratio = min(raw_ratio, CONFINEMENT_RATIO_CAP)
+    ld = (3.0 / 40.0) * (fy * 1000.0 / (lam * root)) * (min(psi_t * psi_e, 1.7) * psi_s * psi_g / ratio) * db
+    ld = max(ld, DEVELOPMENT_LENGTH_MIN_IN)
+    factored = BOND_LENGTH_FACTOR * ld
+    half = 0.5 * clear_height_in
+    return {"clause": BOND_RULE_CLAUSE, "bar_size": int(bar_size), "bar_diameter_in": db, "fy_ksi": fy, "fc_ksi": float(fc_ksi),
+            "sqrt_fc_psi": root, "sqrt_fc_capped": math.sqrt(fc_ksi * 1000.0) > SQRT_FC_CAP_PSI,
+            "lambda": lam, "psi_t": psi_t, "psi_e": psi_e, "psi_s": psi_s, "psi_g": psi_g,
+            "cb_in": cb_in, "ktr_in": ktr_in, "confinement_ratio": ratio, "confinement_ratio_uncapped": raw_ratio,
+            "confinement_ratio_capped": raw_ratio > CONFINEMENT_RATIO_CAP,
+            "ld_in": ld, "minimum_ld_applied": ld == DEVELOPMENT_LENGTH_MIN_IN,
+            "factored_ld_in": factored, "length_factor": BOND_LENGTH_FACTOR,
+            "clear_height_in": clear_height_in, "half_clear_height_in": half,
+            "dcr": factored / half if half > 0.0 else float("inf"), "passes": factored <= half + 1e-9}
 
 
 # ---------------------------------------------------------------------------

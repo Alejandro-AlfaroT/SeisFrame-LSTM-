@@ -259,8 +259,11 @@ def build(record, variant):
                                                               sp.FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF))
         sp.SEISMIC_LIVE_LOAD_FRACTION = float(floor.get("seismic_live_load_fraction",
                                                         sp.SEISMIC_LIVE_LOAD_FRACTION))
+    # A record made before the roof column extension was weighed has no such weight in its ELF.
+    sp.ROOF_COLUMN_EXTENSION = bool(floor.get("roof_column_extension_in"))
     elf = elf_story_forces(demand.get("model_period_sec"))
-    record_weight = float(floor.get("total_floor_seismic_weight_kip") or 0.0) * frame.nf
+    record_weight = (float(floor.get("total_floor_seismic_weight_kip") or 0.0) * frame.nf
+                     + float(floor.get("roof_column_extension_seismic_weight_kip") or 0.0))
     if record_weight and abs(elf["seismic_weight_kip"] - record_weight) > 1e-3 * record_weight:
         raise RuntimeError(
             f"Seismic weight mismatch: exporter {elf['seismic_weight_kip']:.2f} kip vs record "

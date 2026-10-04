@@ -23,8 +23,13 @@ It checks the supplied evidence, not the completeness of the structural model.
   a Table 18.8.4.3 coefficient or infer confinement from an interior label.
 
 Omitted groups and unknown evidence produce not_evaluated, not a pass.
-No automatic roof exemption is applied to SCWB. Any code exception needs a
-separate, documented assessment; one column at a roof is never doubled here.
+The exception of ACI 318-19 18.7.3.1 is applied per connection and per sway
+(user decision 2026-10-02): where the column is discontinuous above the
+connection and its factored axial compression is below Ag f'c / 10 in every
+supplied combination, 18.7.3.2 is not required there; the check records the
+axial load against the limit and keeps the strength sums it did not require.
+Without that evidence on the sway state the rule applies as before; one
+column at a roof is never doubled.
 
 Basis: ACI 318-19 18.6.5.1, 18.7.3.2, 18.8.2.3, 18.8.4 and 21.2.4.4.
 Publisher's 318-19 changes (joint depth and joint-shear phi=0.85):
@@ -45,6 +50,11 @@ from Design.SMRF_Common import make_check, not_evaluated
 
 
 SCWB_CLAUSE = "ACI 318-19 18.7.3.2"
+SCWB_EXCEPTION_CLAUSE = "ACI 318-19 18.7.3.1 (exception to 18.7.3.2)"
+# Columns satisfy 18.7.3.2 "except at connections where the column is discontinuous above the connection
+# and the column factored axial compressive force Pu under load combinations including E is less than
+# Ag f'c / 10" (18.7.3.1). False restores the rule at every connection.
+SCWB_DISCONTINUOUS_COLUMN_EXCEPTION = True
 BEAM_SHEAR_CLAUSE = "ACI 318-19 18.6.5.1"
 JOINT_SHEAR_CLAUSE = "ACI 318-19 18.8.4; 21.2.4.4"
 SLAB_BASES = {"no_slab", "not_in_tension", "developed_effective_width", "terminated_undeveloped",
@@ -107,8 +117,19 @@ def scwb_check(state, *, location="", check_id="scwb"):
             beam_sum += _number(beam.get("mn_kip_in"), "beam mn_kip_in", minimum=0) + slab
         if beam_sum <= 0:
             raise ValueError("Positive total beam flexural strength is required.")
+        exception = _discontinuous_column_exception(state, columns)
     except ValueError as exc:
         return not_evaluated(check_id, SCWB_CLAUSE, str(exc), location)
+    if exception is not None:
+        return make_check(
+            check_id, SCWB_EXCEPTION_CLAUSE, exception["pu_max_kip"], exception["limit_kip"],
+            units="kip", location=location,
+            details={"sum_mnc_kip_in": column_sum, "sum_mnb_kip_in": beam_sum,
+                     "ratio_provided": column_sum / beam_sum, "ratio_required": None,
+                     "column_factored_axial_kip": axial_loads,
+                     "strength_basis": "nominal joint-face strengths; no phi (recorded, not required here)",
+                     "roof_exemption_applied": True, "exception": exception},
+        )
     return make_check(
         check_id, SCWB_CLAUSE, 1.2 * beam_sum, column_sum,
         units="kip-in", location=location,
@@ -118,6 +139,32 @@ def scwb_check(state, *, location="", check_id="scwb"):
                  "strength_basis": "nominal joint-face strengths; no phi",
                  "roof_exemption_applied": False},
     )
+
+
+def _discontinuous_column_exception(state, columns):
+    """The 18.7.3.1 exception at this connection, or None when 18.7.3.2 applies.
+
+    Needs the sway state's ``connection`` evidence (column discontinuous above, gross area, f'c) and the single
+    column's largest factored axial compression over every supplied combination (more combinations than the
+    clause names, so never less than its Pu). Strictly below Ag f'c / 10.
+    """
+    connection = state.get("connection")
+    if not SCWB_DISCONTINUOUS_COLUMN_EXCEPTION or not isinstance(connection, Mapping):
+        return None
+    if connection.get("column_discontinuous_above") is not True or len(columns) != 1:
+        return None
+    if columns[0].get("axial_max_kip") is None:
+        return None
+    area = _number(connection.get("column_gross_area_in2"), "column_gross_area_in2", positive=True)
+    fc = _number(connection.get("column_fc_ksi"), "column_fc_ksi", positive=True)
+    pu_max = _number(columns[0].get("axial_max_kip"), "axial_max_kip")
+    limit = area * fc / 10.0
+    if not pu_max < limit:
+        return None
+    return {"clause": "ACI 318-19 18.7.3.1", "pu_max_kip": pu_max, "limit_kip": limit,
+            "column_gross_area_in2": area, "column_fc_ksi": fc,
+            "basis": ("the column is discontinuous above the connection and its largest factored axial compression "
+                      "over every supplied combination is below Ag f'c / 10")}
 
 
 def beam_capacity_shear_envelope(data):

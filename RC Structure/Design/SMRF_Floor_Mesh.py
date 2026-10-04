@@ -1,6 +1,9 @@
 """Bounded rectangular floor grids with explicit coordinate provenance.
 
-Explicit offsets repeat within each bay. They are a numerical mesh request,
+Explicit offsets repeat within each bay, or are given bay by bay (one list per
+bay, all of one length) when the beams bounding the bays have different
+widths, so every bay keeps the same number of cells and the cell-index
+arithmetic of the floor models holds. They are a numerical mesh request,
 not a claim of convergence or engineering applicability. Uniform defaults
 retain their existing limit; the larger explicit-grid budget is opt-in.
 """
@@ -10,7 +13,7 @@ import hashlib
 import json
 import math
 
-MAX_EXPLICIT_SHELLS = 45000
+MAX_EXPLICIT_SHELLS = 130000
 
 
 def _offsets(values, length, name):
@@ -24,6 +27,24 @@ def _offsets(values, length, name):
     if any(b - a <= 1e-8 for a, b in zip(values, values[1:])):
         raise ValueError(f"{name} must be strictly increasing, with cells wider than 1e-8 in")
     return values
+
+
+def _bay_offsets(values, length, bays, name):
+    """(offsets of the first bay, per-bay offsets or None) from one list or one list per bay."""
+    if isinstance(values, (list, tuple)) and values and isinstance(values[0], (list, tuple)):
+        if len(values) != bays:
+            raise ValueError(f"{name} given bay by bay must have one list for each of the {bays} bays")
+        rows = [_offsets(row, length, name) for row in values]
+        if any(len(row) != len(rows[0]) for row in rows):
+            raise ValueError(f"{name} given bay by bay must use the same number of cells in every bay")
+        return rows[0], rows
+    return _offsets(values, length, name), None
+
+
+def span_offsets(grid, axis, span_index):
+    """Bay offsets of one span of a grid from ``floor_mesh`` (the same list for every span unless given bay by bay)."""
+    by_bay = grid.get(f"{axis}_offsets_by_bay_in")
+    return by_bay[span_index] if by_bay is not None else grid[f"{axis}_offsets_in"]
 
 
 def floor_mesh(nx, ny, lx, ly, mesh_per_bay, *, mesh_spec=None, uniform_shell_limit=8192):
@@ -42,21 +63,30 @@ def floor_mesh(nx, ny, lx, ly, mesh_per_bay, *, mesh_spec=None, uniform_shell_li
         budget = mesh_spec["max_shells"]
         if isinstance(budget, bool) or not isinstance(budget, int) or not 4 <= budget <= MAX_EXPLICIT_SHELLS:
             raise ValueError(f"Explicit mesh max_shells must be an integer from 4 to {MAX_EXPLICIT_SHELLS}")
-        ox = _offsets(mesh_spec["x_offsets_in"], lx, "x_offsets_in")
-        oy = _offsets(mesh_spec["y_offsets_in"], ly, "y_offsets_in")
+        ox, ox_by_bay = _bay_offsets(mesh_spec["x_offsets_in"], lx, nx, "x_offsets_in")
+        oy, oy_by_bay = _bay_offsets(mesh_spec["y_offsets_in"], ly, ny, "y_offsets_in")
         kind, solver = "explicit_rectangular", "UmfPack"
+    if mesh_spec is None:
+        ox_by_bay = oy_by_bay = None
     mx, my = len(ox) - 1, len(oy) - 1
     count = nx * ny * mx * my
     if count > budget:
         raise ValueError(f"Requested floor mesh has {count} shells, exceeding explicit budget {budget}")
-    xs = [i * lx + offset for i in range(nx) for offset in ox[:-1]] + [nx * lx]
-    ys = [j * ly + offset for j in range(ny) for offset in oy[:-1]] + [ny * ly]
+    xs = [i * lx + offset for i in range(nx) for offset in (ox if ox_by_bay is None else ox_by_bay[i])[:-1]] + [nx * lx]
+    ys = [j * ly + offset for j in range(ny) for offset in (oy if oy_by_bay is None else oy_by_bay[j])[:-1]] + [ny * ly]
     dx = [b - a for a, b in zip(xs, xs[1:])]
     dy = [b - a for a, b in zip(ys, ys[1:])]
     coordinates = {"x_coordinates_in": xs, "y_coordinates_in": ys}
     digest = hashlib.sha256(json.dumps(coordinates, sort_keys=True, separators=(",", ":"),
                                       allow_nan=False).encode()).hexdigest()
-    return {"kind": kind, **coordinates, "x_offsets_in": ox, "y_offsets_in": oy,
+    by_bay = {}
+    if ox_by_bay is not None or oy_by_bay is not None:
+        # Offsets given bay by bay: the single lists are withheld so nothing reads one bay's offsets for another.
+        by_bay = {"x_offsets_by_bay_in": ox_by_bay if ox_by_bay is not None else [ox] * nx,
+                  "y_offsets_by_bay_in": oy_by_bay if oy_by_bay is not None else [oy] * ny}
+        ox = oy = None
+        kind = "explicit_rectangular_by_bay"
+    return {"kind": kind, **coordinates, "x_offsets_in": ox, "y_offsets_in": oy, **by_bay,
             "coordinate_sha256": digest, "shell_count": count, "node_count": len(xs) * len(ys),
             "subdivisions_per_bay": mx if mx == my else None,
             "subdivisions_x_per_bay": mx, "subdivisions_y_per_bay": my,
@@ -158,13 +188,70 @@ def graded_face_levels(bay_length_in, beam_width_in, levels=RECIPE_LEVELS, recip
     return [coarse, base, fine, finest][:levels]
 
 
+def graded_face_levels_between(bay_length_in, left_width_in, right_width_in, levels=RECIPE_LEVELS, recipe=GRADED_FACE_V1):
+    """The graded face recipe for a bay whose two bounding beams have different widths.
+
+    The left half of the bay is graded toward the left beam's face and the right half toward the right
+    beam's, meeting at midspan; the number of nodes is that of the symmetric recipe, so every bay of a
+    floor keeps the same cell count. Equal widths give exactly ``graded_face_levels``.
+    """
+    if left_width_in == right_width_in:
+        return graded_face_levels(bay_length_in, left_width_in, levels, recipe)
+    if isinstance(levels, bool) or not isinstance(levels, int) or not 2 <= levels <= RECIPE_LEVELS:
+        raise ValueError(f"A recipe plan needs 2 to {RECIPE_LEVELS} levels")
+    for name, value in (("bay length", bay_length_in), ("beam width", left_width_in), ("beam width", right_width_in)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"Recipe {name} must be a finite positive number")
+    half_span = bay_length_in / 2.0
+
+    def half_pattern(width):
+        face = width / 2.0
+        if face >= half_span / 2.0:
+            raise ValueError("Beam face must lie in the first quarter of the bay for the graded face recipe")
+        clear = half_span - face
+        half = [0.0] + [face * f for f in recipe["near_face_fractions_of_face"]] + [face] + [
+            face + u * (clear / recipe["beyond_face_units_of_113"][-1]) for u in recipe["beyond_face_units_of_113"]]
+        half[-1] = half_span
+        return half
+
+    left, right = half_pattern(left_width_in), half_pattern(right_width_in)
+
+    def join(left_values, right_values):
+        return sorted(set(left_values) | {bay_length_in - v for v in right_values})
+
+    def midpoints(values, bands=None):
+        extra = [(a + b) / 2.0 for a, b in zip(values, values[1:])
+                 if bands is None or any(lo <= (a + b) / 2.0 <= hi for lo, hi in bands)]
+        return sorted(set(values) | set(extra))
+
+    base = join(left, right)
+    coarse = join([left[i] for i in recipe["coarse_half_indices"]], [right[i] for i in recipe["coarse_half_indices"]])
+    fine = midpoints(base)
+    lo_index, hi_index = recipe["fine_band_half_indices"]
+    finest = midpoints(fine, [(left[lo_index], left[hi_index]),
+                              (bay_length_in - right[hi_index], bay_length_in - right[lo_index])])
+    return [coarse, base, fine, finest][:levels]
+
+
+def _by_bay_levels(length, widths, levels, recipe):
+    """Per level, the offsets of every bay along one axis; ``widths`` are the beams at the bay boundaries."""
+    bays = [graded_face_levels_between(length, widths[k], widths[k + 1], levels, recipe) for k in range(len(widths) - 1)]
+    return [[bay[level] for bay in bays] for level in range(len(bays[0]))]
+
+
 def resolve_recipe_plan(geometry, sections, policy):
     """Resolve a named recipe for this geometry and beam width against the shell budget.
 
     Levels are nested and increasing, so the affordable ones form a prefix.
     Fewer than two affordable levels is an explicit ``unresolved_budget``
     result: nothing is coarsened and nothing passes.
+
+    ``sections`` is the one-beam dictionary (``b_beam_in``), a floor described line by line
+    (Design.SMRF_Floor_Sections), or the ``face_widths_in`` recorded by an earlier resolution: with
+    unlike beam lines every bay is graded toward the faces of its own two bounding beams.
     """
+    if "face_widths_in" in sections or sections.get("schema") is not None:
+        return _resolve_recipe_plan_by_line(geometry, sections, policy)
     name = policy["recipe"]
     if name not in RECIPES:
         raise ValueError(f"Unknown slab refinement recipe {name!r}")
@@ -188,6 +275,44 @@ def resolve_recipe_plan(geometry, sections, policy):
             dropped.append(dict(entry, reason=f"{count} shells exceed the declared budget {budget}"))
     return {"recipe": name, "recipe_definition": RECIPES[name],
             "inputs": {"num_bay_x": nx, "num_bay_y": ny, "bay_x_in": lx, "bay_y_in": ly, "beam_width_in": width,
+                       "levels": policy["levels"], "max_shells": budget},
+            "meshes": [r["mesh"] for r in resolved], "resolved_levels": resolved, "dropped_levels": dropped,
+            "status": "resolved" if len(resolved) >= 2 else "unresolved_budget",
+            "detail": (f"{len(resolved)} of {len(xs)} levels fit the {budget}-shell budget"
+                       + ("" if len(resolved) >= 2 else "; a refinement comparison needs two"))}
+
+
+def _resolve_recipe_plan_by_line(geometry, sections, policy):
+    name = policy["recipe"]
+    if name not in RECIPES:
+        raise ValueError(f"Unknown slab refinement recipe {name!r}")
+    budget = policy["max_shells"]
+    if isinstance(budget, bool) or not isinstance(budget, int) or not 4 <= budget <= MAX_EXPLICIT_SHELLS:
+        raise ValueError(f"Recipe max_shells must be an integer from 4 to {MAX_EXPLICIT_SHELLS}")
+    nx, ny = int(geometry["num_bay_x"]), int(geometry["num_bay_y"])
+    lx, ly = float(geometry["bay_x_in"]), float(geometry["bay_y_in"])
+    if nx < 1 or ny < 1:
+        raise ValueError("Recipe geometry needs at least one bay in each direction")
+    if "face_widths_in" in sections:
+        widths = sections["face_widths_in"]
+    else:
+        from Design.SMRF_Floor_Sections import face_widths
+        widths = face_widths(sections, nx, ny)
+    widths = {axis: [float(w) for w in widths[axis]] for axis in ("x", "y")}
+    if len(widths["x"]) != nx + 1 or len(widths["y"]) != ny + 1:
+        raise ValueError("Recipe face widths need one beam width for every beam line")
+    xs = _by_bay_levels(lx, widths["x"], policy["levels"], RECIPES[name])
+    ys = _by_bay_levels(ly, widths["y"], policy["levels"], RECIPES[name])
+    resolved, dropped = [], []
+    for level, (ox, oy) in enumerate(zip(xs, ys)):
+        count = nx * ny * (len(ox[0]) - 1) * (len(oy[0]) - 1)
+        entry = {"level": level, "shell_count": count, "cells_per_bay": [len(ox[0]) - 1, len(oy[0]) - 1]}
+        if count <= budget and not dropped:
+            resolved.append(dict(entry, mesh={"x_offsets_in": ox, "y_offsets_in": oy, "max_shells": budget}))
+        else:
+            dropped.append(dict(entry, reason=f"{count} shells exceed the declared budget {budget}"))
+    return {"recipe": name, "recipe_definition": RECIPES[name],
+            "inputs": {"num_bay_x": nx, "num_bay_y": ny, "bay_x_in": lx, "bay_y_in": ly, "face_widths_in": widths,
                        "levels": policy["levels"], "max_shells": budget},
             "meshes": [r["mesh"] for r in resolved], "resolved_levels": resolved, "dropped_levels": dropped,
             "status": "resolved" if len(resolved) >= 2 else "unresolved_budget",

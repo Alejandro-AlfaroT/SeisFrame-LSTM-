@@ -1,6 +1,6 @@
 """Traceable pixel audit of Fig. 16(a) of Park and Ruitong (1988): axis calibration with skew, tick marks,
 the loop peaks (reversal points), the zero-force and zero-displacement crossings of every branch, and the
-unloading chords, each with its pixel coordinates (Codex Unit 1 review, 2026-09-28: "Trace each branch from its
+unloading chords, each with its pixel coordinates (Unit 1 review, 2026-09-28: "Trace each branch from its
 numbered reversal through both axis crossings, save pixel coordinates and the axis transformation, and have the
 crossing identity checked before fitting").
 
@@ -527,7 +527,7 @@ def branch_observables(M, trace, peak):
         df = abs(out["level_80"]["V_kN"] - out["level_20"]["V_kN"]); du = abs(out["level_80"]["delta_mm"] - out["level_20"]["delta_mm"])
         out["unloading_chord"] = {"dF_kN": df, "dU_mm": du, "k_kN_per_mm": df / du if du > 0 else None,
                                   "k_low": max(0.0, df - 6.0) / (du + 6.0), "k_high": (df + 6.0) / (du - 6.0) if du > 6.0 else None,
-                                  "bounds_basis": "Codex 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm"}
+                                  "bounds_basis": "review 2026-09-28: independent +-3 kN / +-3 mm endpoint bounds; K_high needs dU > 6 mm"}
     else:
         out["unloading_chord"] = None
     return out
@@ -573,7 +573,7 @@ def write_v2(result, v1, path, args):
     v2 = {"version": 2, "date": "2026-09-29",
           "source": v1["source"],
           "supersedes": "unit1_observed_digitized.json (version 1, manual reading of a 300 dpi render, 2026-09-27)",
-          "reason": ("Codex Unit 1 review 2026-09-28: branch-specific redigitization with pixel coordinates and the axis transformation; the v1 residual "
+          "reason": ("Unit 1 review 2026-09-28: branch-specific redigitization with pixel coordinates and the axis transformation; the v1 residual "
                      "targets (35 and 42 mm) and the single unsigned pinching target (28 kN) are not accepted; run labels audited; the +-3 kN / +-3 mm "
                      "reading bounds are estimated resolution, not statistical confidence"),
           "image": result["source"], "axes": result["axes"], "ticks": result["ticks"], "transformation": result["transformation"],
@@ -598,7 +598,7 @@ def write_v2(result, v1, path, args):
                                                                for r in peaks if not r["load_control"]},
                               "status": "the pixel tips lie within about 1.5 mm of mu x 15 mm on both sides; the reconstruction stands with the +-3 mm coherent shift as its sensitivity"},
           "superseded_v1_targets": {"residual_displacement_at_zero_load_mm": {**v1["pinching_indicators"]["residual_displacement_at_zero_load_mm"],
-                                                                              "status": "NOT ACCEPTED (Codex 2026-09-28): the outer positive unloading branches cross zero force at 45-66 mm (branches above)"},
+                                                                              "status": "NOT ACCEPTED (review 2026-09-28): the outer positive unloading branches cross zero force at 45-66 mm (branches above)"},
                                     "load_at_zero_displacement_kN": {**v1["pinching_indicators"]["load_at_zero_displacement_kN"],
                                                                      "status": "NOT ACCEPTED: no per-cycle identity; replaced by the signed bundles in independent_crossings"},
                                     "qualitative": v1["pinching_indicators"]["qualitative"]},

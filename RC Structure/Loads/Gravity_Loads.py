@@ -12,6 +12,7 @@ load intensity (kip/in²) multiplied by its tributary width:
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
+from Model import Member_Groups as mg
 from Model.Build_Model import node_tag
 
 
@@ -92,17 +93,46 @@ def _apply_slab_transfer_loads(dead_factor=1.0, live_factor=1.0, live_pattern="a
     factors; ``live_pattern`` selects the all-panel live case ("all") or a
     saved ACI 6.4.2 arrangement (``live_pattern_<id>``). Member self-weight
     is applied separately, as in every mode.
+
+    Uniform designs carry one transfer, applied to every floor. A grouped
+    design carries one transfer per mechanically distinct floor (its own beam
+    lines and supports), and every floor receives its own; a uniform transfer
+    is refused there, and there is no tributary fallback.
     """
     from Design.SMRF_Floor_Transfer import validate_floor_transfer
+    geometry = {"num_bay_x": sp.NUM_BAY_X, "num_bay_y": sp.NUM_BAY_Y, "bay_x_in": sp.BAY_X, "bay_y_in": sp.BAY_Y}
+    area = sp.BAY_X * sp.NUM_BAY_X * sp.BAY_Y * sp.NUM_BAY_Y / 144.0
+    dead_kip, live_kip = sp.floor_dead_load_ksf() * area, sp.FLOOR_LIVE_LOAD_KSF * area
+    if mg.is_grouped():
+        from Design import SMRF_Floor_Sections as floor_sections
+        from Design.SMRF_Floor_Transfer import is_by_floor, validate_floor_transfers_by_floor
+        if not is_by_floor(sp.FLOOR_TRANSFER):
+            raise mg.GroupedStateError(
+                "The installed floor transfer is one common floor's; a grouped design needs the transfer of each of its "
+                "own floors (Design.SMRF_Floor_Transfer.build_floor_transfers_by_floor). It is not applied.")
+        transfers = validate_floor_transfers_by_floor(
+            sp.FLOOR_TRANSFER, {**geometry, "num_floor": sp.NUM_FLOOR}, floor_sections.by_floor(), sp.SLAB_THICKNESS_IN,
+            dead_kip, live_kip)
+        accumulated = {}
+        for k in range(1, sp.NUM_FLOOR + 1):
+            transfer = transfers[k]
+            if id(transfer) not in accumulated:
+                accumulated[id(transfer)] = _accumulate_transfer(transfer, dead_factor, live_factor, live_pattern)
+            _apply_floor_transfer(k, *accumulated[id(transfer)])
+        return
     transfer = validate_floor_transfer(
-        sp.FLOOR_TRANSFER,
-        {"num_bay_x": sp.NUM_BAY_X, "num_bay_y": sp.NUM_BAY_Y, "bay_x_in": sp.BAY_X, "bay_y_in": sp.BAY_Y},
+        sp.FLOOR_TRANSFER, geometry,
         {"b_beam_in": sp.B_BEAM, "h_beam_in": sp.H_BEAM, "fc_beam_ksi": sp.FC_BEAM_KSI,
          "b_col_in": sp.B_COL, "h_col_in": sp.H_COL},
-        sp.SLAB_THICKNESS_IN,
-        sp.floor_dead_load_ksf() * sp.BAY_X * sp.NUM_BAY_X * sp.BAY_Y * sp.NUM_BAY_Y / 144.0,
-        sp.FLOOR_LIVE_LOAD_KSF * sp.BAY_X * sp.NUM_BAY_X * sp.BAY_Y * sp.NUM_BAY_Y / 144.0,
+        sp.SLAB_THICKNESS_IN, dead_kip, live_kip,
     )
+    loads = _accumulate_transfer(transfer, dead_factor, live_factor, live_pattern)
+    for k in range(1, sp.NUM_FLOOR + 1):
+        _apply_floor_transfer(k, *loads)
+
+
+def _accumulate_transfer(transfer, dead_factor, live_factor, live_pattern):
+    """One floor's loads from one transfer: (beam point loads, bending couples, column loads, joint moments)."""
     from Design.SMRF_Floor_Transfer import global_couple
     beams, columns = {}, {}
     bending_couples = {}   # (axis, line, span) -> {x_fraction: local-y couple (kip-in)}
@@ -146,22 +176,26 @@ def _apply_slab_transfer_loads(dead_factor=1.0, live_factor=1.0, live_pattern="a
             columns[key] = columns.get(key, 0.0) + factor * column["direct_load_kip"]
             add_moment(*key, factor * column.get("couple_global_mx_kip_in", 0.0),
                        factor * column.get("couple_global_my_kip_in", 0.0))
-    for k in range(1, sp.NUM_FLOOR + 1):
-        for (axis, line_index, span_index), loads in beams.items():
-            tag = _beam_element_tag(k, axis, line_index, span_index)
-            length = sp.BAY_X if axis == "x" else sp.BAY_Y
-            for x_fraction in sorted(loads):
-                ops.eleLoad("-ele", tag, "-type", "-beamPoint", 0.0, -loads[x_fraction], x_fraction)
-            for x_fraction, couple in sorted(bending_couples.get((axis, line_index, span_index), {}).items()):
-                for fraction, force in _bending_couple_pair(x_fraction, couple, length):
-                    ops.eleLoad("-ele", tag, "-type", "-beamPoint", 0.0, force, fraction)
-        for (i, j), load in columns.items():
-            mx, my = node_moments.get((i, j), (0.0, 0.0))
-            if load or mx or my:
-                ops.load(node_tag(k, i, j), 0.0, 0.0, -load, mx, my, 0.0)
-        for (i, j), (mx, my) in node_moments.items():
-            if (i, j) not in columns and (mx or my):
-                ops.load(node_tag(k, i, j), 0.0, 0.0, 0.0, mx, my, 0.0)
+    return beams, bending_couples, columns, node_moments
+
+
+def _apply_floor_transfer(k, beams, bending_couples, columns, node_moments):
+    """Put one floor's accumulated transfer loads on floor k of the frame."""
+    for (axis, line_index, span_index), loads in beams.items():
+        tag = _beam_element_tag(k, axis, line_index, span_index)
+        length = sp.BAY_X if axis == "x" else sp.BAY_Y
+        for x_fraction in sorted(loads):
+            ops.eleLoad("-ele", tag, "-type", "-beamPoint", 0.0, -loads[x_fraction], x_fraction)
+        for x_fraction, couple in sorted(bending_couples.get((axis, line_index, span_index), {}).items()):
+            for fraction, force in _bending_couple_pair(x_fraction, couple, length):
+                ops.eleLoad("-ele", tag, "-type", "-beamPoint", 0.0, force, fraction)
+    for (i, j), load in columns.items():
+        mx, my = node_moments.get((i, j), (0.0, 0.0))
+        if load or mx or my:
+            ops.load(node_tag(k, i, j), 0.0, 0.0, -load, mx, my, 0.0)
+    for (i, j), (mx, my) in node_moments.items():
+        if (i, j) not in columns and (mx or my):
+            ops.load(node_tag(k, i, j), 0.0, 0.0, 0.0, mx, my, 0.0)
 
 
 # Half-separation of the force pair that carries an interior bending couple.
@@ -208,6 +242,18 @@ def _apply_element_self_weight(load_factor=1.0):
     n_beam_x = sp.NUM_FLOOR * sp.NUM_BAY_X       * (sp.NUM_BAY_Y + 1)
     n_beam_y = sp.NUM_FLOOR * (sp.NUM_BAY_X + 1) * sp.NUM_BAY_Y
 
+    if mg.is_grouped():
+        # Every member weighs its own section between its own joint faces (Model.Member_Properties).
+        from Model import Member_Properties as mp
+        for tag in range(1, n_col + n_beam_x + n_beam_y + 1):
+            member = mg.resolve(tag)
+            w = load_factor * mp.member_self_weight_kip_per_in(member)
+            if member.is_column:
+                ops.eleLoad("-ele", tag, "-type", "-beamUniform", 0.0, 0.0, -w)
+            else:
+                ops.eleLoad("-ele", tag, "-type", "-beamUniform", 0.0, -w, 0.0)
+        return
+
     w_col  = load_factor * sp.col_self_weight_kip_per_in()   # kip/in, magnitude
     w_beam_x = load_factor * sp.beam_self_weight_kip_per_in("x")
     w_beam_y = load_factor * sp.beam_self_weight_kip_per_in("y")
@@ -223,8 +269,18 @@ def _apply_element_self_weight(load_factor=1.0):
         ops.eleLoad("-ele", tag, "-type", "-beamUniform", 0.0, -w_beam_y, 0.0)
 
 
+def _apply_roof_extension_weight(load_factor=1.0):
+    """The column extension above each roof joint: its weight as a vertical load at the roof node."""
+    from Model import Roof_Extension as roof
+    for j in range(sp.NUM_BAY_Y + 1):
+        for i in range(sp.NUM_BAY_X + 1):
+            weight = load_factor * roof.weight_kip(i, j)
+            if weight:
+                ops.load(node_tag(sp.NUM_FLOOR, i, j), 0.0, 0.0, -weight, 0.0, 0.0, 0.0)
+
+
 def apply_gravity_loads(floor_factor=1.0, self_weight_factor=None,
-                        dead_factor=None, live_factor=None, live_pattern="all"):
+                        dead_factor=None, live_factor=None, live_pattern="all", roof_extension=True):
     """Apply gravity loads, optionally factored for a design load combination.
 
     floor_factor
@@ -241,6 +297,9 @@ def apply_gravity_loads(floor_factor=1.0, self_weight_factor=None,
         tributary modes bundle D+L and keep using floor_factor.
     live_pattern
         "all" or a saved ACI 6.4.2 arrangement id (slab-transfer mode only).
+    roof_extension
+        The weight of the column extensions above the roof joints (Model/Roof_Extension), with the
+        self-weight factor. False only for a comparison against a model that has no such extension.
     """
     if live_pattern not in (None, "all") and sp.effective_gravity_load_model() != "slab_transfer":
         raise ValueError("Live-load patterns require the slab-transfer load model.")
@@ -265,3 +324,5 @@ def apply_gravity_loads(floor_factor=1.0, self_weight_factor=None,
         raise ValueError(f"Unknown GRAVITY_LOAD_MODEL: {mode}")
 
     _apply_element_self_weight(self_weight_factor)
+    if roof_extension:
+        _apply_roof_extension_weight(self_weight_factor)

@@ -211,7 +211,8 @@ def nominal_rectangular_capacity(*, width_in, depth_in, fc_ksi, fy_ksi,
     pmin, pmax = -fy * ast, .85 * fc * (b * h - ast) + fy * ast
     tolerance = 1e-10 * max(1, abs(pmin), abs(pmax))
     if p < pmin - tolerance or p > pmax + tolerance:
-        raise ValueError(f"Axial force {p:g} outside nominal section domain [{pmin:g}, {pmax:g}].")
+        from Design.SMRF_Common import SectionAxialDomainError
+        raise SectionAxialDomainError(f"Axial force {p:g} outside nominal section domain [{pmin:g}, {pmax:g}].")
     beta = max(.65, min(.85, .85 - .05 * (fc - 4)))
     def state(c, included):
         a = min(beta * c, h)
@@ -355,7 +356,8 @@ def build_joint_evidence(record, combination_actions, *, expected_combination_id
               "joint_face_reference_complete": complete and not reference_issues,
               "joints": [], "through_bar_anchorage": [],
               "axial_envelope_basis": "minimum nominal strength across every supplied factored case and both column compression faces; no extrapolation",
-              "uniaxial_only": True, "roof_exemption_applied": False}
+              "uniaxial_only": True,
+              "roof_exemption_applied": "per connection: ACI 318-19 18.7.3.1 (SMRF_Joints.scwb_check)"}
     cache = {}
     def capacity(member, axis, sign, p):
         key = (member, axis, sign, p)
@@ -373,11 +375,18 @@ def build_joint_evidence(record, combination_actions, *, expected_combination_id
     slab_data = slab_data if isinstance(slab_data, Mapping) else {}
     for joint in inventory["joints"]:
         entry = {**joint, "directions": {}}
+        column_section = record.get("sections", {})
+        # Evidence for the ACI 318-19 18.7.3.1 exception (SMRF_Joints.scwb_check): whether a column continues
+        # above this connection, and the gross area and concrete strength its axial limit is taken on.
+        connection = {"column_discontinuous_above": not any(c["position"] == "above" for c in joint["columns"]),
+                      "column_gross_area_in2": (column_section.get("b_col_in") or 0.0) * (column_section.get("h_col_in") or 0.0),
+                      "column_fc_ksi": column_section.get("fc_col_ksi")}
         for axis in ("x", "y"):
             beams = joint[f"beams_{axis}"]
             states = {}
             for sign in ("positive", "negative"):
-                state = {"nominal_strengths": True, "column_capacities": [], "beam_capacities": []}
+                state = {"nominal_strengths": True, "column_capacities": [], "beam_capacities": [],
+                         "connection": dict(connection)}
                 for column in joint["columns"]:
                     cap = {**column, "axial_envelope_checked": False}
                     try:

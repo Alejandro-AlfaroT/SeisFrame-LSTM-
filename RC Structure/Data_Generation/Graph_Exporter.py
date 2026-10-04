@@ -125,7 +125,53 @@ def _member_geometry(n_i, n_j):
     }
 
 
+# Appended to every element row under a grouped design, after the uniform columns (whose order and
+# meaning do not change): where the member sits, its design group, and the hoops of its own cage.
+GROUP_ELEMENT_COLUMNS = ("story_or_floor", "grid_i", "grid_j", "band", "group_id", "location_class",
+                         "stirrup_bar_size", "stirrup_legs", "stirrup_spacing_in", "clear_cover_in",
+                         "longitudinal_centroid_offset_in", "design_sha256")
+
+
+def _grouped_element_property_row(ele_tag, n_i, n_j, element_type):
+    """One element row from the member's own group design (a grouped design is installed)."""
+    import hashlib
+    from Model import Member_Groups as mg
+    from Model import Member_Properties as mp
+    member = mg.resolve(ele_tag)
+    design = member.design
+    if member.member_type != element_type or (member.node_i, member.node_j) != (n_i, n_j):
+        raise mg.GroupedStateError(f"Element {ele_tag} ({element_type}, nodes {n_i}-{n_j}) is not the member the installed "
+                                   f"grouped design assigns that tag ({member.member_type}, nodes {member.node_i}-{member.node_j}).")
+    is_column = element_type == "column"
+    row = {
+        "ele_tag": ele_tag, "node_i": n_i, "node_j": n_j, "element_type": element_type,
+        "element_type_id": ELEMENT_TYPE_ID[element_type],
+        "section_tag": sp.COL_SEC_TAG if is_column else sp.BEAM_SEC_TAG,
+        "transf_tag": (sp.COL_TRANSF_TAG if is_column else
+                       sp.BEAM_X_TRANSF_TAG if element_type == "beam_x" else sp.BEAM_Y_TRANSF_TAG),
+        "integration_tag": sp.COL_INTEG_TAG if is_column else sp.BEAM_INTEG_TAG,
+        "b_in": design.b_in, "h_in": design.h_in, "area_in2": sp.rect_area(design.b_in, design.h_in),
+        "fc_ksi": design.fc_ksi, "fy_ksi": sp.FY_KSI, "bar_size": design.bar_size, "bar_area_in2": design.bar_area_in2,
+        "top_bars": design.top_bars, "bot_bars": design.bot_bars, "side_bars": design.side_bars,
+    }
+    row.update(_member_geometry(n_i, n_j))
+    record = mg.design_record(design)
+    row.update({
+        "story_or_floor": member.story_or_floor, "grid_i": member.grid_i, "grid_j": member.grid_j, "band": member.band,
+        "group_id": member.group_id, "location_class": member.location_class,
+        "stirrup_bar_size": design.stirrup_bar_size, "stirrup_legs": design.stirrup_legs,
+        "stirrup_spacing_in": design.stirrup_spacing_in,
+        "clear_cover_in": sp.COL_CLEAR_COVER_IN if is_column else sp.BEAM_CLEAR_COVER_IN,
+        "longitudinal_centroid_offset_in": mp.longitudinal_cover_in(design),
+        "design_sha256": hashlib.sha256(json.dumps(record, sort_keys=True).encode("utf-8")).hexdigest()[:16],
+    })
+    return row
+
+
 def _element_property_row(ele_tag, n_i, n_j, element_type):
+    from Model import Member_Groups as mg
+    if mg.is_grouped():
+        return _grouped_element_property_row(ele_tag, n_i, n_j, element_type)
     geom = _member_geometry(n_i, n_j)
 
     if element_type == "column":
@@ -472,26 +518,38 @@ def collect_reinforcement_geometry():
     """
     if sp.SLAB_THICKNESS_IN is None:
         return None
+    from Model import Member_Groups as mg
+    state = mg.active()
     members = {}
-    for member, prefix in (("column", "COL"), ("beam", "BEAM")):
-        b, h = getattr(sp, f"B_{prefix}"), getattr(sp, f"H_{prefix}")
+    # One entry per member class in the uniform mode; one per design group under a grouped design.
+    entries = ([(member, member, None) for member in ("column", "beam")] if state is None else
+               [(gid, "column" if design.is_column else "beam", design) for gid, design in sorted(state.designs.items())])
+    for name, member, design in entries:
+        prefix = "COL" if member == "column" else "BEAM"
         core_cover = sp.core_cover_in(member)
-        bar_cover = sp.longitudinal_cover_in(member)
-        bar_size = getattr(sp, f"{prefix}_BAR_SIZE")
-        hoop_size = getattr(sp, f"{prefix}_STIRRUP_BAR_SIZE")
+        if design is None:
+            b, h = getattr(sp, f"B_{prefix}"), getattr(sp, f"H_{prefix}")
+            bar_cover = sp.longitudinal_cover_in(member)
+            bar_size = getattr(sp, f"{prefix}_BAR_SIZE")
+            hoop_size = getattr(sp, f"{prefix}_STIRRUP_BAR_SIZE")
+            legs, spacing = getattr(sp, f"{prefix}_STIRRUP_LEGS"), getattr(sp, f"{prefix}_STIRRUP_SPACING")
+        else:
+            b, h, bar_size, hoop_size = design.b_in, design.h_in, design.bar_size, design.stirrup_bar_size
+            bar_cover = sp.longitudinal_cover_in(member, bar_size, hoop_size)
+            legs, spacing = design.stirrup_legs, design.stirrup_spacing_in
         hoop_diameter = sp.rebar_diameter(hoop_size)
         if any(not math.isfinite(v) or v <= 0 for v in (b, h, core_cover, bar_cover)):
             raise ValueError("Reinforcement export requires finite positive geometry.")
         if 2 * bar_cover >= min(b, h):
             raise ValueError("Reinforcement bar centroids must fit inside the exported section.")
-        members[member] = {
+        members[name] = {
             "clear_cover_outside_hoops_in": core_cover,
             "longitudinal_centroid_offset_in": bar_cover,
             "longitudinal_bar_diameter_in": sp.rebar_diameter(bar_size),
             "stirrup_bar_diameter_in": hoop_diameter,
             "stirrup_bar_size": hoop_size,
-            "stirrup_legs": getattr(sp, f"{prefix}_STIRRUP_LEGS"),
-            "stirrup_spacing_in": getattr(sp, f"{prefix}_STIRRUP_SPACING"),
+            "stirrup_legs": legs,
+            "stirrup_spacing_in": spacing,
             "fiber_core_boundary_offset_in": core_cover,
             "fiber_core_width_in": b - 2 * core_cover,
             "fiber_core_depth_in": h - 2 * core_cover,
@@ -503,7 +561,7 @@ def collect_reinforcement_geometry():
     if isinstance(aggregate, bool) or not math.isfinite(aggregate) or aggregate <= 0:
         raise ValueError("Reinforcement export requires a finite positive maximum aggregate size.")
     return {
-        "schema_version": "smrf_reinforcement_geometry_v1",
+        "schema_version": "smrf_reinforcement_geometry_v1" if state is None else "smrf_reinforcement_geometry_by_group_v1",
         "cover_basis": "clear to outside of hoop; longitudinal centroid = clear + hoop diameter + half bar diameter",
         "fiber_core_basis": "boundary at outside of hoops; geometry only, confinement material calibration not implied",
         "aggregate_max_size_in": aggregate,
@@ -514,7 +572,7 @@ def collect_reinforcement_geometry():
             "es_ksi": sp.ES_KSI,
             "concrete_unit_weight_kcf": sp.CONCRETE_UNIT_WEIGHT_KCF,
         },
-        **members,
+        **(members if state is None else {"groups": members}),
     }
 
 
@@ -534,22 +592,33 @@ def installed_deterioration_policy():
     if mode == "direct":
         return {"mode": "direct", "basis": "IMK_LAMBDA_* constants passed unchanged (E_ref = Lamda * My)",
                 "lamda": {m: getattr(sp, f"IMK_LAMBDA_{m}") for m in modes}}
+    from Model import Member_Groups as mg
+    state = mg.active()
     anchors = {}
-    for member_type in ("beam_x", "column"):
-        d = deterioration_for_member(member_type, 0.0)
-        anchors["beam" if member_type == "beam_x" else "column_nu_0"] = {
+    # Uniform: the beam and the nu = 0 column. Grouped: every design group at nu = 0, by group id.
+    entries = ([("beam", "beam_x", None), ("column_nu_0", "column", None)] if state is None else
+               [(gid, design.member_type, design) for gid, design in sorted(state.designs.items())])
+    for name, member_type, design in entries:
+        d = deterioration_for_member(member_type, 0.0, design=design)
+        anchors[name] = {
             "spacing_depth_ratio": d["deterioration_spacing_depth_ratio"],
             "theta_y_member_rad": d["energy_reference_member_theta_y_rad"],
             "lambda_haselton": d["lambda_haselton_dimensionless"],
             "lamda_opensees_rad": d["lambda_opensees_rad"],
         }
-    reference = deterioration_for_member("column", 0.0)
+    reference = deterioration_for_member("column", 0.0, design=next(
+        (design for design in (state.designs.values() if state is not None else ()) if design.is_column), None))
     return {"mode": mode, "basis": reference["deterioration_source"],
             "calibrated_modes": [m for m in modes if m not in reference["deterioration_suppressed_modes"]],
             "suppressed_modes": {m: reference["deterioration_suppression_lambda_rad"]
                                  for m in reference["deterioration_suppressed_modes"] if m in modes},
             "axial_ratio_clamp": [0.0, 0.70],
             "anchors": anchors}
+
+
+def _grouped_floor_loads():
+    from Model import Member_Properties as mp
+    return mp.floor_load_metadata()
 
 
 def _slip_ownership_policy():
@@ -562,7 +631,58 @@ def _slip_interfaces_registered():
     return len(slip_interfaces())
 
 
+# The global parameters that are one value per frame only in the uniform mode. Under a grouped design they are
+# written as null (never a representative value) and the group designs are written beside them.
+UNIFORM_SECTION_PARAMETER_KEYS = ("fc_col_ksi", "fc_beam_ksi", "b_col_in", "h_col_in", "b_beam_in", "h_beam_in", "col_bar_size", "col_top_bars",
+                         "col_bot_bars", "col_side_bars", "col_bar_area_in2", "col_stirrup_bar_size", "col_stirrup_legs",
+                         "col_stirrup_spacing_in", "col_stirrup_area_in2", "beam_bar_size", "beam_top_bars", "beam_bot_bars",
+                         "beam_side_bars", "beam_bar_area_in2", "beam_stirrup_bar_size", "beam_stirrup_legs",
+                         "beam_stirrup_spacing_in", "beam_stirrup_area_in2")
+
+
+def _uniform_section_parameters():
+    # The one-section values of a uniform design, or every one of them null under a grouped design.
+    from Model import Member_Groups as mg
+    if mg.is_grouped():
+        return {key: None for key in UNIFORM_SECTION_PARAMETER_KEYS}
+    return {
+        "fc_col_ksi": sp.FC_COL_KSI, "fc_beam_ksi": sp.FC_BEAM_KSI,
+        "b_col_in": sp.B_COL, "h_col_in": sp.H_COL, "b_beam_in": sp.B_BEAM, "h_beam_in": sp.H_BEAM,
+        "col_bar_size": sp.COL_BAR_SIZE, "col_top_bars": sp.COL_TOP_BARS, "col_bot_bars": sp.COL_BOT_BARS,
+        "col_side_bars": sp.COL_SIDE_BARS, "col_bar_area_in2": sp.COL_BAR_AREA,
+        "col_stirrup_bar_size": sp.COL_STIRRUP_BAR_SIZE, "col_stirrup_legs": sp.COL_STIRRUP_LEGS,
+        "col_stirrup_spacing_in": sp.COL_STIRRUP_SPACING,
+        "col_stirrup_area_in2": sp.COL_STIRRUP_LEGS * sp.rebar_area(sp.COL_STIRRUP_BAR_SIZE),
+        "beam_bar_size": sp.BEAM_BAR_SIZE, "beam_top_bars": sp.BEAM_TOP_BARS, "beam_bot_bars": sp.BEAM_BOT_BARS,
+        "beam_side_bars": sp.BEAM_SIDE_BARS, "beam_bar_area_in2": sp.BEAM_BAR_AREA,
+        "beam_stirrup_bar_size": sp.BEAM_STIRRUP_BAR_SIZE, "beam_stirrup_legs": sp.BEAM_STIRRUP_LEGS,
+        "beam_stirrup_spacing_in": sp.BEAM_STIRRUP_SPACING,
+        "beam_stirrup_area_in2": sp.BEAM_STIRRUP_LEGS * sp.rebar_area(sp.BEAM_STIRRUP_BAR_SIZE),
+    }
+
+
+def _roof_column_extension():
+    from Model import Roof_Extension as roof
+    return roof.declaration()
+
+
 def collect_global_parameters():
+    from Model import Member_Groups as mg
+    parameters = _collect_global_parameters(_uniform_section_parameters())
+    state = mg.active()
+    if state is not None:
+        # A grouped design: the frame is its member groups; element rows carry each member's own values.
+        parameters.update({
+            "design_mode": "grouped", "member_groups_sha256": state.identity(),
+            "member_groups": {gid: {**mg.design_record(design), "members": len(state.groups[gid]["member_tags"])}
+                              for gid, design in sorted(state.designs.items())},
+            "uniform_section_parameters": "null under a grouped design: every member's section and cage are in its element row",
+        })
+    return parameters
+
+
+def _collect_global_parameters(u):
+    from Model import Member_Groups as mg
     return {
         "num_bay_x": sp.NUM_BAY_X,
         "num_bay_y": sp.NUM_BAY_Y,
@@ -570,38 +690,46 @@ def collect_global_parameters():
         "bay_x_in": sp.BAY_X,
         "bay_y_in": sp.BAY_Y,
         "story_h_in": sp.STORY_H,
-        "fc_col_ksi": sp.FC_COL_KSI,
-        "fc_beam_ksi": sp.FC_BEAM_KSI,
+        "fc_col_ksi": u["fc_col_ksi"],
+        "fc_beam_ksi": u["fc_beam_ksi"],
         "fy_ksi": sp.FY_KSI,
-        "b_col_in": sp.B_COL,
-        "h_col_in": sp.H_COL,
-        "b_beam_in": sp.B_BEAM,
-        "h_beam_in": sp.H_BEAM,
-        "col_bar_size": sp.COL_BAR_SIZE,
-        "col_top_bars": sp.COL_TOP_BARS,
-        "col_bot_bars": sp.COL_BOT_BARS,
-        "col_side_bars": sp.COL_SIDE_BARS,
-        "col_bar_area_in2": sp.COL_BAR_AREA,
-        "col_stirrup_bar_size": sp.COL_STIRRUP_BAR_SIZE,
-        "col_stirrup_legs": sp.COL_STIRRUP_LEGS,
-        "col_stirrup_spacing_in": sp.COL_STIRRUP_SPACING,
-        "col_stirrup_area_in2": sp.COL_STIRRUP_LEGS * sp.rebar_area(sp.COL_STIRRUP_BAR_SIZE),
-        "beam_bar_size": sp.BEAM_BAR_SIZE,
-        "beam_top_bars": sp.BEAM_TOP_BARS,
-        "beam_bot_bars": sp.BEAM_BOT_BARS,
-        "beam_side_bars": sp.BEAM_SIDE_BARS,
-        "beam_bar_area_in2": sp.BEAM_BAR_AREA,
-        "beam_stirrup_bar_size": sp.BEAM_STIRRUP_BAR_SIZE,
-        "beam_stirrup_legs": sp.BEAM_STIRRUP_LEGS,
-        "beam_stirrup_spacing_in": sp.BEAM_STIRRUP_SPACING,
-        "beam_stirrup_area_in2": sp.BEAM_STIRRUP_LEGS * sp.rebar_area(sp.BEAM_STIRRUP_BAR_SIZE),
+        "b_col_in": u["b_col_in"],
+        "h_col_in": u["h_col_in"],
+        "b_beam_in": u["b_beam_in"],
+        "h_beam_in": u["h_beam_in"],
+        "col_bar_size": u["col_bar_size"],
+        "col_top_bars": u["col_top_bars"],
+        "col_bot_bars": u["col_bot_bars"],
+        "col_side_bars": u["col_side_bars"],
+        "col_bar_area_in2": u["col_bar_area_in2"],
+        "col_stirrup_bar_size": u["col_stirrup_bar_size"],
+        "col_stirrup_legs": u["col_stirrup_legs"],
+        "col_stirrup_spacing_in": u["col_stirrup_spacing_in"],
+        "col_stirrup_area_in2": u["col_stirrup_area_in2"],
+        "beam_bar_size": u["beam_bar_size"],
+        "beam_top_bars": u["beam_top_bars"],
+        "beam_bot_bars": u["beam_bot_bars"],
+        "beam_side_bars": u["beam_side_bars"],
+        "beam_bar_area_in2": u["beam_bar_area_in2"],
+        "beam_stirrup_bar_size": u["beam_stirrup_bar_size"],
+        "beam_stirrup_legs": u["beam_stirrup_legs"],
+        "beam_stirrup_spacing_in": u["beam_stirrup_spacing_in"],
+        "beam_stirrup_area_in2": u["beam_stirrup_area_in2"],
         "floor_dead_load_ksf": sp.floor_dead_load_ksf(),
-        "floor_loads": sp.floor_load_metadata() if sp.SLAB_THICKNESS_IN is not None else None,
+        "floor_loads": (_grouped_floor_loads() if mg.is_grouped() else
+                        sp.floor_load_metadata() if sp.SLAB_THICKNESS_IN is not None else None),
         "reinforcement_geometry": collect_reinforcement_geometry(),
+        "roof_column_extension": _roof_column_extension(),
         "floor_live_load_ksf": sp.FLOOR_LIVE_LOAD_KSF,
         "floor_load_ksi": sp.floor_load_ksi(),
         "total_floor_gravity_load_kip": sp.total_floor_gravity_load(),
         "fx_floor_kip": sp.FX_FLOOR,
+        # The design basis and the nonlinear-model profile the response was produced under
+        # (2026-10-01): a Risk II or other-profile output is never merged with these.
+        "risk_category": getattr(sp, "ASCE_RISK_CATEGORY", None),
+        "seismic_importance_factor": getattr(sp, "ASCE_IE", None),
+        "seismic_site_label": getattr(sp, "SEISMIC_SITE_LABEL", None),
+        "analysis_profile_id": getattr(sp, "ANALYSIS_PROFILE_ID", None),
         "element_formulation": sp.ELEMENT_FORMULATION,
         "imk_apply_to_columns": sp.IMK_APPLY_TO_COLUMNS,
         "imk_apply_to_beams": sp.IMK_APPLY_TO_BEAMS,

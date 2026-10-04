@@ -17,10 +17,12 @@ from Design.SMRF_Cage_Geometry import column_cage_admits_beam_bars  # noqa: E402
 
 
 def frame(beam_width):
-    """A 32-in fc-5 column, #5 hoops, and a beam of the given width carrying six #8 bars in #4 stirrups."""
+    """A 32-in fc-5 column, #5 hoops, and a beam of the given width carrying six #8 bars in #4 stirrups, over a
+    14-ft story (a V2 story height; at the repository default 10-ft story the bond rule of ACI 318-19 18.7.4.3
+    rightly rejects the No. 11 cages these tests are about: 1.25 ld = 55.9 in against a 48-in half clear height)."""
     return mock.patch.multiple(
         sp, B_COL=32.0, H_COL=32.0, FC_COL_KSI=5.0, FY_KSI=60.0, COL_CLEAR_COVER_IN=1.5, COL_STIRRUP_BAR_SIZE=5,
-        B_BEAM=beam_width, H_BEAM=24.0, BEAM_CLEAR_COVER_IN=1.5, BEAM_STIRRUP_BAR_SIZE=4,
+        STORY_H=168.0, B_BEAM=beam_width, H_BEAM=24.0, BEAM_CLEAR_COVER_IN=1.5, BEAM_STIRRUP_BAR_SIZE=4,
         BEAM_BAR_SIZE=8, BEAM_TOP_BARS=6, BEAM_BOT_BARS=6, AGGREGATE_MAX_SIZE_IN=0.75, SLAB_THICKNESS_IN=5.0,
         BEAM_BAR_MAX_LAYERS=1)
 
@@ -201,14 +203,19 @@ class ColumnSideOneLayerPreference(unittest.TestCase):
 
 
 class LargerBars(unittest.TestCase):
-    """Fewer, larger bars per face: No. 14 joined the column ladder with the rule; it cannot be lap spliced."""
+    """Fewer, larger bars per face: No. 14 joined the column ladder with the rule; it cannot be lap spliced, and it
+    develops its bars (ACI 318-19 18.7.4.3, 2026-10-02) only where half the clear height holds 1.25 ld: 76.7 in at
+    f'c 5 ksi, so the story here is 16 ft."""
 
     def test_number_14_is_offered_and_threads_where_number_11_runs_out_of_steel(self):
         self.assertIn(14, DesignConfig().rebar.bar_sizes_col)
         self.assertNotIn(18, DesignConfig().rebar.bar_sizes_col)
         ag = 32.0 * 32.0
-        with frame(20.0):
+        with frame(20.0), mock.patch.object(sp, "STORY_H", 192.0):
             threading = rd._col_candidates(0.01 * ag, 0.06 * ag, DesignConfig(), threading=True)
+        with frame(20.0):
+            short = rd._col_candidates(0.01 * ag, 0.06 * ag, DesignConfig(), threading=True)
+        self.assertNotIn(14, {c[0] for c in short}, "a 14-ft story cannot develop a No. 14 at 5 ksi")
         by_size = {}
         for c in threading:
             by_size.setdefault(c[0], []).append(c[4])

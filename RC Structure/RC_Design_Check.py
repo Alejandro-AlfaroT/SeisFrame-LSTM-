@@ -43,7 +43,7 @@ def _stirrup_area(bar_size, legs):
 # remains the old centroid offset. Effective depth is d = h - that offset.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _col_steel_layers(h=None):
+def _col_steel_layers(h=None, design=None):
     """
     Column steel layers for P-M diagram sweep.
     Returns list of (area_in2, dist_from_compression_face_in).
@@ -51,7 +51,12 @@ def _col_steel_layers(h=None):
 
     h defaults to the current section depth. The design ladder passes it
     explicitly to price a candidate section without mutating the globals.
+    ``design`` (Model.Member_Groups.MemberDesign) gives the layers of one
+    member's own column cage; without it the one uniform cage of
+    Structure_Parameters is used.
     """
+    if design is not None:
+        return _design_col_steel_layers(design, h)
     cover = sp.longitudinal_cover_in("column")
     h     = sp.H_COL if h is None else h
     Ab    = sp.COL_BAR_AREA
@@ -74,6 +79,37 @@ def _col_steel_layers(h=None):
                             / (sp.COL_SIDE_BARS + 1))
                            for k in range(1, sp.COL_SIDE_BARS + 1)]
             layers[1:1] = side_layers
+    return layers
+
+
+def _design_col_steel_layers(design, h=None, about="h"):
+    """The same layers for an explicit column design, bending through its h (default) or its b.
+
+    Through b (compression on an h face) the corner bars and the side-face bars sit in the two
+    outermost layers and each interior top or bottom bar is its own layer, exactly as
+    Design.Design_Driver._col_steel_layers_about_z places them for the uniform cage.
+    """
+    cover = sp.longitudinal_cover_in("column", design.bar_size, design.stirrup_bar_size)
+    Ab = design.bar_area_in2
+    if about == "b":
+        b = design.b_in if h is None else h
+        outer = (2 + design.side_bars) * Ab
+        layers = [(outer, cover)]
+        for count in (max(2, design.top_bars), max(2, design.bot_bars)):
+            if count > 2:
+                layers += [(Ab, cover + (b - 2.0 * cover) * k / (count - 1)) for k in range(1, count - 1)]
+        layers.append((outer, b - cover))
+        return sorted(layers, key=lambda layer: layer[1])
+    if about != "h":
+        raise ValueError(f"about must be 'h' or 'b', not {about!r}")
+    h = design.h_in if h is None else h
+    layers = [(design.top_bars * Ab, cover), (design.bot_bars * Ab, h - cover)]
+    if design.side_bars > 0:
+        if sp.SLAB_THICKNESS_IN is None:
+            layers.insert(1, (2 * design.side_bars * Ab, h / 2.0))
+        else:
+            layers[1:1] = [(2 * Ab, cover + (h - 2 * cover) * k / (design.side_bars + 1))
+                           for k in range(1, design.side_bars + 1)]
     return layers
 
 
@@ -220,10 +256,20 @@ def check_column_PM(Pu, Muz, Muy, diagram):
     """
     Mu = math.sqrt(Muz**2 + Muy**2)
 
+    # Both ends of the axial domain are checked before the no-moment shortcut, and a load is compared with
+    # the capacity of its own sign: a tension load divided by the compression cap would give a negative
+    # ratio that passes.
+    phi_Pmax = max(p for p, _m in diagram)
+    phi_Pt = min(p for p, _m in diagram)
+    if Pu < phi_Pt:
+        dcr = Pu / phi_Pt if phi_Pt < -1e-6 else 999.0
+        return dcr, False, Mu, 0.0
     if Mu < 1e-4:
-        phi_Pmax = diagram[0][0]
-        dcr = Pu / phi_Pmax if phi_Pmax > 1e-6 else 999.0
-        return dcr, dcr <= 1.0, Mu, phi_Pmax
+        if Pu >= 0.0:
+            dcr = Pu / phi_Pmax if phi_Pmax > 1e-6 else 999.0
+            return dcr, dcr <= 1.0, Mu, phi_Pmax
+        dcr = Pu / phi_Pt if phi_Pt < -1e-6 else 999.0
+        return dcr, dcr <= 1.0, Mu, phi_Pt
 
     sorted_pts = sorted(diagram, key=lambda p: -p[0])
     phi_Mn_cap = None

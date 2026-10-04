@@ -398,6 +398,83 @@ def _completion_checks(inputs, layout, demands, context):
     return checks
 
 
+def _hook_rejected_spacings(bar, inputs, policy, context):
+    """Spacings whose perimeter hook does not fit the perimeter beam (ACI 318-19 25.4.3.1), with the embedment
+    offered: ({spacing: ldh}, embedment). Without floor context nothing is rejected."""
+    if context is None:
+        return {}, None
+    from Design.SMRF_Beam_Slab_Strength import hook_development_length_in
+    embedment = context["beam_width_in"] - context["beam_clear_cover_in"] - context["beam_hoop_diameter_in"]
+    rejected = {}
+    for spacing in policy["spacing_options_in"]:
+        ldh, _factors = hook_development_length_in(bar, context["fc_beam_ksi"], inputs["fy_ksi"], spacing)
+        if ldh > embedment:
+            rejected[spacing] = ldh
+    return rejected, embedment
+
+
+def _envelopes(demands):
+    """The governing Mu and Vu of each layer (axis_face) over every panel and floor."""
+    envelopes = {}
+    for axis in ("x", "y"):
+        for face in ("top", "bottom"):
+            rows = [row for row in demands if row["axis"] == axis and row["face"] == face]
+            envelopes[f"{axis}_{face}"] = {"mu_kip_in_per_ft": max(row["mu_kip_in_per_ft"] for row in rows),
+                                           "vu_kip_per_ft": max(row["vu_kip_per_ft"] for row in rows)}
+    return envelopes
+
+
+def explain_unsized_layers(record):
+    """Why the ladder found no four-layer layout, read from the record's own inputs (the record is not changed).
+
+    For each layer that no offered bar sized: its demand envelope and the offered candidate (bar, spacing whose
+    hook fits) that fails the fewest layer checks, with those checks' demand and capacity. A candidate that fails
+    only one-way shear says the thickness or the supporting beams govern, not the steel.
+    """
+    data = record.get("inputs") or {}
+    try:
+        inputs, policy, context = _inputs(data.get("slab")), _policy(data.get("policy")), _context(data.get("context"))
+        demands = _demands(data.get("demand_evidence"), inputs)
+    except (ValueError, TypeError, OverflowError) as exc:
+        return {"reason": str(exc)}
+    sized = None
+    for trial in record.get("trial_history", []):
+        layers = set(trial.get("layers_sized", []))
+        sized = layers if sized is None else sized | layers
+    offered = []
+    for bar in policy["bar_sizes"]:
+        rejected, _embedment = _hook_rejected_spacings(bar, inputs, policy, context)
+        offered.extend((bar, spacing) for spacing in policy["spacing_options_in"] if spacing not in rejected)
+    explanation = {}
+    for name, envelope in _envelopes(demands).items():
+        if name in (sized or set()):
+            continue
+        axis = name.split("_")[0]
+        best = None
+        for bar, spacing in offered:
+            layer = _layout(inputs, policy, bar, axis, spacing)
+            if layer is None:
+                continue
+            failed = [c for c in _layer_checks(layer, envelope, inputs, name) if c["status"] != "pass"]
+            key = (len(failed), -bar, spacing)
+            if best is None or key < best[0]:
+                best = (key, layer, failed)
+        entry = {"demand_envelope": envelope, "closest_offered_candidate": None, "failed_checks": [],
+                 "offered_candidates": len(offered)}
+        if best is not None:
+            _key, layer, failed = best
+            entry["closest_offered_candidate"] = {
+                "bar_size": layer["bar_size"], "spacing_in": layer["spacing_in"],
+                "effective_depth_in": layer["effective_depth_in"], "area_in2_per_ft": layer["area_in2_per_ft"],
+                "phi_mn_kip_in_per_ft": layer["flexure"]["phi_mn_kip_in_per_ft"],
+                "phi_vc_kip_per_ft": layer["one_way_shear"]["phi_vc_kip_per_ft"]}
+            entry["failed_checks"] = [{"id": c["id"], "clause": c["clause"], "demand": c["demand"],
+                                       "capacity": c["capacity"], "comparison": c["comparison"], "units": c["units"]}
+                                      for c in failed]
+        explanation[name] = entry
+    return explanation
+
+
 def _open_checks():
     return [not_evaluated("slab_column_local_minimum_steel", "ACI 318-19 8.6.1.2",
                           "Applicability of the slab-column local minimum steel provision to a beam-supported slab has not been assessed."),
@@ -465,22 +542,15 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
             record["trial_history"].append({"bar_size": bar, "passed": False,
                                             "reason": "Two orthogonal face mats do not fit with required clear gap."})
             continue
-        hook_rejected = {}
+        # The mats end at the building perimeter, hooked into the perimeter
+        # beam (ACI 318-19 25.4.3.1). The hook length depends on the hook
+        # spacing (psi_r = 1.6 below 6 db), so each candidate spacing is
+        # checked with its own hook: a spacing whose hook does not fit is
+        # not offered for that bar, and a bar with no fitting spacing at
+        # all is not offered. The check on the selected layout is
+        # slab_perimeter_bar_anchorage.
+        hook_rejected, embedment = _hook_rejected_spacings(bar, inputs, resolved_policy, resolved_context)
         if resolved_context is not None:
-            # The mats end at the building perimeter, hooked into the perimeter
-            # beam (ACI 318-19 25.4.3.1). The hook length depends on the hook
-            # spacing (psi_r = 1.6 below 6 db), so each candidate spacing is
-            # checked with its own hook: a spacing whose hook does not fit is
-            # not offered for that bar, and a bar with no fitting spacing at
-            # all is not offered. The check on the selected layout is
-            # slab_perimeter_bar_anchorage.
-            from Design.SMRF_Beam_Slab_Strength import hook_development_length_in
-            embedment = (resolved_context["beam_width_in"] - resolved_context["beam_clear_cover_in"]
-                         - resolved_context["beam_hoop_diameter_in"])
-            for spacing in resolved_policy["spacing_options_in"]:
-                ldh, _factors = hook_development_length_in(bar, resolved_context["fc_beam_ksi"], inputs["fy_ksi"], spacing)
-                if ldh > embedment:
-                    hook_rejected[spacing] = ldh
             if len(hook_rejected) == len(resolved_policy["spacing_options_in"]):
                 ldh = min(hook_rejected.values())
                 record["trial_history"].append({"bar_size": bar, "passed": False,
@@ -488,11 +558,10 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
                                                           "the perimeter beam offers (25.4.3.1) at every spacing offered."})
                 continue
         layers = {}
+        envelopes = _envelopes(demands)
         for axis in ("x", "y"):
             for face in ("top", "bottom"):
-                rows = [row for row in demands if row["axis"] == axis and row["face"] == face]
-                envelope = {"mu_kip_in_per_ft": max(row["mu_kip_in_per_ft"] for row in rows),
-                            "vu_kip_per_ft": max(row["vu_kip_per_ft"] for row in rows)}
+                envelope = envelopes[f"{axis}_{face}"]
                 for spacing in resolved_policy["spacing_options_in"]:
                     if spacing in hook_rejected:
                         continue

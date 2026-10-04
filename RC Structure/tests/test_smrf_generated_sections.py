@@ -224,7 +224,7 @@ class StaggeredBeamRowsTests(unittest.TestCase):
         d['reinforcement']['beam_bar_stacking']['layers']['x']['top']['per_layer'] = [2, 1]
         with self.assertRaisesRegex(ValueError, 'not the 4'):
             beam_section_from_design(d, axis='x', position='interior', scope='beam_rectangle')
-        # Codex item 3: unequal arrays are rejected, never zipped down to fewer bars
+        # Review item 3: unequal arrays are rejected, never zipped down to fewer bars
         d['reinforcement']['beam_bar_stacking']['layers']['x']['top'] = {'per_layer': [3, 1], 'offsets_in': [2.5]}
         with self.assertRaisesRegex(ValueError, 'must match'):
             beam_section_from_design(d, axis='x', position='interior', scope='beam_rectangle')

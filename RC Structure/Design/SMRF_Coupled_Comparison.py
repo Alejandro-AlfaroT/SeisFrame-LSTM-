@@ -56,8 +56,10 @@ def _frame_base_reactions(live_pattern="all"):
         ops.wipe()
         with contextlib.redirect_stdout(io.StringIO()):
             build_design_model()
-            apply_gravity_loads(floor_factor=1.0, self_weight_factor=DEAD_FACTOR,
-                                dead_factor=DEAD_FACTOR, live_factor=LIVE_FACTOR, live_pattern=live_pattern)
+            # The comparison is of the slab-to-frame load path: both models carry the slab pressure and the
+            # framed members. The column extensions above the roof are a direct column load outside it.
+            apply_gravity_loads(floor_factor=1.0, self_weight_factor=DEAD_FACTOR, dead_factor=DEAD_FACTOR,
+                                live_factor=LIVE_FACTOR, live_pattern=live_pattern, roof_extension=False)
             run_gravity_analysis()
             ops.reactions()
         reactions = {}
@@ -113,6 +115,18 @@ def moment_significance(rows, combination_actions):
             "by_kind": by_kind}
 
 
+def coupled_sections_by_member():
+    """By-member sections of the installed grouped design for SMRF_Coupled_Analysis, at gross stiffness."""
+    from Design import SMRF_Floor_Sections as floor_sections
+    from Design.SMRF_Coupled_Analysis import BY_MEMBER_SCHEMA
+    from Model import Member_Groups as mg
+    grades = {m.design.fc_ksi for m in mg.all_members("column")}
+    if len(grades) != 1:
+        raise mg.GroupedStateError(f"Column groups use different concrete grades {sorted(grades)}; this revision keeps one.")
+    return {"schema": BY_MEMBER_SCHEMA, "floors": [floor_sections.for_floor(k) for k in range(1, sp.NUM_FLOOR + 1)],
+            "fc_col_ksi": grades.pop(), "beam_stiffness_modifier": 1.0, "column_stiffness_modifier": 1.0}
+
+
 def compare_transfer_to_coupled(slab_record, tolerance=DEFAULT_TOLERANCE, mesh_per_bay=None,
                                 combination_actions=None):
     """Run both models from the current Structure_Parameters state and compare.
@@ -126,9 +140,15 @@ def compare_transfer_to_coupled(slab_record, tolerance=DEFAULT_TOLERANCE, mesh_p
         raise ValueError("The coupled comparison needs the slab-aware state with a floor transfer.")
     geometry = {"num_bay_x": sp.NUM_BAY_X, "num_bay_y": sp.NUM_BAY_Y, "num_floor": sp.NUM_FLOOR,
                 "bay_x_in": sp.BAY_X, "bay_y_in": sp.BAY_Y, "story_h_in": sp.STORY_H}
-    sections = {"b_beam_in": sp.B_BEAM, "h_beam_in": sp.H_BEAM, "fc_beam_ksi": sp.FC_BEAM_KSI,
-                "b_col_in": sp.B_COL, "h_col_in": sp.H_COL, "fc_col_ksi": sp.FC_COL_KSI,
-                "beam_stiffness_modifier": 1.0, "column_stiffness_modifier": 1.0}
+    from Model import Member_Groups as mg
+    if mg.is_grouped():
+        # The coupled reference resolves the installed members: every floor's own beam lines and the
+        # columns of every story (below each floor; the column above a floor is the next floor's).
+        sections = coupled_sections_by_member()
+    else:
+        sections = {"b_beam_in": sp.B_BEAM, "h_beam_in": sp.H_BEAM, "fc_beam_ksi": sp.FC_BEAM_KSI,
+                    "b_col_in": sp.B_COL, "h_col_in": sp.H_COL, "fc_col_ksi": sp.FC_COL_KSI,
+                    "beam_stiffness_modifier": 1.0, "column_stiffness_modifier": 1.0}
     mesh = mesh_per_bay or comparison_mesh_per_bay(sp.NUM_BAY_X, sp.NUM_BAY_Y, sp.NUM_FLOOR)
     case = {"id": "gravity_strength_all", "dead_factor": DEAD_FACTOR, "live_factor": LIVE_FACTOR,
             "live_load_ksf": sp.FLOOR_LIVE_LOAD_KSF, "live_pattern": "all"}
@@ -163,6 +183,9 @@ def compare_transfer_to_coupled(slab_record, tolerance=DEFAULT_TOLERANCE, mesh_p
     # Asymmetric loading: the first saved ACI 6.4.2 pattern, both models.
     from Design.SMRF_Demands import live_load_patterns
     saved_cases = (sp.FLOOR_TRANSFER or {}).get("unit_cases", {})
+    if mg.is_grouped():
+        # Every floor's transfer carries the same pattern inventory (one live-pattern list per design).
+        saved_cases = next(iter((sp.FLOOR_TRANSFER or {}).get("transfers", {}).values()), {}).get("unit_cases", {})
     pattern = next((p for p in live_load_patterns(sp.NUM_BAY_X, sp.NUM_BAY_Y)
                     if f"live_pattern_{p['id']}" in saved_cases), None)
     asymmetric = None
