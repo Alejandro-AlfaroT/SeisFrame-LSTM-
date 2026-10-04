@@ -1,0 +1,2331 @@
+{
+ "sampling": {
+  "method": "latin_hypercube_discrete_v1",
+  "seed": 20261004,
+  "count": 100,
+  "population_basis": "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_20261001",
+  "parameter_order": [
+   "num_bay_x",
+   "num_bay_y",
+   "num_floor",
+   "story_height_ft",
+   "bay_x_width_ft",
+   "bay_y_width_ft",
+   "seismic_site"
+  ],
+  "levels": {
+   "num_bay_x": [
+    2,
+    3,
+    4,
+    5,
+    6
+   ],
+   "num_bay_y": [
+    2,
+    3,
+    4,
+    5,
+    6
+   ],
+   "num_floor": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   "story_height_ft": [
+    12.0,
+    12.5,
+    13.0,
+    13.5,
+    14.0,
+    14.5,
+    15.0,
+    15.5,
+    16.0,
+    16.5,
+    17.0,
+    17.5,
+    18.0
+   ],
+   "bay_x_width_ft": [
+    18.0,
+    18.5,
+    19.0,
+    19.5,
+    20.0,
+    20.5,
+    21.0,
+    21.5,
+    22.0,
+    22.5,
+    23.0,
+    23.5,
+    24.0,
+    24.5,
+    25.0,
+    25.5,
+    26.0,
+    26.5,
+    27.0,
+    27.5,
+    28.0,
+    28.5,
+    29.0,
+    29.5,
+    30.0
+   ],
+   "bay_y_width_ft": [
+    18.0,
+    18.5,
+    19.0,
+    19.5,
+    20.0,
+    20.5,
+    21.0,
+    21.5,
+    22.0,
+    22.5,
+    23.0,
+    23.5,
+    24.0,
+    24.5,
+    25.0,
+    25.5,
+    26.0,
+    26.5,
+    27.0,
+    27.5,
+    28.0,
+    28.5,
+    29.0,
+    29.5,
+    30.0
+   ],
+   "seismic_site": [
+    "sdc_c",
+    "sdc_d_low",
+    "sdc_d_high",
+    "sdc_e",
+    "sdc_e_near"
+   ]
+  },
+  "level_counts": {
+   "num_bay_x": 5,
+   "num_bay_y": 5,
+   "num_floor": 6,
+   "story_height_ft": 13,
+   "bay_x_width_ft": 25,
+   "bay_y_width_ft": 25,
+   "seismic_site": 5
+  },
+  "discrete_mapping": "u in [0, 1) -> level floor(u * level_count); one point per stratum of width 1 / count",
+  "redraws_for_repeated_structures": 0,
+  "extension_note": "a later round adds points to the same unit cube; keep this file with the dataset"
+ },
+ "points": [
+  {
+   "case_id": "case_0001",
+   "geometry_name": "lhs_bx4_by3_s4_sh17p5_bwx29_bwy22p5_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 1,
+    "num_floor": 0,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 22,
+    "bay_y_width_ft": 9,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.5973182356024751,
+    "num_bay_y": 0.2946396709221181,
+    "num_floor": 0.029629029895128087,
+    "story_height_ft": 0.8550865099038684,
+    "bay_x_width_ft": 0.9083576204634245,
+    "bay_y_width_ft": 0.3774928481257329,
+    "seismic_site": 0.8853215242346104
+   }
+  },
+  {
+   "case_id": "case_0002",
+   "geometry_name": "lhs_bx5_by3_s4_sh16p5_bwx22_bwy22_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 1,
+    "num_floor": 0,
+    "story_height_ft": 9,
+    "bay_x_width_ft": 8,
+    "bay_y_width_ft": 8,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7701249294849505,
+    "num_bay_y": 0.39864697012082445,
+    "num_floor": 0.11744164185412159,
+    "story_height_ft": 0.7602895714199762,
+    "bay_x_width_ft": 0.3238685822845534,
+    "bay_y_width_ft": 0.352957043033697,
+    "seismic_site": 0.5646582325417756
+   }
+  },
+  {
+   "case_id": "case_0003",
+   "geometry_name": "lhs_bx6_by2_s8_sh13_bwx24p5_bwy25p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 0,
+    "num_floor": 4,
+    "story_height_ft": 2,
+    "bay_x_width_ft": 13,
+    "bay_y_width_ft": 15,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9114548226875637,
+    "num_bay_y": 0.0643983481178128,
+    "num_floor": 0.7744373909074317,
+    "story_height_ft": 0.1620923112579262,
+    "bay_x_width_ft": 0.5284075314448732,
+    "bay_y_width_ft": 0.6006412841276562,
+    "seismic_site": 0.1175637664697396
+   }
+  },
+  {
+   "case_id": "case_0004",
+   "geometry_name": "lhs_bx2_by6_s7_sh16p5_bwx20p5_bwy29_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 4,
+    "num_floor": 3,
+    "story_height_ft": 9,
+    "bay_x_width_ft": 5,
+    "bay_y_width_ft": 22,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.02620107536723072,
+    "num_bay_y": 0.9986594646163698,
+    "num_floor": 0.5286347640577168,
+    "story_height_ft": 0.713423538618845,
+    "bay_x_width_ft": 0.23097864585459493,
+    "bay_y_width_ft": 0.888857900971541,
+    "seismic_site": 0.9090290894079986
+   }
+  },
+  {
+   "case_id": "case_0005",
+   "geometry_name": "lhs_bx3_by5_s6_sh13p5_bwx20p5_bwy24_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 3,
+    "num_floor": 2,
+    "story_height_ft": 3,
+    "bay_x_width_ft": 5,
+    "bay_y_width_ft": 12,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.3034050043397774,
+    "num_bay_y": 0.7773879689219327,
+    "num_floor": 0.3404916093860892,
+    "story_height_ft": 0.2630512141089045,
+    "bay_x_width_ft": 0.21361258257495688,
+    "bay_y_width_ft": 0.5015096181377019,
+    "seismic_site": 0.9618076569900268
+   }
+  },
+  {
+   "case_id": "case_0006",
+   "geometry_name": "lhs_bx4_by6_s8_sh13p5_bwx19p5_bwy27_sdc_c",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 4,
+    "num_floor": 4,
+    "story_height_ft": 3,
+    "bay_x_width_ft": 3,
+    "bay_y_width_ft": 18,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.4159850307930934,
+    "num_bay_y": 0.910871886798189,
+    "num_floor": 0.7995198208706156,
+    "story_height_ft": 0.2412079231685357,
+    "bay_x_width_ft": 0.14854187969351065,
+    "bay_y_width_ft": 0.7561678153736864,
+    "seismic_site": 0.13089807225005423
+   }
+  },
+  {
+   "case_id": "case_0007",
+   "geometry_name": "lhs_bx2_by3_s8_sh12_bwx28p5_bwy27p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 1,
+    "num_floor": 4,
+    "story_height_ft": 0,
+    "bay_x_width_ft": 21,
+    "bay_y_width_ft": 19,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.047821871900193116,
+    "num_bay_y": 0.35088748781905615,
+    "num_floor": 0.7680600527486605,
+    "story_height_ft": 0.016841144642810228,
+    "bay_x_width_ft": 0.8568794173057124,
+    "bay_y_width_ft": 0.7724414314183438,
+    "seismic_site": 0.663194724248025
+   }
+  },
+  {
+   "case_id": "case_0008",
+   "geometry_name": "lhs_bx2_by4_s5_sh13_bwx25p5_bwy30_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 2,
+    "num_floor": 1,
+    "story_height_ft": 2,
+    "bay_x_width_ft": 15,
+    "bay_y_width_ft": 24,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.0030247057472241245,
+    "num_bay_y": 0.45182188512692745,
+    "num_floor": 0.31640473783323214,
+    "story_height_ft": 0.2128694532075114,
+    "bay_x_width_ft": 0.6275701681099976,
+    "bay_y_width_ft": 0.9692668932373495,
+    "seismic_site": 0.4355756618328722
+   }
+  },
+  {
+   "case_id": "case_0009",
+   "geometry_name": "lhs_bx3_by3_s4_sh15p5_bwx20_bwy18_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 1,
+    "num_floor": 0,
+    "story_height_ft": 7,
+    "bay_x_width_ft": 4,
+    "bay_y_width_ft": 0,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.3235861149746981,
+    "num_bay_y": 0.3694408275759674,
+    "num_floor": 0.1532174480700344,
+    "story_height_ft": 0.586880519471308,
+    "bay_x_width_ft": 0.17282936340690452,
+    "bay_y_width_ft": 0.03725747566729158,
+    "seismic_site": 0.2622121580553728
+   }
+  },
+  {
+   "case_id": "case_0010",
+   "geometry_name": "lhs_bx2_by3_s9_sh15p5_bwx18_bwy20_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 1,
+    "num_floor": 5,
+    "story_height_ft": 7,
+    "bay_x_width_ft": 0,
+    "bay_y_width_ft": 4,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.05644949470949871,
+    "num_bay_y": 0.23000585462878767,
+    "num_floor": 0.8466709677077722,
+    "story_height_ft": 0.5980137303365972,
+    "bay_x_width_ft": 0.03883071116837009,
+    "bay_y_width_ft": 0.17376599396962328,
+    "seismic_site": 0.5515125918132241
+   }
+  },
+  {
+   "case_id": "case_0011",
+   "geometry_name": "lhs_bx5_by4_s5_sh16_bwx18p5_bwy27p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 2,
+    "num_floor": 1,
+    "story_height_ft": 8,
+    "bay_x_width_ft": 1,
+    "bay_y_width_ft": 19,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6327399169463311,
+    "num_bay_y": 0.4135906278360075,
+    "num_floor": 0.2602488136226784,
+    "story_height_ft": 0.648094273622222,
+    "bay_x_width_ft": 0.07671956604456273,
+    "bay_y_width_ft": 0.7946133209882196,
+    "seismic_site": 0.005956790869433923
+   }
+  },
+  {
+   "case_id": "case_0012",
+   "geometry_name": "lhs_bx5_by2_s4_sh14_bwx30_bwy28p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 0,
+    "num_floor": 0,
+    "story_height_ft": 4,
+    "bay_x_width_ft": 24,
+    "bay_y_width_ft": 21,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7321539182834319,
+    "num_bay_y": 0.05711770914101871,
+    "num_floor": 0.008212569917347397,
+    "story_height_ft": 0.33553644703253177,
+    "bay_x_width_ft": 0.9880058287185095,
+    "bay_y_width_ft": 0.8738016695267667,
+    "seismic_site": 0.17635371100977806
+   }
+  },
+  {
+   "case_id": "case_0013",
+   "geometry_name": "lhs_bx4_by6_s4_sh16_bwx19p5_bwy20p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 4,
+    "num_floor": 0,
+    "story_height_ft": 8,
+    "bay_x_width_ft": 3,
+    "bay_y_width_ft": 5,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.5621554529417712,
+    "num_bay_y": 0.9009335403411538,
+    "num_floor": 0.01762087449967875,
+    "story_height_ft": 0.6836851372070634,
+    "bay_x_width_ft": 0.13759410284520326,
+    "bay_y_width_ft": 0.2390970086227558,
+    "seismic_site": 0.7776549756765975
+   }
+  },
+  {
+   "case_id": "case_0014",
+   "geometry_name": "lhs_bx6_by2_s4_sh13p5_bwx19p5_bwy25_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 0,
+    "num_floor": 0,
+    "story_height_ft": 3,
+    "bay_x_width_ft": 3,
+    "bay_y_width_ft": 14,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9830162233611394,
+    "num_bay_y": 0.11940015913354256,
+    "num_floor": 0.10900811697597293,
+    "story_height_ft": 0.25806548514663546,
+    "bay_x_width_ft": 0.15017982745213856,
+    "bay_y_width_ft": 0.5743892836295321,
+    "seismic_site": 0.23433021656719738
+   }
+  },
+  {
+   "case_id": "case_0015",
+   "geometry_name": "lhs_bx5_by4_s9_sh15_bwx21_bwy26p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 2,
+    "num_floor": 5,
+    "story_height_ft": 6,
+    "bay_x_width_ft": 6,
+    "bay_y_width_ft": 17,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6748416526185588,
+    "num_bay_y": 0.5894641915442236,
+    "num_floor": 0.9608889881432877,
+    "story_height_ft": 0.4816313520673102,
+    "bay_x_width_ft": 0.2484832158571082,
+    "bay_y_width_ft": 0.711729109399448,
+    "seismic_site": 0.1946967165867019
+   }
+  },
+  {
+   "case_id": "case_0016",
+   "geometry_name": "lhs_bx5_by4_s6_sh13p5_bwx18_bwy22p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 2,
+    "num_floor": 2,
+    "story_height_ft": 3,
+    "bay_x_width_ft": 0,
+    "bay_y_width_ft": 9,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6249028651879712,
+    "num_bay_y": 0.4327841050371941,
+    "num_floor": 0.4573000460019092,
+    "story_height_ft": 0.28927545902318086,
+    "bay_x_width_ft": 0.01977032010583364,
+    "bay_y_width_ft": 0.3817489162380566,
+    "seismic_site": 0.680002741368806
+   }
+  },
+  {
+   "case_id": "case_0017",
+   "geometry_name": "lhs_bx2_by6_s9_sh12_bwx24p5_bwy18_sdc_e",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 4,
+    "num_floor": 5,
+    "story_height_ft": 0,
+    "bay_x_width_ft": 13,
+    "bay_y_width_ft": 0,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.15779282593349617,
+    "num_bay_y": 0.8163097772856198,
+    "num_floor": 0.8714980905443275,
+    "story_height_ft": 0.028006373184296888,
+    "bay_x_width_ft": 0.5347410200960929,
+    "bay_y_width_ft": 0.0027793957250777357,
+    "seismic_site": 0.6597721003999382
+   }
+  },
+  {
+   "case_id": "case_0018",
+   "geometry_name": "lhs_bx2_by6_s6_sh14_bwx26_bwy21_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 4,
+    "num_floor": 2,
+    "story_height_ft": 4,
+    "bay_x_width_ft": 16,
+    "bay_y_width_ft": 6,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.1497198694344421,
+    "num_bay_y": 0.8438876258539694,
+    "num_floor": 0.49067369070300787,
+    "story_height_ft": 0.32545994794268895,
+    "bay_x_width_ft": 0.656502306128978,
+    "bay_y_width_ft": 0.2486028905336699,
+    "seismic_site": 0.4041725538637617
+   }
+  },
+  {
+   "case_id": "case_0019",
+   "geometry_name": "lhs_bx6_by2_s9_sh12p5_bwx28_bwy26_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 0,
+    "num_floor": 5,
+    "story_height_ft": 1,
+    "bay_x_width_ft": 20,
+    "bay_y_width_ft": 16,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8111496452709617,
+    "num_bay_y": 0.14408504781228257,
+    "num_floor": 0.9511993549112273,
+    "story_height_ft": 0.09861079262402958,
+    "bay_x_width_ft": 0.8202324144905104,
+    "bay_y_width_ft": 0.6633069954031187,
+    "seismic_site": 0.516018716718126
+   }
+  },
+  {
+   "case_id": "case_0020",
+   "geometry_name": "lhs_bx6_by3_s9_sh17p5_bwx28p5_bwy21p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 1,
+    "num_floor": 5,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 21,
+    "bay_y_width_ft": 7,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8383448864416977,
+    "num_bay_y": 0.3456584741889392,
+    "num_floor": 0.8960471930344512,
+    "story_height_ft": 0.9083171457955977,
+    "bay_x_width_ft": 0.8691913296763222,
+    "bay_y_width_ft": 0.30277503695028607,
+    "seismic_site": 0.5955361872639859
+   }
+  },
+  {
+   "case_id": "case_0021",
+   "geometry_name": "lhs_bx3_by5_s7_sh16p5_bwx27p5_bwy28p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 3,
+    "num_floor": 3,
+    "story_height_ft": 9,
+    "bay_x_width_ft": 19,
+    "bay_y_width_ft": 21,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.3641703186345784,
+    "num_bay_y": 0.7921875878852753,
+    "num_floor": 0.5142817832071214,
+    "story_height_ft": 0.7475561554490406,
+    "bay_x_width_ft": 0.7719688629539097,
+    "bay_y_width_ft": 0.8610085538278094,
+    "seismic_site": 0.48781315053880997
+   }
+  },
+  {
+   "case_id": "case_0022",
+   "geometry_name": "lhs_bx5_by3_s4_sh13_bwx24_bwy24p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 1,
+    "num_floor": 0,
+    "story_height_ft": 2,
+    "bay_x_width_ft": 12,
+    "bay_y_width_ft": 13,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7580123746473915,
+    "num_bay_y": 0.27482832738903396,
+    "num_floor": 0.06380533518357336,
+    "story_height_ft": 0.17963918377658203,
+    "bay_x_width_ft": 0.48624009846485655,
+    "bay_y_width_ft": 0.5474336613761559,
+    "seismic_site": 0.22559737155941254
+   }
+  },
+  {
+   "case_id": "case_0023",
+   "geometry_name": "lhs_bx5_by5_s6_sh12p5_bwx21_bwy23_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 3,
+    "num_floor": 2,
+    "story_height_ft": 1,
+    "bay_x_width_ft": 6,
+    "bay_y_width_ft": 10,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7213180399609381,
+    "num_bay_y": 0.6380454558019155,
+    "num_floor": 0.44774573128504996,
+    "story_height_ft": 0.13039515093930248,
+    "bay_x_width_ft": 0.2693825648982714,
+    "bay_y_width_ft": 0.41527582358727666,
+    "seismic_site": 0.2781019052490916
+   }
+  },
+  {
+   "case_id": "case_0024",
+   "geometry_name": "lhs_bx5_by6_s9_sh17_bwx20_bwy21_sdc_e",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 4,
+    "num_floor": 5,
+    "story_height_ft": 10,
+    "bay_x_width_ft": 4,
+    "bay_y_width_ft": 6,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6574221384547347,
+    "num_bay_y": 0.8350201360652519,
+    "num_floor": 0.937930155983541,
+    "story_height_ft": 0.8253033489038395,
+    "bay_x_width_ft": 0.16351873728536592,
+    "bay_y_width_ft": 0.251073000538068,
+    "seismic_site": 0.7956205003059938
+   }
+  },
+  {
+   "case_id": "case_0025",
+   "geometry_name": "lhs_bx4_by4_s5_sh12_bwx22_bwy29p5_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 2,
+    "num_floor": 1,
+    "story_height_ft": 0,
+    "bay_x_width_ft": 8,
+    "bay_y_width_ft": 23,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.5855445918947845,
+    "num_bay_y": 0.5038354622806684,
+    "num_floor": 0.20004324062121126,
+    "story_height_ft": 0.0730710711443098,
+    "bay_x_width_ft": 0.3481328211946584,
+    "bay_y_width_ft": 0.920795784398476,
+    "seismic_site": 0.8929463556399607
+   }
+  },
+  {
+   "case_id": "case_0026",
+   "geometry_name": "lhs_bx2_by6_s6_sh17p5_bwx22p5_bwy18p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 4,
+    "num_floor": 2,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 9,
+    "bay_y_width_ft": 1,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.10221069513467207,
+    "num_bay_y": 0.9201783758811111,
+    "num_floor": 0.3895269922312139,
+    "story_height_ft": 0.8654260534691626,
+    "bay_x_width_ft": 0.3732482302262848,
+    "bay_y_width_ft": 0.04920692126906804,
+    "seismic_site": 0.5877418139852028
+   }
+  },
+  {
+   "case_id": "case_0027",
+   "geometry_name": "lhs_bx4_by2_s6_sh13p5_bwx19p5_bwy29p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 0,
+    "num_floor": 2,
+    "story_height_ft": 3,
+    "bay_x_width_ft": 3,
+    "bay_y_width_ft": 23,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.4272427465495508,
+    "num_bay_y": 0.1387192026953081,
+    "num_floor": 0.4067639369180149,
+    "story_height_ft": 0.2326858014118936,
+    "bay_x_width_ft": 0.12430122384184297,
+    "bay_y_width_ft": 0.9541345713204771,
+    "seismic_site": 0.05510947602651402
+   }
+  },
+  {
+   "case_id": "case_0028",
+   "geometry_name": "lhs_bx4_by6_s6_sh16p5_bwx29p5_bwy20p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 4,
+    "num_floor": 2,
+    "story_height_ft": 9,
+    "bay_x_width_ft": 23,
+    "bay_y_width_ft": 5,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.48273261547453755,
+    "num_bay_y": 0.8598419815520613,
+    "num_floor": 0.41690672378369015,
+    "story_height_ft": 0.7387211303596425,
+    "bay_x_width_ft": 0.9569128525322109,
+    "bay_y_width_ft": 0.2093878322950692,
+    "seismic_site": 0.6097719964658145
+   }
+  },
+  {
+   "case_id": "case_0029",
+   "geometry_name": "lhs_bx3_by2_s7_sh15p5_bwx25p5_bwy23_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 0,
+    "num_floor": 3,
+    "story_height_ft": 7,
+    "bay_x_width_ft": 15,
+    "bay_y_width_ft": 10,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.25942968616083156,
+    "num_bay_y": 0.19814867391558771,
+    "num_floor": 0.6333029741215002,
+    "story_height_ft": 0.5532908578691147,
+    "bay_x_width_ft": 0.6323380671277882,
+    "bay_y_width_ft": 0.42941322639240176,
+    "seismic_site": 0.5081998430907766
+   }
+  },
+  {
+   "case_id": "case_0030",
+   "geometry_name": "lhs_bx5_by3_s5_sh15p5_bwx18_bwy23_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 1,
+    "num_floor": 1,
+    "story_height_ft": 7,
+    "bay_x_width_ft": 0,
+    "bay_y_width_ft": 10,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7067155345572675,
+    "num_bay_y": 0.24903147550196883,
+    "num_floor": 0.32580704715302966,
+    "story_height_ft": 0.5751333317685116,
+    "bay_x_width_ft": 0.026336152691227542,
+    "bay_y_width_ft": 0.4391111354360828,
+    "seismic_site": 0.3738043784844835
+   }
+  },
+  {
+   "case_id": "case_0031",
+   "geometry_name": "lhs_bx5_by6_s4_sh14p5_bwx26p5_bwy26_sdc_e",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 4,
+    "num_floor": 0,
+    "story_height_ft": 5,
+    "bay_x_width_ft": 17,
+    "bay_y_width_ft": 16,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7436579826569383,
+    "num_bay_y": 0.8065493858325457,
+    "num_floor": 0.09702600550704085,
+    "story_height_ft": 0.3946034017138152,
+    "bay_x_width_ft": 0.6809687349948029,
+    "bay_y_width_ft": 0.6455822656273743,
+    "seismic_site": 0.6163887225008507
+   }
+  },
+  {
+   "case_id": "case_0032",
+   "geometry_name": "lhs_bx2_by4_s7_sh14_bwx18p5_bwy29_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 2,
+    "num_floor": 3,
+    "story_height_ft": 4,
+    "bay_x_width_ft": 1,
+    "bay_y_width_ft": 22,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.030506880004269668,
+    "num_bay_y": 0.4085521397875202,
+    "num_floor": 0.5900991951998975,
+    "story_height_ft": 0.3452998520432701,
+    "bay_x_width_ft": 0.06806854327108025,
+    "bay_y_width_ft": 0.9033928726891685,
+    "seismic_site": 0.4117901314006984
+   }
+  },
+  {
+   "case_id": "case_0033",
+   "geometry_name": "lhs_bx4_by4_s7_sh14_bwx19_bwy24p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 2,
+    "num_floor": 3,
+    "story_height_ft": 4,
+    "bay_x_width_ft": 2,
+    "bay_y_width_ft": 13,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.4093186467615332,
+    "num_bay_y": 0.5524325486467782,
+    "num_floor": 0.6415868433202264,
+    "story_height_ft": 0.3594945407036272,
+    "bay_x_width_ft": 0.09831891216315017,
+    "bay_y_width_ft": 0.5555580556990387,
+    "seismic_site": 0.34873749901849993
+   }
+  },
+  {
+   "case_id": "case_0034",
+   "geometry_name": "lhs_bx4_by2_s8_sh14_bwx29_bwy21p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 0,
+    "num_floor": 4,
+    "story_height_ft": 4,
+    "bay_x_width_ft": 22,
+    "bay_y_width_ft": 7,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.513814429528074,
+    "num_bay_y": 0.07619086670641963,
+    "num_floor": 0.7317855334167516,
+    "story_height_ft": 0.3168371112359128,
+    "bay_x_width_ft": 0.9166684957833197,
+    "bay_y_width_ft": 0.29752345652935835,
+    "seismic_site": 0.33753785870406317
+   }
+  },
+  {
+   "case_id": "case_0035",
+   "geometry_name": "lhs_bx6_by4_s7_sh14p5_bwx25p5_bwy23p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 2,
+    "num_floor": 3,
+    "story_height_ft": 5,
+    "bay_x_width_ft": 15,
+    "bay_y_width_ft": 11,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8814188146397482,
+    "num_bay_y": 0.5179098432273112,
+    "num_floor": 0.6064874793460269,
+    "story_height_ft": 0.40752049804204715,
+    "bay_x_width_ft": 0.6093540370547523,
+    "bay_y_width_ft": 0.45487987800529195,
+    "seismic_site": 0.6291242444277337
+   }
+  },
+  {
+   "case_id": "case_0036",
+   "geometry_name": "lhs_bx5_by5_s9_sh12_bwx29p5_bwy29_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 3,
+    "num_floor": 5,
+    "story_height_ft": 0,
+    "bay_x_width_ft": 23,
+    "bay_y_width_ft": 22,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6413853296856981,
+    "num_bay_y": 0.7215821178164084,
+    "num_floor": 0.8370745994033189,
+    "story_height_ft": 0.06881518346990172,
+    "bay_x_width_ft": 0.9416030640115919,
+    "bay_y_width_ft": 0.8916697274175377,
+    "seismic_site": 0.9559050455105276
+   }
+  },
+  {
+   "case_id": "case_0037",
+   "geometry_name": "lhs_bx5_by4_s8_sh12p5_bwx30_bwy24p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 2,
+    "num_floor": 4,
+    "story_height_ft": 1,
+    "bay_x_width_ft": 24,
+    "bay_y_width_ft": 13,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6827405371222868,
+    "num_bay_y": 0.5902682709191588,
+    "num_floor": 0.8233362125151014,
+    "story_height_ft": 0.15004381033232916,
+    "bay_x_width_ft": 0.9769614275796111,
+    "bay_y_width_ft": 0.5207663428713711,
+    "seismic_site": 0.44485811767927946
+   }
+  },
+  {
+   "case_id": "case_0038",
+   "geometry_name": "lhs_bx4_by5_s7_sh13p5_bwx27p5_bwy20_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 3,
+    "num_floor": 3,
+    "story_height_ft": 3,
+    "bay_x_width_ft": 19,
+    "bay_y_width_ft": 4,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.4584014815080119,
+    "num_bay_y": 0.7323831690076905,
+    "num_floor": 0.6525757465336081,
+    "story_height_ft": 0.2925957180109917,
+    "bay_x_width_ft": 0.795598497902859,
+    "bay_y_width_ft": 0.18101096640854508,
+    "seismic_site": 0.5761327901727437
+   }
+  },
+  {
+   "case_id": "case_0039",
+   "geometry_name": "lhs_bx5_by3_s7_sh16_bwx25_bwy27_sdc_c",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 1,
+    "num_floor": 3,
+    "story_height_ft": 8,
+    "bay_x_width_ft": 14,
+    "bay_y_width_ft": 18,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7911734088463802,
+    "num_bay_y": 0.2120833939199559,
+    "num_floor": 0.5426417509165663,
+    "story_height_ft": 0.6775579628811711,
+    "bay_x_width_ft": 0.5610590019444247,
+    "bay_y_width_ft": 0.7434922039355623,
+    "seismic_site": 0.04065063521646153
+   }
+  },
+  {
+   "case_id": "case_0040",
+   "geometry_name": "lhs_bx6_by4_s8_sh14_bwx20p5_bwy19_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 2,
+    "num_floor": 4,
+    "story_height_ft": 4,
+    "bay_x_width_ft": 5,
+    "bay_y_width_ft": 2,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8433858133126272,
+    "num_bay_y": 0.49410262771374386,
+    "num_floor": 0.7877082283155048,
+    "story_height_ft": 0.36345280154942694,
+    "bay_x_width_ft": 0.20267373978535586,
+    "bay_y_width_ft": 0.08595907284704637,
+    "seismic_site": 0.49051162629965683
+   }
+  },
+  {
+   "case_id": "case_0041",
+   "geometry_name": "lhs_bx2_by5_s5_sh15_bwx21p5_bwy29_sdc_c",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 3,
+    "num_floor": 1,
+    "story_height_ft": 6,
+    "bay_x_width_ft": 7,
+    "bay_y_width_ft": 22,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.13336708506335337,
+    "num_bay_y": 0.7499054386561432,
+    "num_floor": 0.21826253812974744,
+    "story_height_ft": 0.5282649906287756,
+    "bay_x_width_ft": 0.3139623180512705,
+    "bay_y_width_ft": 0.9139903610504096,
+    "seismic_site": 0.12297475309743837
+   }
+  },
+  {
+   "case_id": "case_0042",
+   "geometry_name": "lhs_bx6_by4_s4_sh18_bwx30_bwy20_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 2,
+    "num_floor": 0,
+    "story_height_ft": 12,
+    "bay_x_width_ft": 24,
+    "bay_y_width_ft": 4,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9376998227896881,
+    "num_bay_y": 0.48637560210677433,
+    "num_floor": 0.1403231586600297,
+    "story_height_ft": 0.9935290504676988,
+    "bay_x_width_ft": 0.9939767041389055,
+    "bay_y_width_ft": 0.16242023941900713,
+    "seismic_site": 0.9284247314528605
+   }
+  },
+  {
+   "case_id": "case_0043",
+   "geometry_name": "lhs_bx6_by4_s5_sh18_bwx29p5_bwy19_sdc_c",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 2,
+    "num_floor": 1,
+    "story_height_ft": 12,
+    "bay_x_width_ft": 23,
+    "bay_y_width_ft": 2,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8266775422263073,
+    "num_bay_y": 0.47515586694407785,
+    "num_floor": 0.18642184905036252,
+    "story_height_ft": 0.9466988141147652,
+    "bay_x_width_ft": 0.9345442063495288,
+    "bay_y_width_ft": 0.09578765651015975,
+    "seismic_site": 0.15286252224488683
+   }
+  },
+  {
+   "case_id": "case_0044",
+   "geometry_name": "lhs_bx4_by4_s5_sh13_bwx23p5_bwy24_sdc_e",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 2,
+    "num_floor": 1,
+    "story_height_ft": 2,
+    "bay_x_width_ft": 11,
+    "bay_y_width_ft": 12,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.5561074278287889,
+    "num_bay_y": 0.569493613448497,
+    "num_floor": 0.22014328120873067,
+    "story_height_ft": 0.20984612139506975,
+    "bay_x_width_ft": 0.4699610025243927,
+    "bay_y_width_ft": 0.4960474092283115,
+    "seismic_site": 0.6912296020429615
+   }
+  },
+  {
+   "case_id": "case_0045",
+   "geometry_name": "lhs_bx5_by5_s8_sh12_bwx30_bwy18p5_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 3,
+    "num_floor": 4,
+    "story_height_ft": 0,
+    "bay_x_width_ft": 24,
+    "bay_y_width_ft": 1,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7850817170895106,
+    "num_bay_y": 0.6525495563192275,
+    "num_floor": 0.6678428102432791,
+    "story_height_ft": 0.0343043913196179,
+    "bay_x_width_ft": 0.9660128183749008,
+    "bay_y_width_ft": 0.055791546503565465,
+    "seismic_site": 0.8361075177354926
+   }
+  },
+  {
+   "case_id": "case_0046",
+   "geometry_name": "lhs_bx5_by5_s7_sh14_bwx24p5_bwy25_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 3,
+    "num_floor": 3,
+    "story_height_ft": 4,
+    "bay_x_width_ft": 13,
+    "bay_y_width_ft": 14,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7161516598465323,
+    "num_bay_y": 0.7067086508058008,
+    "num_floor": 0.5369701211470534,
+    "story_height_ft": 0.37296156884353127,
+    "bay_x_width_ft": 0.5554839876173042,
+    "bay_y_width_ft": 0.5961880214910882,
+    "seismic_site": 0.2801097513059219
+   }
+  },
+  {
+   "case_id": "case_0047",
+   "geometry_name": "lhs_bx2_by2_s9_sh18_bwx20p5_bwy24_sdc_c",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 0,
+    "num_floor": 5,
+    "story_height_ft": 12,
+    "bay_x_width_ft": 5,
+    "bay_y_width_ft": 12,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.08176908426864068,
+    "num_bay_y": 0.08466517283939158,
+    "num_floor": 0.9153052739710594,
+    "story_height_ft": 0.9688196583372836,
+    "bay_x_width_ft": 0.22498351438662362,
+    "bay_y_width_ft": 0.4897191724527887,
+    "seismic_site": 0.16045753429899154
+   }
+  },
+  {
+   "case_id": "case_0048",
+   "geometry_name": "lhs_bx2_by2_s6_sh14p5_bwx26p5_bwy28_sdc_e",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 0,
+    "num_floor": 2,
+    "story_height_ft": 5,
+    "bay_x_width_ft": 17,
+    "bay_y_width_ft": 20,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.1137717206853235,
+    "num_bay_y": 0.12395131219863785,
+    "num_floor": 0.42010330804292706,
+    "story_height_ft": 0.41457629991289124,
+    "bay_x_width_ft": 0.7069068046418705,
+    "bay_y_width_ft": 0.8062324968110371,
+    "seismic_site": 0.7188734008575554
+   }
+  },
+  {
+   "case_id": "case_0049",
+   "geometry_name": "lhs_bx3_by4_s8_sh17p5_bwx24p5_bwy25p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 2,
+    "num_floor": 4,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 13,
+    "bay_y_width_ft": 15,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.3793606767718822,
+    "num_bay_y": 0.5246331740820831,
+    "num_floor": 0.7289210196736587,
+    "story_height_ft": 0.889922390761771,
+    "bay_x_width_ft": 0.5417111519512928,
+    "bay_y_width_ft": 0.6186887266002674,
+    "seismic_site": 0.455081891950827
+   }
+  },
+  {
+   "case_id": "case_0050",
+   "geometry_name": "lhs_bx3_by6_s7_sh17_bwx26p5_bwy26p5_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 4,
+    "num_floor": 3,
+    "story_height_ft": 10,
+    "bay_x_width_ft": 17,
+    "bay_y_width_ft": 17,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.2110296318467342,
+    "num_bay_y": 0.8626113516483161,
+    "num_floor": 0.5619954533016294,
+    "story_height_ft": 0.7930933941244374,
+    "bay_x_width_ft": 0.6900298853726176,
+    "bay_y_width_ft": 0.6936955612257439,
+    "seismic_site": 0.9403847941709058
+   }
+  },
+  {
+   "case_id": "case_0051",
+   "geometry_name": "lhs_bx3_by5_s9_sh14p5_bwx23p5_bwy20p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 3,
+    "num_floor": 5,
+    "story_height_ft": 5,
+    "bay_x_width_ft": 11,
+    "bay_y_width_ft": 5,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.39485007052814275,
+    "num_bay_y": 0.6655311652833135,
+    "num_floor": 0.9214438907491744,
+    "story_height_ft": 0.42172382727538904,
+    "bay_x_width_ft": 0.4546980671278098,
+    "bay_y_width_ft": 0.224306805146076,
+    "seismic_site": 0.4647515411237931
+   }
+  },
+  {
+   "case_id": "case_0052",
+   "geometry_name": "lhs_bx4_by3_s5_sh16p5_bwx21p5_bwy18p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 1,
+    "num_floor": 1,
+    "story_height_ft": 9,
+    "bay_x_width_ft": 7,
+    "bay_y_width_ft": 1,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.5728766029145069,
+    "num_bay_y": 0.26928832373936024,
+    "num_floor": 0.2945761756406227,
+    "story_height_ft": 0.7282853891635499,
+    "bay_x_width_ft": 0.2992196187221197,
+    "bay_y_width_ft": 0.06351637291537099,
+    "seismic_site": 0.3978249518875181
+   }
+  },
+  {
+   "case_id": "case_0053",
+   "geometry_name": "lhs_bx2_by3_s9_sh15_bwx22p5_bwy20p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 1,
+    "num_floor": 5,
+    "story_height_ft": 6,
+    "bay_x_width_ft": 9,
+    "bay_y_width_ft": 5,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.016945582797337592,
+    "num_bay_y": 0.20069068282089175,
+    "num_floor": 0.8683659316262031,
+    "story_height_ft": 0.4931906442489403,
+    "bay_x_width_ft": 0.395483488385388,
+    "bay_y_width_ft": 0.21624875557516204,
+    "seismic_site": 0.7539669605242976
+   }
+  },
+  {
+   "case_id": "case_0054",
+   "geometry_name": "lhs_bx4_by4_s5_sh14p5_bwx22p5_bwy28_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 2,
+    "num_floor": 1,
+    "story_height_ft": 5,
+    "bay_x_width_ft": 9,
+    "bay_y_width_ft": 20,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.4388466657326292,
+    "num_bay_y": 0.4200517023239309,
+    "num_floor": 0.2545814827616624,
+    "story_height_ft": 0.4598541510678814,
+    "bay_x_width_ft": 0.3664383190018312,
+    "bay_y_width_ft": 0.8233877751125509,
+    "seismic_site": 0.21137598840333896
+   }
+  },
+  {
+   "case_id": "case_0055",
+   "geometry_name": "lhs_bx3_by5_s9_sh16p5_bwx27_bwy29p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 3,
+    "num_floor": 5,
+    "story_height_ft": 9,
+    "bay_x_width_ft": 18,
+    "bay_y_width_ft": 23,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.20720447728495575,
+    "num_bay_y": 0.7636180629085743,
+    "num_floor": 0.8880124998797149,
+    "story_height_ft": 0.696494586494438,
+    "bay_x_width_ft": 0.7340045342844739,
+    "bay_y_width_ft": 0.9470956750137246,
+    "seismic_site": 0.7245127126159714
+   }
+  },
+  {
+   "case_id": "case_0056",
+   "geometry_name": "lhs_bx6_by6_s7_sh13_bwx19_bwy19p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 4,
+    "num_floor": 3,
+    "story_height_ft": 2,
+    "bay_x_width_ft": 2,
+    "bay_y_width_ft": 3,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9761778539330485,
+    "num_bay_y": 0.8709042857938512,
+    "num_floor": 0.6164016194956303,
+    "story_height_ft": 0.18239859175261416,
+    "bay_x_width_ft": 0.08523649942186388,
+    "bay_y_width_ft": 0.139246943846271,
+    "seismic_site": 0.02533914125810983
+   }
+  },
+  {
+   "case_id": "case_0057",
+   "geometry_name": "lhs_bx2_by5_s4_sh18_bwx23_bwy28_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 3,
+    "num_floor": 0,
+    "story_height_ft": 12,
+    "bay_x_width_ft": 10,
+    "bay_y_width_ft": 20,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.17765677409632347,
+    "num_bay_y": 0.6707520251064791,
+    "num_floor": 0.125640975292428,
+    "story_height_ft": 0.974332454237341,
+    "bay_x_width_ft": 0.4168392509618434,
+    "bay_y_width_ft": 0.8154687122404023,
+    "seismic_site": 0.3225453049889191
+   }
+  },
+  {
+   "case_id": "case_0058",
+   "geometry_name": "lhs_bx4_by5_s8_sh17p5_bwx29_bwy27_sdc_e",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 3,
+    "num_floor": 4,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 22,
+    "bay_y_width_ft": 18,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.5224812580908031,
+    "num_bay_y": 0.784770095377512,
+    "num_floor": 0.6734126368658204,
+    "story_height_ft": 0.9219420117356018,
+    "bay_x_width_ft": 0.8931625070963459,
+    "bay_y_width_ft": 0.7399566744492876,
+    "seismic_site": 0.7369720805506581
+   }
+  },
+  {
+   "case_id": "case_0059",
+   "geometry_name": "lhs_bx6_by2_s5_sh13p5_bwx27p5_bwy26p5_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 0,
+    "num_floor": 1,
+    "story_height_ft": 3,
+    "bay_x_width_ft": 19,
+    "bay_y_width_ft": 17,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8975953639585333,
+    "num_bay_y": 0.04487884846196169,
+    "num_floor": 0.27811540321927825,
+    "story_height_ft": 0.27140864522235236,
+    "bay_x_width_ft": 0.7678876775984014,
+    "bay_y_width_ft": 0.7087693091406218,
+    "seismic_site": 0.8794593973075124
+   }
+  },
+  {
+   "case_id": "case_0060",
+   "geometry_name": "lhs_bx5_by6_s4_sh12p5_bwx24_bwy25p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 4,
+    "num_floor": 0,
+    "story_height_ft": 1,
+    "bay_x_width_ft": 12,
+    "bay_y_width_ft": 15,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6953348750217403,
+    "num_bay_y": 0.8296316817235976,
+    "num_floor": 0.07508619531096868,
+    "story_height_ft": 0.10273528040728146,
+    "bay_x_width_ft": 0.4903336767833546,
+    "bay_y_width_ft": 0.6219633649918292,
+    "seismic_site": 0.47724250640151555
+   }
+  },
+  {
+   "case_id": "case_0061",
+   "geometry_name": "lhs_bx3_by2_s8_sh17_bwx26p5_bwy25_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 0,
+    "num_floor": 4,
+    "story_height_ft": 10,
+    "bay_x_width_ft": 17,
+    "bay_y_width_ft": 14,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.23772448321153522,
+    "num_bay_y": 0.00679364111544408,
+    "num_floor": 0.8112021488584409,
+    "story_height_ft": 0.7847927118922763,
+    "bay_x_width_ft": 0.7179915378557026,
+    "bay_y_width_ft": 0.5807494834486774,
+    "seismic_site": 0.3833365182228306
+   }
+  },
+  {
+   "case_id": "case_0062",
+   "geometry_name": "lhs_bx4_by5_s6_sh17_bwx23_bwy23_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 3,
+    "num_floor": 2,
+    "story_height_ft": 10,
+    "bay_x_width_ft": 10,
+    "bay_y_width_ft": 10,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.44893666458558884,
+    "num_bay_y": 0.6873342631456965,
+    "num_floor": 0.37567607349602156,
+    "story_height_ft": 0.8003978178776171,
+    "bay_x_width_ft": 0.4364943170951376,
+    "bay_y_width_ft": 0.4020337092491921,
+    "seismic_site": 0.5384358417155509
+   }
+  },
+  {
+   "case_id": "case_0063",
+   "geometry_name": "lhs_bx5_by5_s9_sh16_bwx20_bwy21_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 3,
+    "num_floor": 5,
+    "story_height_ft": 8,
+    "bay_x_width_ft": 4,
+    "bay_y_width_ft": 6,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6146239456422183,
+    "num_bay_y": 0.7548203692307774,
+    "num_floor": 0.9478793457623129,
+    "story_height_ft": 0.6601881389137192,
+    "bay_x_width_ft": 0.19878968505335842,
+    "bay_y_width_ft": 0.27314166199820633,
+    "seismic_site": 0.8544788609518414
+   }
+  },
+  {
+   "case_id": "case_0064",
+   "geometry_name": "lhs_bx4_by6_s6_sh12_bwx21p5_bwy25p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 4,
+    "num_floor": 2,
+    "story_height_ft": 0,
+    "bay_x_width_ft": 7,
+    "bay_y_width_ft": 15,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.4985194926996098,
+    "num_bay_y": 0.9498939391970442,
+    "num_floor": 0.3542485382587284,
+    "story_height_ft": 0.0098247032612478,
+    "bay_x_width_ft": 0.302222582881942,
+    "bay_y_width_ft": 0.6352237032099288,
+    "seismic_site": 0.0627631051538104
+   }
+  },
+  {
+   "case_id": "case_0065",
+   "geometry_name": "lhs_bx6_by2_s9_sh16_bwx18p5_bwy25_sdc_c",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 0,
+    "num_floor": 5,
+    "story_height_ft": 8,
+    "bay_x_width_ft": 1,
+    "bay_y_width_ft": 14,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9495482852960662,
+    "num_bay_y": 0.033836035090532984,
+    "num_floor": 0.9840963607208955,
+    "story_height_ft": 0.6300302822325122,
+    "bay_x_width_ft": 0.04398510522200512,
+    "bay_y_width_ft": 0.5650347522330151,
+    "seismic_site": 0.1857824406880536
+   }
+  },
+  {
+   "case_id": "case_0066",
+   "geometry_name": "lhs_bx3_by2_s5_sh18_bwx25p5_bwy27p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 0,
+    "num_floor": 1,
+    "story_height_ft": 12,
+    "bay_x_width_ft": 15,
+    "bay_y_width_ft": 19,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.29331068608220456,
+    "num_bay_y": 0.16512994582117596,
+    "num_floor": 0.30903762098817217,
+    "story_height_ft": 0.9350959974944275,
+    "bay_x_width_ft": 0.6103571183252005,
+    "bay_y_width_ft": 0.7689051025754816,
+    "seismic_site": 0.036486589783905836
+   }
+  },
+  {
+   "case_id": "case_0067",
+   "geometry_name": "lhs_bx2_by2_s6_sh17p5_bwx24_bwy22p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 0,
+    "num_floor": 2,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 12,
+    "bay_y_width_ft": 9,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.07111758835083354,
+    "num_bay_y": 0.1884677890233652,
+    "num_floor": 0.4352371559505862,
+    "story_height_ft": 0.9152186308821073,
+    "bay_x_width_ft": 0.5088257927688893,
+    "bay_y_width_ft": 0.364723641523478,
+    "seismic_site": 0.367134553497815
+   }
+  },
+  {
+   "case_id": "case_0068",
+   "geometry_name": "lhs_bx4_by6_s8_sh16_bwx27_bwy24p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 4,
+    "num_floor": 4,
+    "story_height_ft": 8,
+    "bay_x_width_ft": 18,
+    "bay_y_width_ft": 13,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.47492949217972646,
+    "num_bay_y": 0.9316519512965635,
+    "num_floor": 0.6840365722159357,
+    "story_height_ft": 0.6567562196984434,
+    "bay_x_width_ft": 0.7462026581300233,
+    "bay_y_width_ft": 0.5349017510299576,
+    "seismic_site": 0.6353196778132877
+   }
+  },
+  {
+   "case_id": "case_0069",
+   "geometry_name": "lhs_bx3_by2_s9_sh14p5_bwx27_bwy26_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 0,
+    "num_floor": 5,
+    "story_height_ft": 5,
+    "bay_x_width_ft": 18,
+    "bay_y_width_ft": 16,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.28968811299451197,
+    "num_bay_y": 0.09836059209629903,
+    "num_floor": 0.9070513084903261,
+    "story_height_ft": 0.3847002273394249,
+    "bay_x_width_ft": 0.7211483639015145,
+    "bay_y_width_ft": 0.6723809463925359,
+    "seismic_site": 0.82827836717451
+   }
+  },
+  {
+   "case_id": "case_0070",
+   "geometry_name": "lhs_bx4_by3_s6_sh13_bwx29p5_bwy19_sdc_e",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 1,
+    "num_floor": 2,
+    "story_height_ft": 2,
+    "bay_x_width_ft": 23,
+    "bay_y_width_ft": 2,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.5401712795502831,
+    "num_bay_y": 0.3159162960793582,
+    "num_floor": 0.4747258546784883,
+    "story_height_ft": 0.19127038786655892,
+    "bay_x_width_ft": 0.9240549347336805,
+    "bay_y_width_ft": 0.10571386426099534,
+    "seismic_site": 0.6714273489081495
+   }
+  },
+  {
+   "case_id": "case_0071",
+   "geometry_name": "lhs_bx4_by3_s6_sh18_bwx28_bwy28p5_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 1,
+    "num_floor": 2,
+    "story_height_ft": 12,
+    "bay_x_width_ft": 20,
+    "bay_y_width_ft": 21,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.5362849108804185,
+    "num_bay_y": 0.22794783803203475,
+    "num_floor": 0.39328156011048016,
+    "story_height_ft": 0.9581993039590452,
+    "bay_x_width_ft": 0.8323586842176492,
+    "bay_y_width_ft": 0.8441794615109345,
+    "seismic_site": 0.9365228919111688
+   }
+  },
+  {
+   "case_id": "case_0072",
+   "geometry_name": "lhs_bx6_by4_s9_sh16p5_bwx19_bwy23p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 2,
+    "num_floor": 5,
+    "story_height_ft": 9,
+    "bay_x_width_ft": 2,
+    "bay_y_width_ft": 11,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8764032168594867,
+    "num_bay_y": 0.4486065970782211,
+    "num_floor": 0.9726060938156764,
+    "story_height_ft": 0.7056388381513028,
+    "bay_x_width_ft": 0.1040082497448915,
+    "bay_y_width_ft": 0.4715985131501359,
+    "seismic_site": 0.10497511488552215
+   }
+  },
+  {
+   "case_id": "case_0073",
+   "geometry_name": "lhs_bx2_by6_s7_sh17p5_bwx23p5_bwy28_sdc_e",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 4,
+    "num_floor": 3,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 11,
+    "bay_y_width_ft": 20,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.09350215965528338,
+    "num_bay_y": 0.886638932385615,
+    "num_floor": 0.5539054732349566,
+    "story_height_ft": 0.8941448473749537,
+    "bay_x_width_ft": 0.4475662231111957,
+    "bay_y_width_ft": 0.8304082349293417,
+    "seismic_site": 0.7491088791665413
+   }
+  },
+  {
+   "case_id": "case_0074",
+   "geometry_name": "lhs_bx6_by6_s5_sh16_bwx23p5_bwy18_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 4,
+    "num_floor": 1,
+    "story_height_ft": 8,
+    "bay_x_width_ft": 11,
+    "bay_y_width_ft": 0,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8015789953492739,
+    "num_bay_y": 0.9571408995053546,
+    "num_floor": 0.19850618579258722,
+    "story_height_ft": 0.6260371950770548,
+    "bay_x_width_ft": 0.47868861779234523,
+    "bay_y_width_ft": 0.01974017131611697,
+    "seismic_site": 0.845144258101583
+   }
+  },
+  {
+   "case_id": "case_0075",
+   "geometry_name": "lhs_bx2_by5_s7_sh12_bwx21p5_bwy30_sdc_c",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 3,
+    "num_floor": 3,
+    "story_height_ft": 0,
+    "bay_x_width_ft": 7,
+    "bay_y_width_ft": 24,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.19217504460939544,
+    "num_bay_y": 0.7178065724775138,
+    "num_floor": 0.507099328627635,
+    "story_height_ft": 0.044097656484155284,
+    "bay_x_width_ft": 0.2858814572411986,
+    "bay_y_width_ft": 0.972226373423925,
+    "seismic_site": 0.01808342814051844
+   }
+  },
+  {
+   "case_id": "case_0076",
+   "geometry_name": "lhs_bx6_by4_s9_sh14p5_bwx28p5_bwy19p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 2,
+    "num_floor": 5,
+    "story_height_ft": 5,
+    "bay_x_width_ft": 21,
+    "bay_y_width_ft": 3,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9212885949947609,
+    "num_bay_y": 0.5307596504773762,
+    "num_floor": 0.8591354892310952,
+    "story_height_ft": 0.43295249749578324,
+    "bay_x_width_ft": 0.8723548190659761,
+    "bay_y_width_ft": 0.12370814168128991,
+    "seismic_site": 0.09895308194318635
+   }
+  },
+  {
+   "case_id": "case_0077",
+   "geometry_name": "lhs_bx3_by3_s8_sh13_bwx20_bwy28p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 1,
+    "num_floor": 4,
+    "story_height_ft": 2,
+    "bay_x_width_ft": 4,
+    "bay_y_width_ft": 21,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.33744546163105693,
+    "num_bay_y": 0.3202174743401764,
+    "num_floor": 0.717680133725371,
+    "story_height_ft": 0.22622811442385282,
+    "bay_x_width_ft": 0.18522494632155517,
+    "bay_y_width_ft": 0.8556174422234376,
+    "seismic_site": 0.25863909177814565
+   }
+  },
+  {
+   "case_id": "case_0078",
+   "geometry_name": "lhs_bx6_by2_s4_sh13p5_bwx18p5_bwy27_sdc_e",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 0,
+    "num_floor": 0,
+    "story_height_ft": 3,
+    "bay_x_width_ft": 1,
+    "bay_y_width_ft": 18,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8650038496451959,
+    "num_bay_y": 0.023288314616594613,
+    "num_floor": 0.13447315379271327,
+    "story_height_ft": 0.3055507230243609,
+    "bay_x_width_ft": 0.05887591596077394,
+    "bay_y_width_ft": 0.7247825465957892,
+    "seismic_site": 0.7028615709623862
+   }
+  },
+  {
+   "case_id": "case_0079",
+   "geometry_name": "lhs_bx3_by3_s8_sh18_bwx25_bwy30_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 1,
+    "num_floor": 4,
+    "story_height_ft": 12,
+    "bay_x_width_ft": 14,
+    "bay_y_width_ft": 24,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.34771076112419025,
+    "num_bay_y": 0.38940227713368053,
+    "num_floor": 0.7077180506260475,
+    "story_height_ft": 0.9888852383320764,
+    "bay_x_width_ft": 0.5881578072550196,
+    "bay_y_width_ft": 0.9888677951438011,
+    "seismic_site": 0.8635233183380789
+   }
+  },
+  {
+   "case_id": "case_0080",
+   "geometry_name": "lhs_bx6_by5_s4_sh12p5_bwx29_bwy29p5_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 3,
+    "num_floor": 0,
+    "story_height_ft": 1,
+    "bay_x_width_ft": 22,
+    "bay_y_width_ft": 23,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9933483315119274,
+    "num_bay_y": 0.601451312798558,
+    "num_floor": 0.16629118300851364,
+    "story_height_ft": 0.08451572649658483,
+    "bay_x_width_ft": 0.8814192339842988,
+    "bay_y_width_ft": 0.9399570898698499,
+    "seismic_site": 0.9765483767894413
+   }
+  },
+  {
+   "case_id": "case_0081",
+   "geometry_name": "lhs_bx3_by5_s5_sh17p5_bwx23_bwy24_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 3,
+    "num_floor": 1,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 10,
+    "bay_y_width_ft": 12,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.3179801890780667,
+    "num_bay_y": 0.6423712009434074,
+    "num_floor": 0.23533554035276405,
+    "story_height_ft": 0.8475785534605056,
+    "bay_x_width_ft": 0.40729419847764925,
+    "bay_y_width_ft": 0.5142054766354555,
+    "seismic_site": 0.29247798057106944
+   }
+  },
+  {
+   "case_id": "case_0082",
+   "geometry_name": "lhs_bx2_by2_s8_sh16p5_bwx22_bwy19p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 0,
+    "num_floor": 4,
+    "story_height_ft": 9,
+    "bay_x_width_ft": 8,
+    "bay_y_width_ft": 3,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.12831603460186958,
+    "num_bay_y": 0.013975479393977424,
+    "num_floor": 0.8086170171309027,
+    "story_height_ft": 0.7578963418366402,
+    "bay_x_width_ft": 0.33929965663500566,
+    "bay_y_width_ft": 0.14384645311459754,
+    "seismic_site": 0.2464734276284069
+   }
+  },
+  {
+   "case_id": "case_0083",
+   "geometry_name": "lhs_bx3_by6_s4_sh14p5_bwx21_bwy23p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 4,
+    "num_floor": 0,
+    "story_height_ft": 5,
+    "bay_x_width_ft": 6,
+    "bay_y_width_ft": 11,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.2739955476222394,
+    "num_bay_y": 0.984856863671419,
+    "num_floor": 0.04034221823929138,
+    "story_height_ft": 0.4497347859357024,
+    "bay_x_width_ft": 0.25457494363640143,
+    "bay_y_width_ft": 0.4447591575916832,
+    "seismic_site": 0.07701445876863464
+   }
+  },
+  {
+   "case_id": "case_0084",
+   "geometry_name": "lhs_bx3_by5_s4_sh12_bwx28p5_bwy22p5_sdc_c",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 3,
+    "num_floor": 0,
+    "story_height_ft": 0,
+    "bay_x_width_ft": 21,
+    "bay_y_width_ft": 9,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.2695944973279418,
+    "num_bay_y": 0.6245785004910173,
+    "num_floor": 0.08380951848144998,
+    "story_height_ft": 0.0571732648103792,
+    "bay_x_width_ft": 0.840404564347456,
+    "bay_y_width_ft": 0.39514742958307564,
+    "seismic_site": 0.14786196809657962
+   }
+  },
+  {
+   "case_id": "case_0085",
+   "geometry_name": "lhs_bx4_by4_s5_sh17_bwx26_bwy26p5_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 2,
+    "num_floor": 1,
+    "story_height_ft": 10,
+    "bay_x_width_ft": 16,
+    "bay_y_width_ft": 17,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.4639968585349527,
+    "num_bay_y": 0.4615552566723559,
+    "num_floor": 0.24710271778392698,
+    "story_height_ft": 0.8364852183920297,
+    "bay_x_width_ft": 0.6619450027007134,
+    "bay_y_width_ft": 0.6865826825849528,
+    "seismic_site": 0.810213858913814
+   }
+  },
+  {
+   "case_id": "case_0086",
+   "geometry_name": "lhs_bx5_by3_s8_sh15p5_bwx25_bwy20_sdc_e",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 1,
+    "num_floor": 4,
+    "story_height_ft": 7,
+    "bay_x_width_ft": 14,
+    "bay_y_width_ft": 4,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.7688360235121382,
+    "num_bay_y": 0.3066138306486041,
+    "num_floor": 0.7505261203566468,
+    "story_height_ft": 0.5638618222530769,
+    "bay_x_width_ft": 0.5981171657920467,
+    "bay_y_width_ft": 0.19529268662242383,
+    "seismic_site": 0.7624843998378378
+   }
+  },
+  {
+   "case_id": "case_0087",
+   "geometry_name": "lhs_bx6_by4_s4_sh15_bwx26_bwy21_sdc_c",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 2,
+    "num_floor": 0,
+    "story_height_ft": 6,
+    "bay_x_width_ft": 16,
+    "bay_y_width_ft": 6,
+    "seismic_site": 0
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9575776698341444,
+    "num_bay_y": 0.5496831562224074,
+    "num_floor": 0.05150755361985829,
+    "story_height_ft": 0.47511585541086626,
+    "bay_x_width_ft": 0.6774384557373662,
+    "bay_y_width_ft": 0.26829479438718395,
+    "seismic_site": 0.08444834181478546
+   }
+  },
+  {
+   "case_id": "case_0088",
+   "geometry_name": "lhs_bx2_by6_s8_sh12p5_bwx22_bwy26_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 4,
+    "num_floor": 4,
+    "story_height_ft": 1,
+    "bay_x_width_ft": 8,
+    "bay_y_width_ft": 16,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.18150384694827743,
+    "num_bay_y": 0.9642553773581213,
+    "num_floor": 0.7488230776231474,
+    "story_height_ft": 0.128483381233923,
+    "bay_x_width_ft": 0.35962540464866666,
+    "bay_y_width_ft": 0.6517223305354675,
+    "seismic_site": 0.8057426589791916
+   }
+  },
+  {
+   "case_id": "case_0089",
+   "geometry_name": "lhs_bx5_by2_s7_sh17_bwx27p5_bwy23p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 0,
+    "num_floor": 3,
+    "story_height_ft": 10,
+    "bay_x_width_ft": 19,
+    "bay_y_width_ft": 11,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6071977382215857,
+    "num_bay_y": 0.10799749929404237,
+    "num_floor": 0.5781099584786297,
+    "story_height_ft": 0.8164039704930769,
+    "bay_x_width_ft": 0.7840720131918235,
+    "bay_y_width_ft": 0.46859711201104676,
+    "seismic_site": 0.30583950201994914
+   }
+  },
+  {
+   "case_id": "case_0090",
+   "geometry_name": "lhs_bx2_by2_s5_sh15p5_bwx28_bwy22_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 0,
+    "num_floor": 1,
+    "story_height_ft": 7,
+    "bay_x_width_ft": 20,
+    "bay_y_width_ft": 8,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.16762927892433324,
+    "num_bay_y": 0.15954949145314687,
+    "num_floor": 0.28197633055770477,
+    "story_height_ft": 0.6130183835457418,
+    "bay_x_width_ft": 0.8084380334163649,
+    "bay_y_width_ft": 0.32633536641603345,
+    "seismic_site": 0.20774084613962793
+   }
+  },
+  {
+   "case_id": "case_0091",
+   "geometry_name": "lhs_bx6_by2_s5_sh12p5_bwx25_bwy30_sdc_e",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 0,
+    "num_floor": 1,
+    "story_height_ft": 1,
+    "bay_x_width_ft": 14,
+    "bay_y_width_ft": 24,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.8533291958143598,
+    "num_bay_y": 0.1765072945763337,
+    "num_floor": 0.3303571009745047,
+    "story_height_ft": 0.11419825383645886,
+    "bay_x_width_ft": 0.5753373781448452,
+    "bay_y_width_ft": 0.9925438310446907,
+    "seismic_site": 0.7879403252077799
+   }
+  },
+  {
+   "case_id": "case_0092",
+   "geometry_name": "lhs_bx6_by3_s6_sh15p5_bwx18_bwy19_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 1,
+    "num_floor": 2,
+    "story_height_ft": 7,
+    "bay_x_width_ft": 0,
+    "bay_y_width_ft": 2,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9004078621087441,
+    "num_bay_y": 0.25264501326953726,
+    "num_floor": 0.487416229170646,
+    "story_height_ft": 0.6042109983233541,
+    "bay_x_width_ft": 0.007115561681228767,
+    "bay_y_width_ft": 0.11318436359035924,
+    "seismic_site": 0.9980868835337227
+   }
+  },
+  {
+   "case_id": "case_0093",
+   "geometry_name": "lhs_bx3_by3_s7_sh15_bwx19_bwy21p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 1,
+    "num_floor": 3,
+    "story_height_ft": 6,
+    "bay_x_width_ft": 2,
+    "bay_y_width_ft": 7,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.24501368365386855,
+    "num_bay_y": 0.33045313478568056,
+    "num_floor": 0.5839999863030959,
+    "story_height_ft": 0.5174283538064937,
+    "bay_x_width_ft": 0.1114167821124115,
+    "bay_y_width_ft": 0.28520111989825936,
+    "seismic_site": 0.5285194222629653
+   }
+  },
+  {
+   "case_id": "case_0094",
+   "geometry_name": "lhs_bx5_by5_s4_sh15_bwx24_bwy18p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 3,
+    "num_bay_y": 3,
+    "num_floor": 0,
+    "story_height_ft": 6,
+    "bay_x_width_ft": 12,
+    "bay_y_width_ft": 1,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.6662470398080997,
+    "num_bay_y": 0.6116104314878461,
+    "num_floor": 0.03854303165898503,
+    "story_height_ft": 0.5353779552174435,
+    "bay_x_width_ft": 0.5124593010737146,
+    "bay_y_width_ft": 0.07078269763196199,
+    "seismic_site": 0.4207611565005851
+   }
+  },
+  {
+   "case_id": "case_0095",
+   "geometry_name": "lhs_bx3_by6_s9_sh17p5_bwx23_bwy27p5_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 4,
+    "num_floor": 5,
+    "story_height_ft": 11,
+    "bay_x_width_ft": 10,
+    "bay_y_width_ft": 19,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.3597448444599203,
+    "num_bay_y": 0.8948478981023794,
+    "num_floor": 0.9950952297978789,
+    "story_height_ft": 0.8764020917763764,
+    "bay_x_width_ft": 0.42995068885014764,
+    "bay_y_width_ft": 0.7831354381858658,
+    "seismic_site": 0.3129898587621265
+   }
+  },
+  {
+   "case_id": "case_0096",
+   "geometry_name": "lhs_bx4_by3_s7_sh15_bwx26_bwy22_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 2,
+    "num_bay_y": 1,
+    "num_floor": 3,
+    "story_height_ft": 6,
+    "bay_x_width_ft": 16,
+    "bay_y_width_ft": 8,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.506919622623082,
+    "num_bay_y": 0.37852587554364037,
+    "num_floor": 0.624618645189336,
+    "story_height_ft": 0.5000653649552512,
+    "bay_x_width_ft": 0.6436852494034159,
+    "bay_y_width_ft": 0.34813412426748025,
+    "seismic_site": 0.9827593804856437
+   }
+  },
+  {
+   "case_id": "case_0097",
+   "geometry_name": "lhs_bx3_by4_s6_sh17_bwx22p5_bwy22_sdc_d_low",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 2,
+    "num_floor": 2,
+    "story_height_ft": 10,
+    "bay_x_width_ft": 9,
+    "bay_y_width_ft": 8,
+    "seismic_site": 1
+   },
+   "unit_cube": {
+    "num_bay_x": 0.38819646331123586,
+    "num_bay_y": 0.5782646935000237,
+    "num_floor": 0.4650830969190226,
+    "story_height_ft": 0.7797508372968683,
+    "bay_x_width_ft": 0.3888591519431415,
+    "bay_y_width_ft": 0.3361851120996959,
+    "seismic_site": 0.3519327085352721
+   }
+  },
+  {
+   "case_id": "case_0098",
+   "geometry_name": "lhs_bx6_by6_s6_sh15_bwx27_bwy21p5_sdc_e",
+   "level_index": {
+    "num_bay_x": 4,
+    "num_bay_y": 4,
+    "num_floor": 2,
+    "story_height_ft": 6,
+    "bay_x_width_ft": 18,
+    "bay_y_width_ft": 7,
+    "seismic_site": 3
+   },
+   "unit_cube": {
+    "num_bay_x": 0.9649129153859817,
+    "num_bay_y": 0.9792638500025146,
+    "num_floor": 0.3662905335818376,
+    "story_height_ft": 0.46766484609989406,
+    "bay_x_width_ft": 0.7538842734502217,
+    "bay_y_width_ft": 0.31813147661807123,
+    "seismic_site": 0.6475395342933173
+   }
+  },
+  {
+   "case_id": "case_0099",
+   "geometry_name": "lhs_bx2_by3_s5_sh15p5_bwx21_bwy19p5_sdc_d_high",
+   "level_index": {
+    "num_bay_x": 0,
+    "num_bay_y": 1,
+    "num_floor": 1,
+    "story_height_ft": 7,
+    "bay_x_width_ft": 6,
+    "bay_y_width_ft": 3,
+    "seismic_site": 2
+   },
+   "unit_cube": {
+    "num_bay_x": 0.06598677466213845,
+    "num_bay_y": 0.2888354712422968,
+    "num_floor": 0.17454783961293976,
+    "story_height_ft": 0.549540189639138,
+    "bay_x_width_ft": 0.27537072651090255,
+    "bay_y_width_ft": 0.1595004958651853,
+    "seismic_site": 0.5422913529289555
+   }
+  },
+  {
+   "case_id": "case_0100",
+   "geometry_name": "lhs_bx3_by5_s8_sh12p5_bwx28_bwy18_sdc_e_near",
+   "level_index": {
+    "num_bay_x": 1,
+    "num_bay_y": 3,
+    "num_floor": 4,
+    "story_height_ft": 1,
+    "bay_x_width_ft": 20,
+    "bay_y_width_ft": 0,
+    "seismic_site": 4
+   },
+   "unit_cube": {
+    "num_bay_x": 0.22896769952055906,
+    "num_bay_y": 0.6924567518784479,
+    "num_floor": 0.6931548617201583,
+    "story_height_ft": 0.14258002559219618,
+    "bay_x_width_ft": 0.810409564495332,
+    "bay_y_width_ft": 0.026625860488210043,
+    "seismic_site": 0.9187430934486487
+   }
+  }
+ ]
+}

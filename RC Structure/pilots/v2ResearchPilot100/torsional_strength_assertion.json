@@ -1,0 +1,16 @@
+{
+  "schema": "seisframe_research_method_assertion_v1",
+  "method": "first_order_planar_line_nominal_strength_reference_v1",
+  "adopted_for_v2_research": true,
+  "asserted_by": "Andro (project owner, through this chat)",
+  "assertion_date": "2026-10-04",
+  "assertion_basis": "Adopt the per-design first-order frame-strength reference for V2 research qualification, after reviewing the five repaired check5 designs and the documented scope, verification and limitations. Close M1 only when that exact design passes both-resolution checks and no shear/axial-cap mechanism governs. This does not assert the legacy beam-only proxy or authorize production release.",
+  "authorization_quote": "I think based off what Ive seen, im ready to make the assertion",
+  "requires_per_design_evidence": true,
+  "production_release_authorized": false,
+  "scope": "Uniform all-grid frames, fixed bases, symmetric column cages, TIR <= 1.2; first-order directional nominal strengths; stated reference limitations retained. Unsupported or inconclusive cases remain open.",
+  "reviewer_sha256": {
+    "review_torsional_strength.py": "752c94213bf6ec99aecbe8bacf6d1641defb4afa627719b5b4fb5bca55afb4f4",
+    "_story_strength_reference.py": "ae95cc0b2d085e8e8b1b4cb2f3c33e89fbf290d8b555592787a94e60e02a0ab0"
+  }
+}
