@@ -59,7 +59,9 @@ for _entry in (str(RC_DIR), str(Path(__file__).resolve().parent)):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)
 
-PLAN_SCHEMA = "seisframe_v2_research_ntha_plan_v1"
+from Data_Generation.Research_Batch_Evidence import load_case_addendum, effective_state
+
+PLAN_SCHEMA = "seisframe_v2_research_ntha_plan_v2"
 PLAN_NAME = "ntha_plan.json"
 IDENTITY_NAME = "run_identity.json"
 STATUS_NAME = "run_status.json"
@@ -103,11 +105,11 @@ def source_identity():
     import openseespy.opensees as ops
     files = driver.source_sha256()
     chain = {}
-    for name in ("Ground_Motion_Main.py", "Data_Generation/Run_Research_Batch.py", "Data_Generation/Graph_Exporter.py",
-                 "Loads/Ground_Motion.py"):
+    from tools.source_fingerprint import CHAIN_FILES
+    for name in CHAIN_FILES:
         chain[name] = hashlib.sha256((RC_DIR / name).read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest()
     packages = {}
-    for name in ("openseespy", "openseespywin", "numpy", "scipy"):
+    for name in ("openseespy", "openseespywin", "numpy", "scipy", "matplotlib"):
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -226,7 +228,8 @@ def assign_records(cases, pairs, seed):
     return {case["case_id"]: pairs[order[index % len(order)]] for index, case in enumerate(sorted(cases, key=lambda c: c["case_id"]))}
 
 
-def build_plan(manifest_path, design_roots, record_set=DEFAULT_RECORD_SET, seed=DEFAULT_SEED):
+def build_plan(manifest_path, design_roots, record_set=DEFAULT_RECORD_SET, seed=DEFAULT_SEED,
+               addendum_roots=None, review_roots=None):
     from Design.Screening_Manifest import load_manifest
     manifest = load_manifest(manifest_path)
     cases = manifest["cases"] if isinstance(manifest, dict) else manifest
@@ -243,10 +246,15 @@ def build_plan(manifest_path, design_roots, record_set=DEFAULT_RECORD_SET, seed=
             state = design_state(_read_json(design_dir / "result.json"))
             pinned = {key: state[key] for key in ("status", "design_sha256", "profile_id", "profile_sha256")}
             pinned.update(failed_checks=len(state["failed_check_ids"]), open_checks=len(state["open_check_ids"]))
+            pinned['result_sha256'] = _sha256_file(design_dir / 'result.json')
+            addendum = load_case_addendum(case['case_id'], design_dir / 'design.json', addendum_roots, review_roots)
+            pinned['m1_addendum_sha256'] = addendum['sha256'] if addendum else None
+            pinned['effective_design_sha256'] = _sha256_json(effective_state(state, addendum))
         rows.append({"index": index, "case": case, "alpha": alphas[case["case_id"]], "record": records[case["case_id"]],
                      "design": pinned})
     used = [row["record"]["pair_key"] for row in rows]
     body = {"schema": PLAN_SCHEMA,
+            "source": source_identity(),
             "status": "declared diagnostic research batch; not production generation, not a qualification",
             "case_definition": "one structure, one recorded horizontal pair (X and Y together), one common multiplier, one nonlinear run",
             "manifest": {"name": Path(manifest_path).name, "sha256": _sha256_file(manifest_path), "cases": len(cases)},
@@ -269,23 +277,44 @@ def build_plan(manifest_path, design_roots, record_set=DEFAULT_RECORD_SET, seed=
     return {**body, "plan_sha256": _sha256_json(body)}
 
 
+def validate_plan(plan):
+    body = {key: value for key, value in plan.items() if key != 'plan_sha256'}
+    if _sha256_json(body) != plan.get('plan_sha256'):
+        raise RuntimeError('Plan was edited after it was written (SHA-256 mismatch).')
+    if plan.get('schema') != PLAN_SCHEMA or not plan.get('source'):
+        raise RuntimeError('A new v2 plan and output root are required; historical plans are not upgraded in place.')
+    ids = [row['case']['case_id'] for row in plan['cases']]
+    if len(set(ids)) != len(ids) or [r['index'] for r in plan['cases']] != list(range(len(ids))):
+        raise RuntimeError('Duplicate cases or invalid plan indices.')
+    return plan
+
+
+def require_source_match(plan, current, record=None):
+    if plan['source'] != current:
+        raise RuntimeError('Source/environment differs from the pinned run plan. Use the matching checkout or a new plan.')
+    if record is not None:
+        saved = (record.get('request_identity') or {}).get('source_sha256') or record.get('source_sha256')
+        if not isinstance(saved, dict) or not saved or _sha256_json(saved) != current['design_source_aggregate_sha256']:
+            raise RuntimeError('Design source is missing or differs from the current source. Redesign under the matching baseline.')
+
+
 def load_or_write_plan(root, args):
     root = Path(root)
     path = root / PLAN_NAME
     if path.exists():
-        plan = _read_json(path)
-        body = {key: value for key, value in plan.items() if key != "plan_sha256"}
-        if _sha256_json(body) != plan.get("plan_sha256"):
-            raise RuntimeError(f"{path} does not match its own SHA-256; it was edited after it was written.")
+        plan = validate_plan(_read_json(path))
+        require_source_match(plan, source_identity())
         if args.manifest and args.design_roots:
-            fresh = build_plan(args.manifest, args.design_roots, args.record_set, args.seed)
+            fresh = build_plan(args.manifest, args.design_roots, args.record_set, args.seed,
+                               getattr(args, 'm1_addendum_roots', None), getattr(args, 'm1_review_roots', None))
             if fresh["plan_sha256"] != plan["plan_sha256"]:
                 raise RuntimeError("The requested manifest, designs, record files, record set or seed give a different plan from "
                                    f"the one saved in {path}. A changed input needs a new output root.")
         return plan
     if not args.manifest or not args.design_roots:
         raise RuntimeError("A new output root needs --manifest and --design-roots.")
-    plan = build_plan(args.manifest, args.design_roots, args.record_set, args.seed)
+    plan = build_plan(args.manifest, args.design_roots, args.record_set, args.seed,
+                      getattr(args, 'm1_addendum_roots', None), getattr(args, 'm1_review_roots', None))
     root.mkdir(parents=True, exist_ok=True)
     _write_json(path, plan)
     return plan
@@ -329,7 +358,12 @@ def history_checks(run_dir):
     n_rows = len(arrays["time_sec"])
     aligned = (rotation.shape == moment.shape == (n_rows, len(rows))
                and len(arrays["commit_count"]) == n_rows and len(arrays["scheduled_step"]) == n_rows)
-    time_increasing = bool(n_rows < 2 or np.all(np.diff(arrays["time_sec"]) > 0))
+    time_increasing = bool(n_rows > 0 and np.isfinite(arrays['time_sec']).all()
+                           and np.all(np.diff(arrays["time_sec"]) > 0))
+    scheduled_complete = bool(n_rows > 0 and np.array_equal(arrays['scheduled_step'], np.arange(n_rows)))
+    commits = arrays['commit_count']
+    commits_valid = bool(n_rows > 0 and np.isfinite(commits).all() and np.all(commits > 0)
+                         and np.all(commits == np.floor(commits)) and np.all(np.diff(commits) > 0))
     gravity_differs = None
     if n_rows:
         gravity_differs = float(np.nanmax(np.abs(rotation[0] - arrays["gravity_rotation_rad"])))
@@ -347,6 +381,7 @@ def history_checks(run_dir):
             yielded[key] = yielded.get(key, 0) + 1
     return {"available": True, "rows": int(n_rows), "springs": int(len(rows)), "aligned": bool(aligned),
             "time_strictly_increasing": time_increasing,
+            "scheduled_steps_complete": scheduled_complete, "commit_counts_valid": commits_valid,
             "non_finite_values": int((~np.isfinite(rotation)).sum() + (~np.isfinite(moment)).sum()),
             "first_row_minus_gravity_state_max_abs_rad": gravity_differs,
             "yield_definition": f"moment reaches +My(+) or -My(-) within {YIELD_TOLERANCE:g} relative at any stored step",
@@ -371,10 +406,11 @@ def claim(case_dir):
     return True
 
 
-def run_case(root, case_id, design_roots, include_failed=False, smoke_duration_sec=None):
+def run_case(root, case_id, design_roots, include_failed=False, smoke_duration_sec=None,
+             addendum_roots=None, review_roots=None):
     """Worker: configure, install the design, scale the pair, run, export, check. Returns the status dictionary."""
     root = Path(root)
-    plan = _read_json(root / PLAN_NAME)
+    plan = validate_plan(_read_json(root / PLAN_NAME))
     row = next(item for item in plan["cases"] if item["case"]["case_id"] == case_id)
     case_dir = root / case_id
     started = time.perf_counter()
@@ -402,6 +438,8 @@ def run_case(root, case_id, design_roots, include_failed=False, smoke_duration_s
                           else "the plan pins no design for this case")
             return status
         result = _read_json(design_dir / "result.json")
+        if _sha256_file(design_dir / 'result.json') != row['design']['result_sha256']:
+            raise RuntimeError('result.json differs from the pinned design qualification record.')
         state = design_state(result)
         if state["design_sha256"] != row["design"]["design_sha256"]:
             raise RuntimeError("The design in the design roots is not the design the plan pins (different SHA-256).")
@@ -423,11 +461,24 @@ def run_case(root, case_id, design_roots, include_failed=False, smoke_duration_s
             raise RuntimeError("design.json does not match the SHA-256 recorded in result.json.")
         record = _read_json(design_dir / "design.json")
 
+        # Refuse stale source before installing a model or starting any analysis.
+        source = source_identity()
+        require_source_match(plan, source, record)
+        addendum = load_case_addendum(case_id, design_dir / 'design.json', addendum_roots, review_roots)
+        if (addendum['sha256'] if addendum else None) != row['design']['m1_addendum_sha256']:
+            raise RuntimeError('Missing, changed or unplanned M1 addendum; create a new plan for changed qualification.')
+        effective = effective_state(state, addendum)
+        if _sha256_json(effective) != row['design']['effective_design_sha256']:
+            raise RuntimeError('Effective qualification differs from the plan.')
+        identity.update(result_sha256=row['design']['result_sha256'],
+                        m1_addendum=addendum, effective_design=effective)
+
         verify.configure_case(row["case"], state["profile_id"])
         apply_record(record)
         profile = ap.apply_profile(state["profile_id"])
         source = source_identity()
         recorded_source = (record.get("request_identity") or {}).get("source_sha256") or record.get("source_sha256")
+        require_source_match(plan, source, record)
         identity.update(profile={"id": profile["id"], "sha256": profile["sha256"], "state": profile["state"],
                                  "declarations": profile["declarations"]},
                         source=source,
@@ -449,8 +500,8 @@ def run_case(root, case_id, design_roots, include_failed=False, smoke_duration_s
             entry = row["record"][axis]
             unscaled = load_ground_motion_record(entry["record_id"], scale_factor=1.0)
             actual = _sha256_file(unscaled.source_path) if unscaled.source_path else None
-            if entry["sha256"] and actual and actual != entry["sha256"]:
-                raise RuntimeError(f"Record file of {entry['record_id']} differs from the plan (SHA-256 {actual[:12]} vs {entry['sha256'][:12]}).")
+            if not entry.get('sha256') or not actual or actual != entry['sha256']:
+                raise RuntimeError(f"Record file of {entry['record_id']} has a missing or mismatched SHA-256.")
             files[axis] = {"record_id": entry["record_id"], "sha256": actual, "planned_sha256": entry["sha256"],
                            "dt_sec": unscaled.dt_sec, "npts": unscaled.npts}
             raw[axis] = pseudo_acceleration_g(_to_g(unscaled.acceleration, unscaled.units), unscaled.dt_sec, t_ref)
@@ -475,6 +526,10 @@ def run_case(root, case_id, design_roots, include_failed=False, smoke_duration_s
 
         run_args = SimpleNamespace(**plan["analysis"])
         summary = gm_main.run_one(record_x, record_y, run_args, case_dir)
+        require_source_match(plan, source_identity(), record)
+        if (_sha256_file(design_dir / 'design.json') != state['design_sha256']
+                or _sha256_file(design_dir / 'result.json') != row['design']['result_sha256']):
+            raise RuntimeError('Design evidence changed during the run.')
         installed = hd.verify_installed_design(record)
         analysis = summary.get("status") or {}
         checks = history_checks(case_dir)
@@ -486,14 +541,20 @@ def run_case(root, case_id, design_roots, include_failed=False, smoke_duration_s
             problems.append("exported hinge histories are not aligned, finite and time-ordered")
         if not checks.get("available"):
             problems.append("no hinge moment-rotation history was exported")
+        if not complete_history(analysis, checks):
+            problems.append('history does not cover the complete nonempty scheduled run')
         drift = summary.get("max_story_drift_resultant") or {}
         status.update(state="analysis_failed" if failed else "error" if problems else "completed", problems=problems,
                       completed_steps=analysis.get("completed_steps"), requested_steps=analysis.get("npts_requested"),
                       failed_step=analysis.get("failed_step"),
                       peak_story_drift_ratio=drift.get("peak_drift_resultant_ratio"), peak_drift_story=drift.get("story"),
                       total_multiplier=factor, reference_period_sec=t_ref, design=state,
+                      effective_design=effective,
+                      m1_addendum_sha256=addendum['sha256'] if addendum else None,
                       installed_design_matches_record=installed.get("consistent"), histories=checks,
-                      training_eligible=(not failed and not problems and smoke_duration_sec is None))
+                      training_eligible=(not failed and not problems and smoke_duration_sec is None
+                                         and effective.get('accepted') is True
+                                         and not effective['failed_check_ids'] and not effective['open_check_ids']))
     except Exception as exc:                               # noqa: BLE001 -- everything is kept and reported
         status.update(state="error", reason=f"{type(exc).__name__}: {exc}", traceback=traceback.format_exc())
     finally:
@@ -504,9 +565,18 @@ def run_case(root, case_id, design_roots, include_failed=False, smoke_duration_s
     return status
 
 
-def worker_main(root, case_id, design_roots, include_failed, smoke_duration_sec):
+def complete_history(analysis, checks):
+    requested = analysis.get('npts_requested')
+    return bool(isinstance(requested, int) and requested > 0
+                and analysis.get('completed_steps') == requested
+                and checks.get('rows') == requested and checks.get('springs', 0) > 0
+                and checks.get('scheduled_steps_complete') and checks.get('commit_counts_valid'))
+
+
+def worker_main(root, case_id, design_roots, include_failed, smoke_duration_sec,
+                addendum_roots=None, review_roots=None):
     case_dir = Path(root) / case_id
-    status = run_case(root, case_id, design_roots, include_failed, smoke_duration_sec)
+    status = run_case(root, case_id, design_roots, include_failed, smoke_duration_sec, addendum_roots, review_roots)
     _write_json(case_dir / STATUS_NAME, status)
     print(json.dumps({key: status.get(key) for key in ("case_id", "state", "reason", "completed_steps", "requested_steps",
                                                         "peak_story_drift_ratio", "elapsed_sec")}, default=str), flush=True)
@@ -549,10 +619,14 @@ def launch(root, case_id, args):
         command.append("--include-failed-designs")
     if args.smoke_duration_sec is not None:
         command += ["--smoke-duration-sec", str(args.smoke_duration_sec)]
+    for option, name in (('--m1-addendum-roots', 'm1_addendum_roots'), ('--m1-review-roots', 'm1_review_roots')):
+        if getattr(args, name, None):
+            command += [option, *[str(Path(p).resolve()) for p in getattr(args, name)]]
     with open(case_dir / "log.txt", "w", encoding="utf-8") as log, open(case_dir / "stderr.txt", "w", encoding="utf-8") as err:
         code = subprocess.run(command, cwd=str(RC_DIR), stdout=log, stderr=err).returncode
     if not (case_dir / STATUS_NAME).exists():              # the process died before it could report
         _write_json(case_dir / STATUS_NAME, {"case_id": case_id, "state": "error", "reason": f"worker exited with code {code} and no status",
+                                             "plan_sha256": validate_plan(_read_json(Path(root) / PLAN_NAME))['plan_sha256'],
                                              "host": socket.gethostname(), "finished": time.strftime("%Y-%m-%d %H:%M:%S")})
     return _read_json(case_dir / STATUS_NAME)
 
@@ -563,18 +637,49 @@ SUMMARY_COLUMNS = ("case_id", "state", "training_eligible", "alpha", "record_pai
                    "output_mb", "host", "reason")
 
 
+def validate_collected_case(plan, item, status, identity):
+    """Reject foreign evidence instead of trusting a copied training_eligible flag."""
+    case_id = item['case']['case_id']
+    if status.get('case_id') != case_id or status.get('plan_sha256') != plan['plan_sha256']:
+        raise RuntimeError(f'{case_id}: status belongs to a different case/plan.')
+    if identity.get('source') or status.get('state') == 'completed' or status.get('training_eligible'):
+        pin = item['design'] or {}
+        if (identity.get('plan_sha256') != plan['plan_sha256'] or identity.get('case') != item['case']
+                or identity.get('source') != plan['source']
+                or identity.get('design_source_matches_this_tree') is not True
+                or identity.get('result_sha256') != pin.get('result_sha256')
+                or (identity.get('design') or {}).get('design_sha256') != pin.get('design_sha256')
+                or (identity.get('m1_addendum') or {}).get('sha256') != pin.get('m1_addendum_sha256')
+                or _sha256_json(identity.get('effective_design')) != pin.get('effective_design_sha256')
+                or status.get('effective_design') != identity.get('effective_design')):
+            raise RuntimeError(f'{case_id}: missing or mismatched run identity/qualification.')
+    if status.get('training_eligible'):
+        effective = identity.get('effective_design') or {}
+        if (status.get('state') != 'completed' or status.get('smoke_test') is not False
+                or effective.get('accepted') is not True or effective.get('failed_check_ids')
+                or effective.get('open_check_ids')):
+            raise RuntimeError(f'{case_id}: inconsistent training eligibility.')
+
+
 def summarize(root):
     """batch_status.csv / .json from the case folders: every case of the plan, run or not, with its state."""
     root = Path(root)
-    plan = _read_json(root / PLAN_NAME)
+    plan = validate_plan(_read_json(root / PLAN_NAME))
+    expected = {item['case']['case_id'] for item in plan['cases']}
+    extra = {p.parent.name for p in root.glob('*/run_status.json')} - expected
+    if extra:
+        raise RuntimeError(f'Unplanned case folders in collection: {sorted(extra)}')
     rows = []
     for item in plan["cases"]:
         case_id = item["case"]["case_id"]
         state = case_state(root, case_id)
         status = _read_json(root / case_id / STATUS_NAME) if state.startswith("final:") else {}
+        if status:
+            identity_path = root / case_id / IDENTITY_NAME
+            validate_collected_case(plan, item, status, _read_json(identity_path) if identity_path.exists() else {})
         histories = status.get("histories") or {}
         yielded, springs = histories.get("yielded_by_class") or {}, histories.get("springs_by_class") or {}
-        design = status.get("design") or {}
+        design = status.get("effective_design") or status.get("design") or {}
         rows.append({"case_id": case_id, "state": status.get("state", state), "training_eligible": bool(status.get("training_eligible")),
                      "alpha": item["alpha"], "record_pair": item["record"]["pair_key"],
                      "reference_period_sec": status.get("reference_period_sec"), "total_multiplier": status.get("total_multiplier"),
@@ -608,6 +713,8 @@ def main(argv=None):
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--manifest", default=None, help="Screening plan of the designed cases (needed for a new output root).")
     parser.add_argument("--design-roots", nargs="+", default=None, help="Folders holding case_NNNN/design.json and result.json.")
+    parser.add_argument('--m1-addendum-roots', nargs='+', help='Folders holding case_NNNN/qualification_addendum.json.')
+    parser.add_argument('--m1-review-roots', nargs='+', help='Folders holding case_NNNN/review.json and pm65/pm129 evidence.')
     parser.add_argument("--record-set", default=DEFAULT_RECORD_SET)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--plan-only", action="store_true")
@@ -626,7 +733,8 @@ def main(argv=None):
     root = Path(args.output_root)
 
     if args.worker:
-        return worker_main(root, args.worker, args.design_roots, args.include_failed_designs, args.smoke_duration_sec)
+        return worker_main(root, args.worker, args.design_roots, args.include_failed_designs, args.smoke_duration_sec,
+                           args.m1_addendum_roots, args.m1_review_roots)
     if args.summarize_only:
         print(json.dumps(summarize(root), indent=1))
         return 0
@@ -637,6 +745,8 @@ def main(argv=None):
         return 0
     if not args.design_roots:
         raise RuntimeError("A run needs --design-roots (where this machine keeps the pinned designs).")
+    # Check existing/collected evidence before launching more work into this root.
+    summarize(root)
     selected = select_cases(plan, args)
     todo = [case_id for case_id in selected if case_state(root, case_id) == "open"]
     held = [case_id for case_id in selected if case_state(root, case_id) == "claimed"]

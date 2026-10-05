@@ -1,7 +1,7 @@
 {
  "design_source_aggregate_sha256": "9799e085240d40be539e68c7aaf33494bf248ec7e96afe62e4961515d8ba6943",
  "design_source_files": 92,
- "generation_chain_aggregate_sha256": "cdabe9b2fc5866b8d27fc7e3ea2d796dbd0a110918e3c00618209a006609893d",
+ "generation_chain_aggregate_sha256": "f7bd9ac79ed523fdd1e2462d6320b01cb049ff39bcd32fd550c3bf47d9a6896e",
  "opensees_version": "3.8.0",
  "python": "3.12.13",
  "packages": {
@@ -108,12 +108,18 @@
  },
  "generation_chain": {
   "Ground_Motion_Main.py": "2ec52d352a0f2a2868726091e3fedb69c56b37bd6afa32a82dbb3fd4f67bc719",
-  "Data_Generation/Run_Research_Batch.py": "c46e809cedc2f4d3f7e2c0405a66c192df9894f31d30dd59a8175b17d2bb9536",
+  "Data_Generation/Run_Research_Batch.py": "a8ca721cb691f4c458f847a7e162d2a4f2d0cad579111db326a9f85cca20910d",
   "Loads/Ground_Motion.py": "b0d5d18d2bc1f4c6803a060b9d1eee17087b7a9b14084b85edb9227838776110",
   "Data_Generation/Generate_Parameterized_Dataset.py": "1058bf9abb419561c2cb8d91eb38ec64e6dd725da0e3e49213d0afca7512a855",
   "Data_Generation/Generate_Hybrid_Dataset.py": "c351a3f403552993d91e024b1f30b745863d7855e0703d27afcfdaa36a6e62d0",
   "Data_Generation/Hybrid_Exporter.py": "6a92031676c3e29136edcaa0684b4b063c79b05f90136387b8b4357af0b24739",
   "Data_Generation/Graph_Exporter.py": "7f33bbc423679c7839b78cee907100ec993f62cb204ccde33d33d3bec36fa4fe",
-  "Data_Generation/Calibrate_Intensity.py": "91b891bd3d60700b8c3b6d384135889ff3fe2198f7e3dd85f0c2798d4806302b"
+  "Data_Generation/Calibrate_Intensity.py": "91b891bd3d60700b8c3b6d384135889ff3fe2198f7e3dd85f0c2798d4806302b",
+  "Data_Generation/Research_Batch_Evidence.py": "cda67eff170a329312b9e7f844e9b143d47d70380563ac58073da7cb947ee6d2",
+  "tools/source_fingerprint.py": "5e51186110478fe5678c68ddb59250510a7ccd9a1ec8979b2bd1bd431d6826dc",
+  "tools/assert_torsional_strength.py": "120f63d96079eea2f0583c44f8c8060c8a157b2072d825cfe899c60d3d4deccd",
+  "tools/review_torsional_strength.py": "752c94213bf6ec99aecbe8bacf6d1641defb4afa627719b5b4fb5bca55afb4f4",
+  "tools/_story_strength_reference.py": "6ff1dfd7b2e08e88edc223f98554c4171146c5352c3c7c0565af1b71ff9a3239",
+  "pilots/v2ResearchPilot100/torsional_strength_assertion.json": "0a6ef6e10c5018ae6d640d7b42e84f1f4d8fec48c0676636e03a94d485d7fb49"
  }
 }

@@ -113,8 +113,12 @@ class PlanAndBookkeeping(unittest.TestCase):
             self.assertEqual(plan["scaling"]["alpha_counts"], {"0.5": 33, "1.0": 34, "1.5": 33})
             self.assertEqual(plan["designs_pinned"], 1)
             first = plan["cases"][0]
-            self.assertEqual(first["design"], {"status": "designed", "design_sha256": "abc", "profile_id": "p", "profile_sha256": "q",
-                                               "failed_checks": 0, "open_checks": 1})
+            self.assertEqual({k: first['design'][k] for k in
+                              ('status','design_sha256','profile_id','profile_sha256','failed_checks','open_checks')},
+                             {"status": "designed", "design_sha256": "abc", "profile_id": "p", "profile_sha256": "q",
+                              "failed_checks": 0, "open_checks": 1})
+            self.assertEqual(first['design']['result_sha256'], batch._sha256_file(designs/'case_0001/result.json'))
+            self.assertIsNone(first['design']['m1_addendum_sha256'])
             self.assertIsNone(plan["cases"][1]["design"])
             self.assertEqual(len(first["record"]["x"]["sha256"]), 64)
             self.assertNotIn(str(designs), json.dumps(plan))                                  # no machine path in the plan
