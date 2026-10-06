@@ -56,7 +56,7 @@ SEED = 20260731
 # so every value is an exact binary fraction and its inch value (6 x ticks) is exact. The basis name
 # travels with every plan built from these ranges so a plan of an earlier population is never mistaken
 # for this one.
-POPULATION_BASIS = "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_20261001"
+POPULATION_BASIS = "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_sdc_c_d_20261005"
 GEOMETRY_INCREMENT_FT = 0.5
 RANGES = {
     "num_bay_x": tuple(range(2, 7)),
@@ -136,7 +136,9 @@ def sampling_provenance(seed, method=SAMPLING_METHOD, include_source=True):
 # Design hazard, assigned per case. Geometry alone barely moves design demand,
 # so without this axis the design loop returns near-identical members for
 # different buildings. Labels must match Structure_Parameters.SEISMIC_SITE_OPTIONS.
-SEISMIC_SITES = ("sdc_c", "sdc_d_low", "sdc_d_high", "sdc_e", "sdc_e_near")
+# V2 research population restricted to SDC C-D by user decision (2026-10-05).
+# The broader site library remains available for historical designs and code checks.
+SEISMIC_SITES = ("sdc_c", "sdc_d_low", "sdc_d_high")
 
 # The ladder of uncalibrated scale factors available to --runs-per-record.
 # Under --intensity-calibration these are placeholders: the scale for each run
@@ -470,6 +472,8 @@ def build_plan(
     record_pairs=None,
     sampling_method=SAMPLING_METHOD,
 ):
+    if any(site not in SEISMIC_SITES for site in seismic_sites):
+        raise ValueError(f"V2 generation requires SDC C-D presets: {list(SEISMIC_SITES)}.")
     # The candidate order comes from the named planner (already seeded); the plan takes a slice of it.
     geometries = candidate_geometries(seed, sampling_method)
     if geometry_offset < 0 or case_id_offset < 0:

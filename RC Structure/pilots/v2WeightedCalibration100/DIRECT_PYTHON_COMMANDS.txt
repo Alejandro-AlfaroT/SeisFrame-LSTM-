@@ -1,0 +1,51 @@
+Direct Python alternative for PyCharm PowerShell terminals that block .ps1 files
+
+These commands do not change the PowerShell execution policy. Activate the matching
+OpPy environment first. Run from RC Structure (not the repository root):
+
+    Set-Location '.\RC Structure'
+    python -X utf8 -B pilots/v2WeightedCalibration100/verify_setup.py
+
+Stop if any setup check fails. Install the prepared overlay before this check.
+
+ONE COORDINATOR, AFTER ALL FOUR FRESH DESIGN ROOTS HAVE BEEN COPIED:
+
+    python -X utf8 -B Data_Generation/Inspect_Calibration_Designs.py --design-root outputs/v2ResearchPilot100_CD_shard_01 --design-root outputs/v2ResearchPilot100_CD_shard_02 --design-root outputs/v2ResearchPilot100_CD_shard_03 --design-root outputs/v2ResearchPilot100_CD_shard_04 --case-manifest pilots/v2ResearchPilot100/screening_plan.json --allow-open-m1-diagnostic --output pilots/v2WeightedCalibration100/prepared/wcal100_CD_Fc6_r1
+
+Review design_inventory.json. The following command requires all 100 cases from the
+original roster to be eligible; it refuses missing, failed or stale cases. This is
+an explicit open-M1-only diagnostic, not an assertion or training release.
+
+    python -X utf8 -B Data_Generation/Build_Weighted_Seismic_Calibration_Plan.py --design-root outputs/v2ResearchPilot100_CD_shard_01 --design-root outputs/v2ResearchPilot100_CD_shard_02 --design-root outputs/v2ResearchPilot100_CD_shard_03 --design-root outputs/v2ResearchPilot100_CD_shard_04 --case-manifest pilots/v2ResearchPilot100/screening_plan.json --allow-open-m1-diagnostic --set-name peer_mle_all --all-pairs-in-set --max-motion-points 15000 --assignment one-per-case --seed 20261006 --shards 4 --workers 1 --minimum-scale 0.125 --initial-scale 1 --maximum-scale 8 --max-trials 7 --timeout-seconds 3600 --output-root outputs/wcal100_CD_Fc6_r1 --output pilots/v2WeightedCalibration100/prepared/wcal100_CD_Fc6_r1/plan.json
+
+Copy the prepared folder and all four complete design roots to all four machines.
+Do not rebuild the plan on each machine. See README.md for exclusion handling;
+do not silently substitute a smaller case roster.
+
+EACH DEVICE, FROM ITS RC Structure DIRECTORY:
+
+Set the device number to 1, 2, 3 or 4 on its respective machine, then execute:
+
+    $device = 1
+    $plan = 'pilots/v2WeightedCalibration100/prepared/wcal100_CD_Fc6_r1/plan.json'
+    python -X utf8 -B pilots/v2WeightedCalibration100/verify_setup.py
+    if ($LASTEXITCODE -ne 0) { throw 'Setup mismatch; stop here.' }
+    python -X utf8 -B Data_Generation/Run_Weighted_Seismic_Calibration.py --plan $plan --shard $device --preflight-only
+    if ($LASTEXITCODE -ne 0) { throw 'Preflight failed; stop here.' }
+    python -X utf8 -B Data_Generation/Run_Weighted_Seismic_Calibration.py --plan $plan --shard $device --first-job-only
+    if ($LASTEXITCODE -eq 0) {
+        python -X utf8 -B Data_Generation/Run_Weighted_Seismic_Calibration.py --plan $plan --shard $device --resume
+    } else {
+        Write-Host 'First full-record search stopped; preserve and review its evidence before continuing.'
+    }
+
+To resume after review, use the same --plan and --shard with --resume. Completed
+searches are verified and preserved; interrupted trials are not retried. Read the
+README limitations before recovery. Do not launch two owners of the same shard.
+
+COORDINATOR, AFTER COPYING COMPLETE device_01 ... device_04 OUTPUT FOLDERS:
+
+    python -X utf8 -B Data_Generation/Collect_Weighted_Seismic_Calibration.py --plan pilots/v2WeightedCalibration100/prepared/wcal100_CD_Fc6_r1/plan.json --device-root outputs/wcal100_CD_Fc6_r1/device_01 --device-root outputs/wcal100_CD_Fc6_r1/device_02 --device-root outputs/wcal100_CD_Fc6_r1/device_03 --device-root outputs/wcal100_CD_Fc6_r1/device_04 --output outputs/wcal100_CD_Fc6_r1_collection
+
+Complete collection is not necessarily successful calibration. Review target,
+unusable-trial, missing-search and original qualification fields in the summary.

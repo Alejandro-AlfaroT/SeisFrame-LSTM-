@@ -197,6 +197,39 @@ class RiskBasis(unittest.TestCase):
 
 
 class GeometryPopulation(unittest.TestCase):
+    def test_saved_pilots_cover_100_c_d_cases_and_reject_e_manifest(self):
+        for pilot in ("v2DesignPilot100", "v2ResearchPilot100"):
+            root = RC_DIR / "pilots" / pilot
+            whole = sm.load_manifest(root / "screening_plan.json")["cases"]
+            self.assertEqual(len(whole), 100)
+            self.assertEqual({s: sum(c["seismic_site"] == s for c in whole) for s in gen.SEISMIC_SITES},
+                             {"sdc_c": 33, "sdc_d_low": 34, "sdc_d_high": 33})
+            shards = []
+            for shard in range(1, 5):
+                part = sm.load_manifest(root / f"shard_{shard:02d}_screening_plan.json")["cases"]
+                self.assertEqual(len(part), 25)
+                shards.extend(part)
+            self.assertEqual(sorted(shards, key=lambda c: c["case_id"]), whole)
+            self.assertEqual(len({c["case_id"] for c in shards}), 100)
+            bad = json.loads((root / "screening_plan.json").read_text())
+            bad["cases"][0]["seismic_site"] = "sdc_e"
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "e.json"
+                path.write_text(json.dumps(bad))
+                with self.assertRaisesRegex(ValueError, "sdc_e"):
+                    sm.load_manifest(path)
+
+    def test_generation_hazards_are_c_d_and_reject_e(self):
+        self.assertEqual(gen.SEISMIC_SITES, ("sdc_c", "sdc_d_low", "sdc_d_high"))
+        for label in gen.SEISMIC_SITES:
+            _, sds, sd1, s1 = sp.seismic_site_by_label(label)
+            self.assertIn(seismic_design_category(sds, sd1, s1, sp.ASCE_RISK_CATEGORY), ("C", "D"))
+        for site in ("sdc_e", "sdc_e_near"):
+            with self.assertRaises(ValueError):
+                gen.build_plan(1, [1], seismic_sites=(site,))
+            with self.assertRaises(ValueError):
+                verify.plan_cases(1, seismic_sites=(site,))
+
     def test_range_endpoints_levels_and_unchanged_counts(self):
         ranges = gen.RANGES
         self.assertEqual(gen.GEOMETRY_INCREMENT_FT, 0.5)

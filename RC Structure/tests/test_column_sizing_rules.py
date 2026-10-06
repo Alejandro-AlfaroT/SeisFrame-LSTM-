@@ -139,7 +139,7 @@ class SearchRepairsAfterTheSecondScreen(unittest.TestCase):
         from Design.Section_Design import beam_ladder
         self.columns = column_ladder()
         self.beams = beam_ladder(span_in=216.0, story_height_in=144.0)
-        self.ci = self.columns.index((26.0, 26.0, 5.0))
+        self.ci = self.columns.index((26.0, 26.0, 6.0))
         self.bi = self.beams.index((12.0, 22.0, 5.0))
 
     def plan(self, worst, **flags):

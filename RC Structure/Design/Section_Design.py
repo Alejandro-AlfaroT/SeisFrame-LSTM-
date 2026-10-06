@@ -47,7 +47,8 @@ BEAM_DEPTHS_IN = (16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 36.0)
 # credit both still count in full; beams and slab stop at 8 ksi (the slab is cast with the beams). Column
 # concrete stronger than 1.4 times the floor's is carried through the joint by placing column-strength
 # concrete in the floor at the column (ACI 318-19 15.5(a)), which is also what the joint strength assumes.
-COLUMN_CONCRETE_STRENGTHS_KSI = (5.0, 6.0, 8.0, 10.0)
+# Column grades revised by user decision 2026-10-05: 6-10 ksi in 1-ksi steps.
+COLUMN_CONCRETE_STRENGTHS_KSI = (6.0, 7.0, 8.0, 9.0, 10.0)
 BEAM_CONCRETE_STRENGTHS_KSI = (5.0, 6.0, 8.0)
 CONCRETE_STRENGTHS_KSI = tuple(sorted(set(COLUMN_CONCRETE_STRENGTHS_KSI) | set(BEAM_CONCRETE_STRENGTHS_KSI)))
 # Large geometry is the last resort (user decision 2026-10-03; the tallest frames are nine stories): a column

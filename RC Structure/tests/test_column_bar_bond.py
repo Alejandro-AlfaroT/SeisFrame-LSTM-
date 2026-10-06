@@ -129,7 +129,7 @@ class CapacityCheckAndPlanner(unittest.TestCase):
     def test_the_planner_steps_the_column_and_the_reason_is_declared(self):
         columns = Section_Design.column_ladder()
         beams = Section_Design.beam_ladder(span_in=240.0, story_height_in=168.0)
-        ci = next(i for i, r in enumerate(columns) if r == (32.0, 32.0, 5.0))
+        ci = next(i for i, r in enumerate(columns) if r == (32.0, 32.0, 6.0))
         bi = next(i for i, r in enumerate(beams) if r[1] == 24.0)
         flags = {"drift_ok": True, "scwb_ok": True, "joint_scwb_failed": False, "capacity_accepted": False,
                  "beam_section_adequate": True, "beam_hoops_selected": True, "beam_bars_thread": True,

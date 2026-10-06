@@ -1,7 +1,7 @@
 {
- "design_source_aggregate_sha256": "9799e085240d40be539e68c7aaf33494bf248ec7e96afe62e4961515d8ba6943",
+ "design_source_aggregate_sha256": "13c7a42c7cbfce28f335179e49d3f6e460c1c359f76ec877ac35de5f6850c80a",
  "design_source_files": 92,
- "generation_chain_aggregate_sha256": "f7bd9ac79ed523fdd1e2462d6320b01cb049ff39bcd32fd550c3bf47d9a6896e",
+ "generation_chain_aggregate_sha256": "e574c2a0e5066cae4d2dd9e62686a49bfcdf2930fb44da3aa0334bed2d146e8f",
  "opensees_version": "3.8.0",
  "python": "3.12.13",
  "packages": {
@@ -47,7 +47,7 @@
   "Design/Joint_Design_Tracking.py": "3b16dd76f0cec189ad38c8e18df94a8021e84dbb0490a8f0bb5c8ddfa7aa6115",
   "Design/Replay_Uniform_Candidate.py": "05b1dd1794e47491605a040fd4c5037d8ebfcec6a7b922a863e38a3d04030fee",
   "Design/Screening_Manifest.py": "308a2dc62e8674fec8e6d5278b51ca436c4503101cbb295f219883d882e9883d",
-  "Design/Section_Design.py": "c7e77f8b8b40c47d986b0d5a2a89a4ba2ff88186cc0965ca2e2793a05bf5a0de",
+  "Design/Section_Design.py": "a8cbb5559bedefe196e0e5df4bab5e289cd9ec3ed73353f855008ad41484c83d",
   "Design/SMRF_Beam_Actions.py": "9eeae211003d55c162a0b3d9943bb2d20922ccde118bf7f9088106f46c6e5771",
   "Design/SMRF_Beam_Slab_Strength.py": "59b6f3d3256966a9cdf82a1db5a209ce87612c5d8c852110e4cdd3bae8eba46e",
   "Design/SMRF_Cage_Geometry.py": "7a4f3e1bda113dc47abde574091f98665e4ef8584d5c6fa7a754e58112808628",
@@ -104,13 +104,13 @@
   "Model/Sections.py": "7b39acd511d9f3e705d86d2f1691f7effe802b5d2c731ad8db9bb4c8aea6c4bc",
   "RC_Design_Check.py": "dcd3976ac351e4bf0a9051f372727e9545e42b2bbba4de419da17c30d822dde8",
   "Redesign.py": "76e1a38ace606864db7299773fa4ec5ac8580a3b9ec18edc989429bad054dac7",
-  "Structure_Parameters.py": "b4386f7fd07a9aa75aa6a1d14bfeb12c2e71f75866a4f5aafa3c33afa91f9ce0"
+  "Structure_Parameters.py": "1ead116e809bb0c837d893063bdc8260e2c373aac741cc7b3f89078e640d4a55"
  },
  "generation_chain": {
   "Ground_Motion_Main.py": "2ec52d352a0f2a2868726091e3fedb69c56b37bd6afa32a82dbb3fd4f67bc719",
   "Data_Generation/Run_Research_Batch.py": "a8ca721cb691f4c458f847a7e162d2a4f2d0cad579111db326a9f85cca20910d",
   "Loads/Ground_Motion.py": "b0d5d18d2bc1f4c6803a060b9d1eee17087b7a9b14084b85edb9227838776110",
-  "Data_Generation/Generate_Parameterized_Dataset.py": "1058bf9abb419561c2cb8d91eb38ec64e6dd725da0e3e49213d0afca7512a855",
+  "Data_Generation/Generate_Parameterized_Dataset.py": "09cb5de69f7a2bfb29e89241c49adcd766c48ad2e02c9c57d4b00cc4bf7c97ac",
   "Data_Generation/Generate_Hybrid_Dataset.py": "c351a3f403552993d91e024b1f30b745863d7855e0703d27afcfdaa36a6e62d0",
   "Data_Generation/Hybrid_Exporter.py": "6a92031676c3e29136edcaa0684b4b063c79b05f90136387b8b4357af0b24739",
   "Data_Generation/Graph_Exporter.py": "7f33bbc423679c7839b78cee907100ec993f62cb204ccde33d33d3bec36fa4fe",

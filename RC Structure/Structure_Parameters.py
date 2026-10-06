@@ -22,7 +22,7 @@ BAY_Y = 120.0
 STORY_H = 120.0
 
 # Material strengths
-FC_COL_KSI = 5.0
+FC_COL_KSI = 6.0
 FC_BEAM_KSI = 4.0
 
 FY_KSI = 60.0

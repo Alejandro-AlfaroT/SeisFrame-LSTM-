@@ -1,6 +1,6 @@
 {
  "schema": "seisframe_v2_screening_plan_v1",
- "status": "prepared_for_v2ResearchPilot100_not_executed",
+ "status": "prepared_for_v2ResearchPilot100_CD_not_executed",
  "scope": "Design pilot on a Latin hypercube sample of the V2 population: checks the automatic design across the parameter space before generation. PROBE assertions; not a training dataset and not an acceptance.",
  "profile_id": "v2_nonlinear_flexure_anchored_energy_research_v1",
  "design_basis": {
@@ -32,7 +32,7 @@
    30.0
   ],
   "site_class": "C",
-  "population_basis": "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_20261001"
+  "population_basis": "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_sdc_c_d_20261005"
  },
  "nonlinear_profile": {
   "element_formulation": "imk",
@@ -47,7 +47,7 @@
   "initial_workers": 1,
   "subsequent_max_workers": 4,
   "max_section_iter": 16,
-  "output_root": "outputs/v2ResearchPilot100_shard_01",
+  "output_root": "outputs/v2ResearchPilot100_CD_shard_01",
   "fresh_root_required": true,
   "retry_policy": "No retries with a changed budget; a changed input, source or assumption needs a new output root."
  },
@@ -64,7 +64,7 @@
   "method": "latin_hypercube_discrete_v1",
   "seed": 20261004,
   "count": 100,
-  "population_basis": "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_20261001",
+  "population_basis": "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_sdc_c_d_20261005",
   "parameter_order": [
    "num_bay_x",
    "num_bay_y",
@@ -169,9 +169,7 @@
    "seismic_site": [
     "sdc_c",
     "sdc_d_low",
-    "sdc_d_high",
-    "sdc_e",
-    "sdc_e_near"
+    "sdc_d_high"
    ]
   },
   "level_counts": {
@@ -181,7 +179,7 @@
    "story_height_ft": 13,
    "bay_x_width_ft": 25,
    "bay_y_width_ft": 25,
-   "seismic_site": 5
+   "seismic_site": 3
   },
   "discrete_mapping": "u in [0, 1) -> level floor(u * level_count); one point per stratum of width 1 / count",
   "redraws_for_repeated_structures": 0,
@@ -199,8 +197,8 @@
    "bay_x_width_ft": 29.0,
    "bay_y_width_ft": 22.5,
    "story_height_ft": 17.5,
-   "seismic_site": "sdc_e_near",
-   "geometry_name": "lhs_bx4_by3_s4_sh17p5_bwx29_bwy22p5_sdc_e_near",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx4_by3_s4_sh17p5_bwx29_bwy22p5_sdc_d_high",
    "purpose": "Latin hypercube point 1 of 100, seed 20261004."
   },
   {
@@ -212,8 +210,8 @@
    "bay_x_width_ft": 20.5,
    "bay_y_width_ft": 24.0,
    "story_height_ft": 13.5,
-   "seismic_site": "sdc_e_near",
-   "geometry_name": "lhs_bx3_by5_s6_sh13p5_bwx20p5_bwy24_sdc_e_near",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx3_by5_s6_sh13p5_bwx20p5_bwy24_sdc_d_high",
    "purpose": "Latin hypercube point 5 of 100, seed 20261004."
   },
   {
@@ -225,8 +223,8 @@
    "bay_x_width_ft": 20.0,
    "bay_y_width_ft": 18.0,
    "story_height_ft": 15.5,
-   "seismic_site": "sdc_d_low",
-   "geometry_name": "lhs_bx3_by3_s4_sh15p5_bwx20_bwy18_sdc_d_low",
+   "seismic_site": "sdc_c",
+   "geometry_name": "lhs_bx3_by3_s4_sh15p5_bwx20_bwy18_sdc_c",
    "purpose": "Latin hypercube point 9 of 100, seed 20261004."
   },
   {
@@ -238,8 +236,8 @@
    "bay_x_width_ft": 19.5,
    "bay_y_width_ft": 20.5,
    "story_height_ft": 16.0,
-   "seismic_site": "sdc_e",
-   "geometry_name": "lhs_bx4_by6_s4_sh16_bwx19p5_bwy20p5_sdc_e",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx4_by6_s4_sh16_bwx19p5_bwy20p5_sdc_d_high",
    "purpose": "Latin hypercube point 13 of 100, seed 20261004."
   },
   {
@@ -251,8 +249,8 @@
    "bay_x_width_ft": 24.5,
    "bay_y_width_ft": 18.0,
    "story_height_ft": 12.0,
-   "seismic_site": "sdc_e",
-   "geometry_name": "lhs_bx2_by6_s9_sh12_bwx24p5_bwy18_sdc_e",
+   "seismic_site": "sdc_d_low",
+   "geometry_name": "lhs_bx2_by6_s9_sh12_bwx24p5_bwy18_sdc_d_low",
    "purpose": "Latin hypercube point 17 of 100, seed 20261004."
   },
   {
@@ -264,8 +262,8 @@
    "bay_x_width_ft": 27.5,
    "bay_y_width_ft": 28.5,
    "story_height_ft": 16.5,
-   "seismic_site": "sdc_d_high",
-   "geometry_name": "lhs_bx3_by5_s7_sh16p5_bwx27p5_bwy28p5_sdc_d_high",
+   "seismic_site": "sdc_d_low",
+   "geometry_name": "lhs_bx3_by5_s7_sh16p5_bwx27p5_bwy28p5_sdc_d_low",
    "purpose": "Latin hypercube point 21 of 100, seed 20261004."
   },
   {
@@ -277,8 +275,8 @@
    "bay_x_width_ft": 22.0,
    "bay_y_width_ft": 29.5,
    "story_height_ft": 12.0,
-   "seismic_site": "sdc_e_near",
-   "geometry_name": "lhs_bx4_by4_s5_sh12_bwx22_bwy29p5_sdc_e_near",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx4_by4_s5_sh12_bwx22_bwy29p5_sdc_d_high",
    "purpose": "Latin hypercube point 25 of 100, seed 20261004."
   },
   {
@@ -290,8 +288,8 @@
    "bay_x_width_ft": 25.5,
    "bay_y_width_ft": 23.0,
    "story_height_ft": 15.5,
-   "seismic_site": "sdc_d_high",
-   "geometry_name": "lhs_bx3_by2_s7_sh15p5_bwx25p5_bwy23_sdc_d_high",
+   "seismic_site": "sdc_d_low",
+   "geometry_name": "lhs_bx3_by2_s7_sh15p5_bwx25p5_bwy23_sdc_d_low",
    "purpose": "Latin hypercube point 29 of 100, seed 20261004."
   },
   {
@@ -316,8 +314,8 @@
    "bay_x_width_ft": 30.0,
    "bay_y_width_ft": 24.5,
    "story_height_ft": 12.5,
-   "seismic_site": "sdc_d_high",
-   "geometry_name": "lhs_bx5_by4_s8_sh12p5_bwx30_bwy24p5_sdc_d_high",
+   "seismic_site": "sdc_d_low",
+   "geometry_name": "lhs_bx5_by4_s8_sh12p5_bwx30_bwy24p5_sdc_d_low",
    "purpose": "Latin hypercube point 37 of 100, seed 20261004."
   },
   {
@@ -342,8 +340,8 @@
    "bay_x_width_ft": 30.0,
    "bay_y_width_ft": 18.5,
    "story_height_ft": 12.0,
-   "seismic_site": "sdc_e_near",
-   "geometry_name": "lhs_bx5_by5_s8_sh12_bwx30_bwy18p5_sdc_e_near",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx5_by5_s8_sh12_bwx30_bwy18p5_sdc_d_high",
    "purpose": "Latin hypercube point 45 of 100, seed 20261004."
   },
   {
@@ -355,8 +353,8 @@
    "bay_x_width_ft": 24.5,
    "bay_y_width_ft": 25.5,
    "story_height_ft": 17.5,
-   "seismic_site": "sdc_d_high",
-   "geometry_name": "lhs_bx3_by4_s8_sh17p5_bwx24p5_bwy25p5_sdc_d_high",
+   "seismic_site": "sdc_d_low",
+   "geometry_name": "lhs_bx3_by4_s8_sh17p5_bwx24p5_bwy25p5_sdc_d_low",
    "purpose": "Latin hypercube point 49 of 100, seed 20261004."
   },
   {
@@ -368,8 +366,8 @@
    "bay_x_width_ft": 22.5,
    "bay_y_width_ft": 20.5,
    "story_height_ft": 15.0,
-   "seismic_site": "sdc_e",
-   "geometry_name": "lhs_bx2_by3_s9_sh15_bwx22p5_bwy20p5_sdc_e",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx2_by3_s9_sh15_bwx22p5_bwy20p5_sdc_d_high",
    "purpose": "Latin hypercube point 53 of 100, seed 20261004."
   },
   {
@@ -381,8 +379,8 @@
    "bay_x_width_ft": 23.0,
    "bay_y_width_ft": 28.0,
    "story_height_ft": 18.0,
-   "seismic_site": "sdc_d_low",
-   "geometry_name": "lhs_bx2_by5_s4_sh18_bwx23_bwy28_sdc_d_low",
+   "seismic_site": "sdc_c",
+   "geometry_name": "lhs_bx2_by5_s4_sh18_bwx23_bwy28_sdc_c",
    "purpose": "Latin hypercube point 57 of 100, seed 20261004."
   },
   {
@@ -420,8 +418,8 @@
    "bay_x_width_ft": 27.0,
    "bay_y_width_ft": 26.0,
    "story_height_ft": 14.5,
-   "seismic_site": "sdc_e_near",
-   "geometry_name": "lhs_bx3_by2_s9_sh14p5_bwx27_bwy26_sdc_e_near",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx3_by2_s9_sh14p5_bwx27_bwy26_sdc_d_high",
    "purpose": "Latin hypercube point 69 of 100, seed 20261004."
   },
   {
@@ -433,8 +431,8 @@
    "bay_x_width_ft": 23.5,
    "bay_y_width_ft": 28.0,
    "story_height_ft": 17.5,
-   "seismic_site": "sdc_e",
-   "geometry_name": "lhs_bx2_by6_s7_sh17p5_bwx23p5_bwy28_sdc_e",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx2_by6_s7_sh17p5_bwx23p5_bwy28_sdc_d_high",
    "purpose": "Latin hypercube point 73 of 100, seed 20261004."
   },
   {
@@ -446,8 +444,8 @@
    "bay_x_width_ft": 20.0,
    "bay_y_width_ft": 28.5,
    "story_height_ft": 13.0,
-   "seismic_site": "sdc_d_low",
-   "geometry_name": "lhs_bx3_by3_s8_sh13_bwx20_bwy28p5_sdc_d_low",
+   "seismic_site": "sdc_c",
+   "geometry_name": "lhs_bx3_by3_s8_sh13_bwx20_bwy28p5_sdc_c",
    "purpose": "Latin hypercube point 77 of 100, seed 20261004."
   },
   {
@@ -459,8 +457,8 @@
    "bay_x_width_ft": 23.0,
    "bay_y_width_ft": 24.0,
    "story_height_ft": 17.5,
-   "seismic_site": "sdc_d_low",
-   "geometry_name": "lhs_bx3_by5_s5_sh17p5_bwx23_bwy24_sdc_d_low",
+   "seismic_site": "sdc_c",
+   "geometry_name": "lhs_bx3_by5_s5_sh17p5_bwx23_bwy24_sdc_c",
    "purpose": "Latin hypercube point 81 of 100, seed 20261004."
   },
   {
@@ -472,8 +470,8 @@
    "bay_x_width_ft": 26.0,
    "bay_y_width_ft": 26.5,
    "story_height_ft": 17.0,
-   "seismic_site": "sdc_e_near",
-   "geometry_name": "lhs_bx4_by4_s5_sh17_bwx26_bwy26p5_sdc_e_near",
+   "seismic_site": "sdc_d_high",
+   "geometry_name": "lhs_bx4_by4_s5_sh17_bwx26_bwy26p5_sdc_d_high",
    "purpose": "Latin hypercube point 85 of 100, seed 20261004."
   },
   {
@@ -485,8 +483,8 @@
    "bay_x_width_ft": 27.5,
    "bay_y_width_ft": 23.5,
    "story_height_ft": 17.0,
-   "seismic_site": "sdc_d_low",
-   "geometry_name": "lhs_bx5_by2_s7_sh17_bwx27p5_bwy23p5_sdc_d_low",
+   "seismic_site": "sdc_c",
+   "geometry_name": "lhs_bx5_by2_s7_sh17_bwx27p5_bwy23p5_sdc_c",
    "purpose": "Latin hypercube point 89 of 100, seed 20261004."
   },
   {
@@ -498,8 +496,8 @@
    "bay_x_width_ft": 19.0,
    "bay_y_width_ft": 21.5,
    "story_height_ft": 15.0,
-   "seismic_site": "sdc_d_high",
-   "geometry_name": "lhs_bx3_by3_s7_sh15_bwx19_bwy21p5_sdc_d_high",
+   "seismic_site": "sdc_d_low",
+   "geometry_name": "lhs_bx3_by3_s7_sh15_bwx19_bwy21p5_sdc_d_low",
    "purpose": "Latin hypercube point 93 of 100, seed 20261004."
   },
   {
