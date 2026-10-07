@@ -15,7 +15,7 @@ One simultaneous X/Y ground-motion pair per eligible design; both components rec
 
 Score = sum(weight × metric/reference), target 1.0. Ratios are uncapped and compensate for each other; drift references may be exceeded. This does not guarantee yielding at every story or cyclic damage coverage. The damage metric is plastic rotation demand divided by theta_p, not fatigue damage or dissipated-energy deterioration. Existing solver, complete-history, recorder-agreement and collapse checks still apply. The old `is_inelastic` label is retained separately.
 
-Default search: raw factors 0.125–8, starting at 1, at most seven full-record trials per design/pair, relative bracket tolerance 0.1, one-hour timeout per trial, one worker per device. The reported scale is the smallest passing scale actually tested, not a proven global optimum. These are raw multipliers, not spectral alpha. A 100-design batch can require up to 700 NTHAs; completion time depends on the first full-record searches.
+Default search: raw factors 1.0–3.5, starting at 1.0, at most seven full-record trials per design/pair, relative bracket tolerance 0.1, one-hour timeout per trial, one worker per device. The reported scale is the smallest passing scale actually tested, not a proven global optimum. These are raw multipliers, not spectral alpha. A 100-design batch can require up to 700 NTHAs; completion time depends on the first full-record searches.
 
 ## 1. Install the prepared files on all four devices
 

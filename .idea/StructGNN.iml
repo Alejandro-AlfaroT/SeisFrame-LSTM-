@@ -11,7 +11,7 @@
       <excludeFolder url="file://$MODULE_DIR$/Data" />
       <excludeFolder url="file://$MODULE_DIR$/Data_SAP2000" />
     </content>
-    <orderEntry type="jdk" jdkName="~\anaconda3\envs\OpPy" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="OpPy" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
