@@ -16,7 +16,7 @@ from Design.SMRF_Slab import evaluate_slab
 from Design.SMRF_Slab_Reinforcement import evaluate_slab_reinforcement
 
 
-QUALIFICATION_VERSION = "smrf_qualification_v3_joint_actions_clear_cover"
+QUALIFICATION_VERSION = "smrf_qualification_v4_incomplete_cage_evidence"
 # This gate is lifted only after required design algorithms and independent
 # verification exist. A passing subset of unit tests is not release approval.
 GENERATION_RELEASE_READY = False
@@ -97,9 +97,14 @@ def detailing_inputs(record):
                 values["clear_height_in"] = geometry["story_h_in"] - sections["h_beam_in"]
             except (KeyError, TypeError):
                 pass
+        elif "beam_bar_stacking" in bars:
+            # The detailing evaluator independently rebuilds the layered cage.
+            # Preserve an explicitly malformed declaration so it fails closed;
+            # only records without this field use the legacy single-row check.
+            values["bar_stacking"] = bars["beam_bar_stacking"]
         # These must be outputs of an actual detailing procedure, not defaults.
         for key, value in record.get("detailing", {}).get(member, {}).items():
-            if key not in values:
+            if key not in values and not (member == "beam" and key == "bar_stacking"):
                 values[key] = value
         inputs[member] = values
     return inputs
@@ -148,8 +153,10 @@ def recomputed_evidence(record):
     recomputed entries or {}, "families", "checks": the integrity checks}.
     Downstream qualification consumes only these recomputed objects: nothing
     nested in the saved copies is read once they have been compared. The
-    saved evidence is unusable when the recomputation differs, the recorded
-    hoops differ from the model's, or the slab strengths differ.
+    Capacity evidence is unusable when recomputation differs or any selected
+    hoop cage differs from the installed one. An unsuccessful hoop selection
+    is an incomplete design, not inconsistent evidence: its independently
+    recomputed failures remain available, while selection completeness fails.
     """
     from Design.SMRF_Design_Evidence import capacity_design_recomputation, slab_strength_recomputation
     rebar = record.get("reinforcement", {})
@@ -166,28 +173,47 @@ def recomputed_evidence(record):
                      "differences": recomputation["differences"]}))
         recomputed = recomputation["recomputed"] or {}
         transverse = recomputed.get("transverse") or {}
-        # Column legs are selected per direction; the scalar the model reads is
-        # the lighter direction (legs_model). Both must match the record.
-        column_hoops = transverse.get("column") or {}
-        hoops_match = bool(recomputed) and all(
-            rebar.get(key) == (transverse.get(member) or {}).get(field)
-            for member, prefix in (("beam", "beam"), ("column", "col"))
-            for key, field in ((f"{prefix}_stirrup_bar_size", "bar_size"),
-                               (f"{prefix}_stirrup_legs", "legs_model" if member == "column" else "legs"),
-                               (f"{prefix}_stirrup_spacing_in", "spacing_in"))
-        ) and rebar.get("col_stirrup_legs_by_direction") == column_hoops.get("legs")
-        checks.append(make_check(
-            "qualification.hoops_match_design", "Evidence integrity",
-            int(hoops_match), 1, "==",
-            details={"basis": "the transverse steel the model and IMK calibration read (reinforcement.*_stirrup_*) "
-                              "must be the hoops the recomputed capacity design selects; column legs per direction, "
-                              "with col_stirrup_legs the lighter direction",
-                     "reinforcement": {k: rebar.get(k) for k in ("beam_stirrup_bar_size", "beam_stirrup_legs",
-                                                                  "beam_stirrup_spacing_in", "col_stirrup_bar_size",
-                                                                  "col_stirrup_legs", "col_stirrup_legs_by_direction",
-                                                                  "col_stirrup_spacing_in")},
-                     "recomputed_capacity_design": transverse}))
-        if recomputation["consistent"] and hoops_match:
+        missing, mismatched, member_states = [], [], {}
+        for member, prefix in (("beam", "beam"), ("column", "col")):
+            hoops = transverse.get(member)
+            if not hoops:
+                missing.append(member)
+                member_states[member] = "not_selected"
+                continue
+            fields = ((f"{prefix}_stirrup_bar_size", "bar_size"),
+                      (f"{prefix}_stirrup_legs", "legs_model" if member == "column" else "legs"),
+                      (f"{prefix}_stirrup_spacing_in", "spacing_in"))
+            # Column legs are directional; its legacy scalar is the lighter
+            # direction. Both representations must match an actual selection.
+            if member == "column":
+                fields += (("col_stirrup_legs_by_direction", "legs"),)
+            mismatch = any(rebar.get(key) != hoops.get(field) for key, field in fields)
+            member_states[member] = "installed_mismatch" if mismatch else "installed_match"
+            if mismatch:
+                mismatched.append(member)
+        details = {
+            "basis": "each selected capacity-design hoop cage must match reinforcement.*_stirrup_* read by "
+                     "the model and IMK calibration; seed values for an unselected cage are not a designed cage",
+            "members": member_states, "missing_selections": missing, "mismatched_members": mismatched,
+            "reinforcement": {k: rebar.get(k) for k in ("beam_stirrup_bar_size", "beam_stirrup_legs",
+                                "beam_stirrup_spacing_in", "col_stirrup_bar_size", "col_stirrup_legs",
+                                "col_stirrup_legs_by_direction", "col_stirrup_spacing_in")},
+            "recomputed_capacity_design": transverse}
+        if recomputed:
+            checks.append(make_check(
+                "qualification.hoop_selection_complete", "Capacity-design completion",
+                int(not missing), 1, "==", details={"missing_selections": missing}))
+        if not recomputed or (missing and not mismatched):
+            reason = ("Capacity design could not be recomputed." if not recomputed else
+                      "No capacity-design hoop selection for: " + ", ".join(missing) +
+                      ". Installed seed values cannot establish a complete designed-cage identity.")
+            identity = not_evaluated("qualification.hoops_match_design", "Evidence integrity", reason)
+            identity["details"].update(details)
+            checks.append(identity)
+        else:
+            checks.append(make_check("qualification.hoops_match_design", "Evidence integrity",
+                                     int(not mismatched), 1, "==", details=details))
+        if recomputation["consistent"] and not mismatched:
             capacity = recomputed
     if record.get("beam_slab_strengths") is not None or record.get("slab_reinforcement") is not None:
         strength = slab_strength_recomputation(record)

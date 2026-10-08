@@ -84,6 +84,8 @@ class CompatibleFloor:
         # Use the existing explicit-grid validator; do not raise its shell budget.
         grid=coupled_floor_mesh(nx,ny,lx,ly,mesh,beam_width_in=s['b_beam_in'],
                                 slab_perimeter=self.slab_perimeter,mesh_spec=spec)
+        # Response and stiffness paths choose their solvers independently of the mesh.
+        grid["solver"] = "SuperLU" if _extract_stiffness or not _reference_solver else "UmfPack"
         xs=dict(enumerate(grid['x_coordinates_in'],start=grid['index_start']))
         ys=dict(enumerate(grid['y_coordinates_in'],start=grid['index_start']))
         cell_x,cell_y=list(xs)[:-1],list(ys)[:-1]

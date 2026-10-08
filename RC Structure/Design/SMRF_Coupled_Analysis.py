@@ -175,6 +175,8 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
         if not hs < hb < sh or hc >= lx or bc >= ly or b >= min(lx, ly):
             raise ValueError("Coupled geometry must leave a downstand web, clear column height and clear beam spans.")
     grid = coupled_floor_mesh(nx, ny, lx, ly, mesh, beam_width_in=b, slab_perimeter=slab_perimeter, mesh_spec=mesh_spec)
+    # This coupled diagnostic retains its own solver; record the actual choice.
+    grid["solver"] = "UmfPack"
     if nf*grid['shell_count'] > MAX_SHELLS:
         raise ValueError(f"Coupled diagnostic exceeds {MAX_SHELLS} total shells across floors, including perimeter.")
     xs = dict(enumerate(grid['x_coordinates_in'], start=grid['index_start']))

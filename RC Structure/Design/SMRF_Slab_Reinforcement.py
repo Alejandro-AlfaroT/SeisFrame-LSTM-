@@ -25,7 +25,7 @@ import math
 from .SMRF_Common import make_check, not_evaluated, summarize_checks
 
 
-METHOD_VERSION = "aci318_19_verified_slab_strip_strength_v2_completion_checks"
+METHOD_VERSION = "aci318_19_verified_slab_strip_strength_v3_corner_selection"
 _BARS = {4: (0.5, 0.20), 5: (0.625, 0.31), 6: (0.75, 0.44)}
 _DEFAULT_POLICY = {"bar_sizes": [4, 5, 6], "spacing_options_in": list(range(3, 13)),
                    "clear_cover_in": 0.75, "outer_axis": "x"}
@@ -388,12 +388,9 @@ def _completion_checks(inputs, layout, demands, context):
                              2.0 * layout["layers"]["x_bottom"]["spacing_in"], context["column_core_width_in"] + layout["layers"]["x_bottom"]["spacing_in"],
                              "<=", "in", details={"basis": "continuous bottom mat; two bars fit within the column core",
                                                   "placement_requirement": "centre the bottom mat on every column line"}))
-    max_positive = max(row["mu_kip_in_per_ft"] for row in demands if row["face"] == "bottom")
+    max_positive = _corner_moment_demand(demands, context)
     for name in ("x_top", "y_top", "x_bottom", "y_bottom"):
-        checks.append(make_check("slab_corner_reinforcement", "ACI 318-19 8.7.3.1 (alpha_f > 1.0 discontinuous corners)",
-                                 max_positive, layout["layers"][name]["flexure"]["phi_mn_kip_in_per_ft"],
-                                 "<=", "kip-in/ft", name,
-                                 details={"basis": "uniform mats extend over the full corner region in both directions"}))
+        checks.append(_corner_check(layout["layers"][name], max_positive, name))
     checks.extend(_open_checks())
     return checks
 
@@ -424,6 +421,32 @@ def _envelopes(demands):
     return envelopes
 
 
+def _corner_moment_demand(demands, context):
+    """The existing completion check's demand, shared by mat selection.
+
+    With no floor context the completion provisions remain unevaluated.
+    Otherwise every uniform mat must carry the largest positive moment in
+    either direction, as required by the corner check already in this module.
+    This does not replace or change any layer's own strip-demand envelope.
+    """
+    if context is None:
+        return None
+    return max(row["mu_kip_in_per_ft"] for row in demands if row["face"] == "bottom")
+
+
+def _corner_check(layer, demand, location):
+    return make_check("slab_corner_reinforcement", "ACI 318-19 8.7.3.1 (alpha_f > 1.0 discontinuous corners)",
+                      demand, layer["flexure"]["phi_mn_kip_in_per_ft"], "<=", "kip-in/ft", location,
+                      details={"basis": "uniform mats extend over the full corner region in both directions"})
+
+
+def _selection_checks(layer, envelope, inputs, location, corner_demand):
+    checks = _layer_checks(layer, envelope, inputs, location)
+    if corner_demand is not None:
+        checks.append(_corner_check(layer, corner_demand, location))
+    return checks
+
+
 def explain_unsized_layers(record):
     """Why the ladder found no four-layer layout, read from the record's own inputs (the record is not changed).
 
@@ -446,6 +469,7 @@ def explain_unsized_layers(record):
         rejected, _embedment = _hook_rejected_spacings(bar, inputs, policy, context)
         offered.extend((bar, spacing) for spacing in policy["spacing_options_in"] if spacing not in rejected)
     explanation = {}
+    corner_demand = _corner_moment_demand(demands, context)
     for name, envelope in _envelopes(demands).items():
         if name in (sized or set()):
             continue
@@ -455,11 +479,13 @@ def explain_unsized_layers(record):
             layer = _layout(inputs, policy, bar, axis, spacing)
             if layer is None:
                 continue
-            failed = [c for c in _layer_checks(layer, envelope, inputs, name) if c["status"] != "pass"]
+            failed = [c for c in _selection_checks(layer, envelope, inputs, name, corner_demand)
+                      if c["status"] != "pass"]
             key = (len(failed), -bar, spacing)
             if best is None or key < best[0]:
                 best = (key, layer, failed)
-        entry = {"demand_envelope": envelope, "closest_offered_candidate": None, "failed_checks": [],
+        entry = {"demand_envelope": envelope, "corner_moment_demand_kip_in_per_ft": corner_demand,
+                 "closest_offered_candidate": None, "failed_checks": [],
                  "offered_candidates": len(offered)}
         if best is not None:
             _key, layer, failed = best
@@ -512,10 +538,17 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
     deflection, integrity and corner checks; without it they stay open. Crossing orthogonal bars touch within each face mat;
     two face mats retain at least max(1 in, 4/3 aggregate) clear gap. One bar size
     is shared by all four layers; spacings may differ by axis/face but are
-    uniform across the building. Failure exhausts the ladder without fallback.
+    uniform across the building. The corner requirement participates in mat
+    selection while each saved demand_envelope remains the original strip
+    envelope. Failure exhausts the ladder without fallback.
+
+    ``strip_screen_passed`` records the strip-only result; ``screen_passed``
+    additionally requires no failed completion checks. Explicitly unevaluated
+    scope checks remain open and never imply complete slab acceptance.
     """
     record = {"method_version": METHOD_VERSION, "stage": "verified_strip_strength_only",
-              "accepted": False, "screen_passed": False, "layout": None, "trial_history": []}
+              "accepted": False, "strip_screen_passed": False, "screen_passed": False,
+              "layout": None, "trial_history": []}
     try:
         inputs, resolved_policy = _inputs(slab_inputs), _policy(policy)
         resolved_context = _context(context)
@@ -534,6 +567,8 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
                                 str(exc)), *_open_checks()]
         return {**record, "checks": checks, "summary": summarize_checks(checks)}
     candidates = []
+    envelopes = _envelopes(demands)
+    corner_demand = _corner_moment_demand(demands, resolved_context)
     for bar in resolved_policy["bar_sizes"]:
         diameter, _ = _BARS[bar]
         gap = inputs["thickness_in"] - 2.0 * resolved_policy["clear_cover_in"] - 4.0 * diameter
@@ -558,7 +593,6 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
                                                           "the perimeter beam offers (25.4.3.1) at every spacing offered."})
                 continue
         layers = {}
-        envelopes = _envelopes(demands)
         for axis in ("x", "y"):
             for face in ("top", "bottom"):
                 envelope = envelopes[f"{axis}_{face}"]
@@ -566,8 +600,13 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
                     if spacing in hook_rejected:
                         continue
                     layer = _layout(inputs, resolved_policy, bar, axis, spacing)
-                    if layer and all(c["status"] == "pass" for c in _layer_checks(layer, envelope, inputs, "trial")):
-                        layers[f"{axis}_{face}"] = {**layer, "face": face, "demand_envelope": envelope}
+                    if layer and all(c["status"] == "pass" for c in
+                                     _selection_checks(layer, envelope, inputs, "trial", corner_demand)):
+                        layers[f"{axis}_{face}"] = {
+                            **layer, "face": face, "demand_envelope": envelope,
+                            "corner_moment_demand_kip_in_per_ft": corner_demand,
+                            "selection_flexural_demand_kip_in_per_ft": max(
+                                envelope["mu_kip_in_per_ft"], corner_demand or 0.0)}
                         break
         success = len(layers) == 4
         record["trial_history"].append({"bar_size": bar, "passed": success,
@@ -593,8 +632,11 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
             layer = selected["layers"][f"{demand['axis']}_{demand['face']}"]
             location = f"{demand['panel_id']}:{demand['axis']}:{demand['face']}"
             checks.extend(_layer_checks(layer, demand, inputs, location))
-        record["screen_passed"] = all(check["status"] == "pass" for check in checks)
-        checks.extend(_completion_checks(inputs, selected, demands, resolved_context))
+        record["strip_screen_passed"] = all(check["status"] == "pass" for check in checks)
+        completion = _completion_checks(inputs, selected, demands, resolved_context)
+        checks.extend(completion)
+        record["screen_passed"] = (record["strip_screen_passed"]
+                                   and not any(check["status"] == "fail" for check in completion))
     return {**record, "checks": checks, "summary": summarize_checks(checks)}
 
 

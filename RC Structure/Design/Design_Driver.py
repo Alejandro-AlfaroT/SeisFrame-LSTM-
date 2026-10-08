@@ -313,35 +313,24 @@ def _update_slab_reinforcement(cfg, slab):
             plan, assertions=asdict(cfg.slab_actions))
     sp.SLAB_ACTIONS = evidence
     record = design_slab_reinforcement(inputs, evidence, None, _slab_completion_context(slab, cfg))
-    if record["layout"] is None and cfg.slab_actions.all_asserted():
-        refinement = evidence.get("refinement") or {}
-        status = refinement.get("status", "not_requested")
-        detail = refinement.get("status_detail") or ""
-        if refinement.get("comparisons"):
-            # The evidence is not saved when the design refuses, so the
-            # comparison that refused it is summarized in the message.
-            last = refinement["comparisons"][-1]
-            rows = last.get("comparisons") or []
-            failed = [r for r in rows if not r.get("within_tolerance")]
-            worst = {metric: max((r.get("relative_change") or 0.0) for r in rows if r.get("metric") == metric)
-                     for metric in ("mu_kip_in_per_ft", "vu_kip_per_ft") if any(r.get("metric") == metric for r in rows)}
-            levels = [lvl.get("requested_mesh", {}).get("subdivisions_per_bay") for lvl in refinement.get("levels", [])]
-            detail = (f"final pair of levels {levels[-2:]} cells per bay: {len(failed)} of {len(rows)} strip "
-                      f"comparisons outside tolerance, largest relative change "
-                      + ", ".join(f"{k} {v:.4f}" for k, v in worst.items())
-                      + (f"; {detail}" if detail else ""))
-        message = (f"Slab reinforcement not selected (slab refinement {status}"
+    slab_failed = any(check.get("status") == "fail" for check in record.get("checks", []))
+    if cfg.slab_actions.all_asserted() and (record["layout"] is None or slab_failed
+                                           or record.get("screen_passed") is False):
+        from Design.SMRF_Slab_Refinement import refinement_diagnostics
+        refinement = refinement_diagnostics(evidence)
+        status = refinement.get("status") or "not_requested"
+        detail = refinement["detail"]
+        message = (f"Slab reinforcement not accepted (slab refinement {status}"
                    + (f": {detail}" if detail else "") + "): " + "; ".join(
                        c["details"].get("reason", c["id"]) for c in record["checks"] if c["status"] != "pass"))
         # The refused attempt is not saved in a design record, so what refused it travels with the error
         # (screening repair item 1, 2026-10-02): the run writes it beside the result.
         from Design.SMRF_Slab_Reinforcement import explain_unsized_layers
-        comparisons = refinement.get("comparisons") or []
         refusal = {"thickness_in": slab["thickness_in"],
                    "beam_section": [sp.B_BEAM, sp.H_BEAM, sp.FC_BEAM_KSI],
                    "column_section": [sp.B_COL, sp.H_COL, sp.FC_COL_KSI],
-                   "refinement": {"status": status, "detail": detail,
-                                  "final_strip_comparisons": (comparisons[-1].get("comparisons") if comparisons else None)},
+                   "refinement": refinement,
+                   "layout": copy.deepcopy(record.get("layout")),
                    "bar_trials": record.get("trial_history", []),
                    "failed_checks": [c for c in record["checks"] if c["status"] != "pass"],
                    "unsized_layers": explain_unsized_layers(record)}
@@ -352,8 +341,8 @@ def _update_slab_reinforcement(cfg, slab):
             # thickness search does not step on them; they stay an error with their evidence (screening
             # repair item 4; widened from comparison_failed alone on 2026-10-03).
             raise SlabDesignError(message, refusal)
-        # The actions are verified and no layout of the declared bars and spacings carries them at this
-        # thickness: the slab thickness search steps the ladder (screening repair item 3, 2026-10-02).
+        # Verified actions, but the selected mat or the declared reinforcement ladder fails a slab
+        # requirement: rebuild the coupled design on the next supported thickness.
         raise SlabLayoutError(message, slab["thickness_in"], refusal)
     sp.SLAB_REINFORCEMENT = record
     return record
@@ -1506,7 +1495,19 @@ def _repair_bar_stacking(cfg, actions, worst, joint_scwb, capacity):
             _sync_cfg_to_sp(cfg)
 
 
-def _analyze_bar_layout(cfg, slab, slab_search, max_steel_iter):
+def _notify_progress(callback, event, phase, **details):
+    """Best-effort observation; neither mutation nor callback failure changes the search."""
+    if callback is not None:
+        try:
+            callback(copy.deepcopy({"event": event, "phase": phase, **details}))
+        except Exception as exc:  # Diagnostic observers are not design acceptance constraints.
+            try:
+                print(f"[design progress warning] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            except Exception:
+                pass
+
+
+def _analyze_bar_layout(cfg, slab, slab_search, max_steel_iter, progress=None):
     """Analyze fixed member sections, trying stacking before the slab thickness ladder.
 
     A thicker slab changes mass, floor transfer and strip actions: rebuild all of
@@ -1518,14 +1519,28 @@ def _analyze_bar_layout(cfg, slab, slab_search, max_steel_iter):
                  if key.startswith(("BEAM_", "COL_"))}
     layout_trials = []
     while True:
+        trial = len(layout_trials) + 1
         for key, value in cage_seed.items():
             setattr(sp, key, copy.deepcopy(value))
         _sync_cfg_to_sp(cfg)
+        _notify_progress(progress, "phase_started", "candidate.modal", layout_trial=trial,
+                         slab_thickness_in=slab["thickness_in"])
         period = _model_period()
+        _notify_progress(progress, "phase_completed", "candidate.modal", layout_trial=trial, period_sec=period)
+        _notify_progress(progress, "phase_started", "candidate.torsion", layout_trial=trial)
         torsion = _torsion_assessment(period, cfg) if cfg.demands.accidental_torsion_ratio else None
+        _notify_progress(progress, "phase_completed", "candidate.torsion", layout_trial=trial)
+        _notify_progress(progress, "phase_started", "candidate.steel", layout_trial=trial)
         worst, elf, actions, joint = _steel_pass(cfg, period, max_steel_iter, torsion)
+        _notify_progress(progress, "phase_completed", "candidate.steel", layout_trial=trial, dcr=worst)
+        _notify_progress(progress, "phase_started", "candidate.capacity", layout_trial=trial)
         capacity = _capacity_design(cfg, actions)
+        _notify_progress(progress, "phase_completed", "candidate.capacity", layout_trial=trial,
+                         accepted=capacity["accepted"])
+        _notify_progress(progress, "phase_started", "candidate.bar_stacking", layout_trial=trial)
         worst, joint, capacity, repair = _repair_bar_stacking(cfg, actions, worst, joint, capacity)
+        _notify_progress(progress, "phase_completed", "candidate.bar_stacking", layout_trial=trial,
+                         repair_status=repair["status"])
         layout_trials.append({"thickness_in": slab["thickness_in"], **repair})
         if repair["status"] != "arrangements_exhausted":
             break
@@ -1534,8 +1549,12 @@ def _analyze_bar_layout(cfg, slab, slab_search, max_steel_iter):
             layout_trials[-1]["next_thickness_unavailable"] = unavailable
             break
         slab = thicker
+        _notify_progress(progress, "phase_started", "candidate.slab_retry", layout_trial=trial + 1,
+                         slab_thickness_in=slab["thickness_in"])
         _update_floor_transfer(cfg, slab)
         slab, next_search = _slab_thickness_search(cfg, slab)
+        _notify_progress(progress, "phase_completed", "candidate.slab_retry", layout_trial=trial + 1,
+                         slab_thickness_in=slab["thickness_in"])
         slab_search["steps"] += 1 + next_search["steps"]
         slab_search["trials"].extend(next_search["trials"])
         slab_search["thickness_in"] = slab["thickness_in"]
@@ -2136,7 +2155,21 @@ def _column_reduction_advance(reduction, columns, column_index, accepted, note=N
                    constraints, outcome, actual_beam_index)
 
 
-def _constraint_summary(worst, hard_max, scwb_screen_ok, joint_scwb, capacity, drift_screen, accepted):
+def _slab_candidate_screen(record):
+    """Evaluated slab failures cannot be hidden by a sized layout or an open scope check."""
+    checks = (record or {}).get("checks") or []
+    failed = [c for c in checks if c.get("status") == "fail"]
+    # An unasserted, unselected slab keeps the legacy preliminary rectangular-beam
+    # screen available. Its qualification stays open; this does not select steel.
+    selected = (record or {}).get("layout") is not None
+    return {"accepted": not failed and (not selected or (record or {}).get("screen_passed") is not False),
+            "reinforcement_selected": selected,
+            "failed_checks": copy.deepcopy(failed),
+            "scope_open_checks": [c["id"] for c in checks if c.get("status") == "not_evaluated"]}
+
+
+def _constraint_summary(worst, hard_max, scwb_screen_ok, joint_scwb, capacity, drift_screen, accepted,
+                        slab_screen=None):
     """Every acceptance constraint of one evaluated candidate, with its failures spelled out.
 
     Kept per history entry so the selected iteration and the last iteration
@@ -2153,6 +2186,9 @@ def _constraint_summary(worst, hard_max, scwb_screen_ok, joint_scwb, capacity, d
             "joint_scwb": {key: joint_scwb.get(key) for key in ("evaluated", "all_pass", "counts", "min_ratio_provided",
                                                                   "steel_exhausted", "failed_checks")},
             "capacity_design_accepted": capacity["accepted"], "capacity_design_failed_checks": failing,
+            "slab_screen": copy.deepcopy(slab_screen),
+            "transverse_selection_complete": all(capacity.get("transverse", {}).get(name) is not None
+                                                  for name in ("beam", "column")),
             "drift_accepted": drift_screen["accepted"],
             "drift_failed_checks": [c["id"] + (f"@{c['location']}" if c.get("location") else "")
                                     for c in drift_screen["checks"] if c["status"] == "fail"]}
@@ -2173,7 +2209,7 @@ def _smallest_scwb_column_index(ladder):
     return len(ladder) - 1, False
 
 
-def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=True, keep_history=True):
+def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=True, keep_history=True, progress=None):
     """Search for feasibility, then compare modeled material quantities within a fixed budget.
 
     Returns a JSON-serializable record of the final sections, reinforcement,
@@ -2181,7 +2217,10 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     ``keep_history`` False drops the per-iteration entries from the record
     (data generation keeps only the final design, user decision 2026-10-02);
     the search summary, the counts and the selected candidate's evidence stay.
+    ``progress`` receives copied, compact events during the search; these are
+    diagnostics, never restart checkpoints or evidence of design acceptance.
     """
+    _notify_progress(progress, "phase_started", "design.setup", max_section_iter=max_section_iter)
     cfg = cfg or DesignConfig.from_structure_parameters()
     # Category, Ie and the drift criterion come from one basis; a policy that names another
     # category, or a stale ASCE_IE, stops the design before anything is analysed.
@@ -2250,7 +2289,14 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     initial_transverse = {key: getattr(sp, key) for key in (
         "BEAM_STIRRUP_BAR_SIZE", "BEAM_STIRRUP_LEGS", "BEAM_STIRRUP_SPACING",
         "COL_STIRRUP_BAR_SIZE", "COL_STIRRUP_LEGS", "COL_STIRRUP_LEGS_BY_DIRECTION", "COL_STIRRUP_SPACING")}
+    _notify_progress(progress, "phase_completed", "design.setup")
+    candidate_attempt = 0
     while iteration < max_section_iter or reduction is not None:
+        candidate_attempt += 1
+        _notify_progress(progress, "candidate_started", "candidate.setup", candidate_attempt=candidate_attempt,
+                         iteration=iteration + 1, iterations_completed=iteration,
+                         column_section=list(columns[column_index]), beam_section=list(beams[beam_index]),
+                         search_mode="reduction" if reduction is not None else "feasibility")
         # Every pair starts from the same reinforcement and slab request. No failed trial
         # can ratchet the next trial's cage, hoop diameter or slab thickness upward.
         _restore_state(candidate_seed)
@@ -2277,9 +2323,12 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
         # The transfer depends on the slab and on the beam/column sections, so
         # it is rebuilt whenever the ladder moves (inside the slab search); the
         # restored best state carries its own copy (FLOOR_TRANSFER is in _STATE_KEYS).
+        _notify_progress(progress, "phase_started", "candidate.slab", candidate_attempt=candidate_attempt,
+                         iteration=iteration + 1)
         try:
             beam_index, slab, slab_retries, slab_search = _slab_search(cfg, beams, beam_index, slab_floor_in)
         except SlabDesignError as error:
+            _notify_progress(progress, "candidate_rejected", "candidate.slab", error=str(error))
             if reduction is None:
                 raise
             # A step-down trial whose slab is refused is a failed trial; the passing design stands.
@@ -2306,10 +2355,14 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
                                             "(slab search); next deeper compatible rung whose slab carries its strip actions"})
         if slab_search["steps"]:
             slab_floor_in = slab["thickness_in"]
+        _notify_progress(progress, "phase_completed", "candidate.slab", slab_thickness_in=slab["thickness_in"],
+                         column_section=list(columns[column_index]), beam_section=list(beams[beam_index]))
+        _notify_progress(progress, "phase_started", "candidate.bar_layout")
         try:
             slab, period, torsion, worst, elf, combination_actions, joint_scwb, capacity = _analyze_bar_layout(
-                cfg, slab, slab_search, max_steel_iter)
+                cfg, slab, slab_search, max_steel_iter, **({"progress": progress} if progress is not None else {}))
         except SlabDesignError as error:
+            _notify_progress(progress, "candidate_rejected", "candidate.bar_layout", error=str(error))
             if reduction is None:
                 raise
             column_index = _column_reduction_advance(
@@ -2322,6 +2375,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
             beam_index = reduction["beam"]
             continue
         except SectionAxialDomainError as error:
+            _notify_progress(progress, "candidate_rejected", "candidate.axial_domain", error=str(error))
             if reduction is not None:
                 column_index = _column_reduction_advance(reduction, columns, column_index, False, str(error),
                                                           actual_beam_index=beam_index)
@@ -2355,6 +2409,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
                 raise RuntimeError("Axial-domain escalation did not terminate; the column ladder is inconsistent.") from error
             continue
         except BeamBarRowsError as error:
+            _notify_progress(progress, "candidate_rejected", "candidate.bar_rows", error=str(error))
             if reduction is not None:
                 column_index = _column_reduction_advance(reduction, columns, column_index, False, str(error),
                                                           actual_beam_index=beam_index)
@@ -2375,6 +2430,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
             beam_index = deeper
             continue
         except RuntimeError as error:
+            _notify_progress(progress, "candidate_rejected", "candidate.analysis", error=str(error))
             numerical = ("gravity analysis failed", "capacity hoop selection cycled",
                          "capacity hoop selection exceeded")
             if not any(message in str(error).lower() for message in numerical):
@@ -2392,7 +2448,9 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
                 f"beam {beams[beam_index]}: {error}. No strength failure inferred and no automatic size growth."
             ) from error
 
+        _notify_progress(progress, "phase_completed", "candidate.bar_layout")
         iteration += 1
+        _notify_progress(progress, "phase_started", "candidate.checks", iteration=iteration)
         # The sizing screen (uniform-member proxy) and the per-joint rule the
         # steel pass closed on; a joint that still fails is a section matter.
         scwb_screen_ok = _column_nominal_moment() >= _scwb_required_column_moment()
@@ -2476,6 +2534,9 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
             deviation += 5.0
         if not drift_screen["accepted"]:
             deviation += 20.0
+        slab_screen = _slab_candidate_screen(sp.SLAB_REINFORCEMENT)
+        if not slab_screen["accepted"]:
+            deviation += 5.0
         if best is None or deviation < best["deviation"]:
             best = {"deviation": deviation, "entry": entry, "state": _capture_state(),
                     "combination_actions": combination_actions, "capacity": capacity,
@@ -2489,9 +2550,21 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
             and scwb_ok
             and capacity["accepted"]
             and drift_screen["accepted"]
+            and slab_screen["accepted"]
         )
         entry["constraints"] = _constraint_summary(worst, cfg.dcr.dcr_hard_max, scwb_screen_ok, joint_scwb,
-                                                   capacity, drift_screen, accepted)
+                                                   capacity, drift_screen, accepted, slab_screen)
+        _notify_progress(progress, "iteration_completed", "candidate.checks", iteration=iteration,
+                         candidate_attempt=candidate_attempt,
+                         column_section=entry["column_section"], beam_section=entry["beam_section"],
+                         slab_thickness_in=slab["thickness_in"], beam_dcr=worst["beam"], column_dcr=worst["column"],
+                         candidate_screen_passed=accepted,
+                         constraints={key: entry["constraints"][key] for key in
+                                      ("strength_within_ceiling", "scwb_screen_satisfied", "capacity_design_accepted",
+                                       "transverse_selection_complete", "drift_accepted")},
+                         capacity_failed_checks=entry["constraints"]["capacity_design_failed_checks"][:12],
+                         capacity_failed_check_count=len(entry["constraints"]["capacity_design_failed_checks"]),
+                         joint_scwb_counts=joint_scwb.get("counts"), slab_screen_accepted=slab_screen["accepted"])
         if accepted or reduction is not None:
             snapshot = ({"deviation": deviation, "entry": entry, "state": _capture_state(),
                          "combination_actions": combination_actions, "capacity": capacity,
@@ -2613,14 +2686,18 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     _restore_state(best["state"])
     _sync_cfg_to_sp(cfg)
     final = best["entry"]
+    _notify_progress(progress, "phase_completed", "design.search", selected_iteration=final["iteration"],
+                     stop_reason=stop_reason, iterations_completed=iteration)
     governing = max(final["column_dcr"], final["beam_dcr"])
     # Load-path check of the selected frame: the bare frame with its transfer
     # against the monolithic coupled model, same slab, sections and loads.
     coupled_comparison = None
     if sp.FLOOR_TRANSFER is not None:
+        _notify_progress(progress, "phase_started", "design.coupled_comparison")
         from Design.SMRF_Coupled_Comparison import compare_transfer_to_coupled
         coupled_comparison = compare_transfer_to_coupled(final["slab"],
                                                          combination_actions=best["combination_actions"])
+        _notify_progress(progress, "phase_completed", "design.coupled_comparison")
 
     # Evaluated against the restored (final) section, so the reported figures
     # describe the design that is actually written out.
@@ -2743,6 +2820,10 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
         "slab_thickness_search": final.get("slab_thickness_search"),
         "history": history if keep_history else [],
         "search": {
+            "selected_candidate_status": ("screen_passed" if (final.get("constraints") or {}).get("candidate_screen_passed")
+                                           else "diagnostic_fallback_failed_screen"),
+            "transverse_selection_complete": all(best["capacity"].get("transverse", {}).get(name) is not None
+                                                  for name in ("beam", "column")),
             "stop_reason": stop_reason,
             "stop_detail": stop_detail,
             "selected_iteration": final["iteration"],
@@ -2789,9 +2870,14 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     record["drift_screen"]["analysis_input_sha256"] = analysis_input_signature(record)
     if record.get("coupled_comparison"):
         record["coupled_comparison"]["analysis_input_sha256"] = analysis_input_signature(record)
+    _notify_progress(progress, "phase_started", "design.evidence")
     attach_design_evidence(record, cfg)
+    _notify_progress(progress, "phase_completed", "design.evidence")
     from Design.SMRF_Qualification import qualify_design
+    _notify_progress(progress, "phase_started", "design.qualification")
     record["qualification"] = qualify_design(record)
+    _notify_progress(progress, "phase_completed", "design.qualification",
+                     counts=record["qualification"]["counts"], accepted=record["qualification"]["accepted"])
     record["dcr"]["accepted"] = record["qualification"]["accepted"]
     return record
 
@@ -2986,7 +3072,7 @@ def design_request_identity(cfg=None):
     return {"sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(), **json.loads(canonical)}
 
 
-def load_or_create_design(design_path, cfg=None, verbose=True, max_section_iter=None, keep_history=True):
+def load_or_create_design(design_path, cfg=None, verbose=True, max_section_iter=None, keep_history=True, progress=None):
     """Read a cached design artifact, or run the design and write it.
 
     ``max_section_iter`` overrides the search's section-iteration budget (the driver's default when
@@ -3023,13 +3109,16 @@ def load_or_create_design(design_path, cfg=None, verbose=True, max_section_iter=
             apply_design(record)
             return record, False
         record = design_structure(cfg=cfg, verbose=verbose, keep_history=keep_history,
+                                  **({"progress": progress} if progress is not None else {}),
                                   **({} if max_section_iter is None else {"max_section_iter": int(max_section_iter)}))
         record["request_identity"] = identity
+        _notify_progress(progress, "phase_started", "design.write", design_path=str(design_path))
         temporary.write_text(json.dumps(record, indent=2, allow_nan=False) + "\n", encoding="utf-8")
         # No-clobber rename on Windows; writers in this workflow share the lock.
         if design_path.exists():
             raise RuntimeError("Design destination appeared during analysis; existing artifact preserved.")
         temporary.rename(design_path)
+        _notify_progress(progress, "phase_completed", "design.write", design_path=str(design_path))
         return record, True
     finally:
         if temporary.exists():

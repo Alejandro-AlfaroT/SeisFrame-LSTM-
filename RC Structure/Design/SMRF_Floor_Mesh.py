@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 
 MAX_EXPLICIT_SHELLS = 130000
 
@@ -65,7 +66,9 @@ def floor_mesh(nx, ny, lx, ly, mesh_per_bay, *, mesh_spec=None, uniform_shell_li
             raise ValueError(f"Explicit mesh max_shells must be an integer from 4 to {MAX_EXPLICIT_SHELLS}")
         ox, ox_by_bay = _bay_offsets(mesh_spec["x_offsets_in"], lx, nx, "x_offsets_in")
         oy, oy_by_bay = _bay_offsets(mesh_spec["y_offsets_in"], ly, ny, "y_offsets_in")
-        kind, solver = "explicit_rectangular", "UmfPack"
+        # SuperLU avoids the observed fine-grid UMFPACK numeric allocation failure.
+        # Mesh geometry, shell budget and refinement acceptance are unchanged.
+        kind, solver = "explicit_rectangular", "SuperLU"
     if mesh_spec is None:
         ox_by_bay = oy_by_bay = None
     mx, my = len(ox) - 1, len(oy) - 1
@@ -330,3 +333,123 @@ def nested_refinement(coarse, fine):
         increased |= len(b) > len(a)
     if not increased:
         raise ValueError("Refinement must add coordinates; repeated grids are not refinement")
+
+
+LOCAL_EXTENSION_METHOD = "failed_witness_face_band_v1"
+
+
+def witness_face_band_extension(geometry, recipe_inputs, coarse_actions, fine_actions,
+                                comparison, previous_grid, used_axes=()):
+    """Propose one nested face-band bisection from failed, located strip witnesses.
+
+    All faces along the selected axis are refined, using each bay's own two
+    bounding beam widths. Each axis is eligible only once. Ranking uses the
+    smallest normalized distance to a physical face, rounded to 12 decimals
+    for reflection-stable ties; ties choose X before Y. This is a bounded
+    numerical proposal, never an acceptance result or a geometry change.
+    """
+    result = {"method": LOCAL_EXTENSION_METHOD, "used_axes": list(used_axes)}
+
+    def refused(status, detail):
+        return {**result, "status": status, "detail": detail}
+
+    try:
+        if any(axis not in ("x", "y") for axis in used_axes) or len(set(used_axes)) != len(used_axes):
+            raise ValueError("Previously extended axes must be distinct X/Y axes")
+        nx, ny = (int(geometry[k]) for k in ("num_bay_x", "num_bay_y"))
+        lengths = {a: float(geometry[f"bay_{a}_in"]) for a in ("x", "y")}
+        bays = {"x": nx, "y": ny}
+        widths = recipe_inputs.get("face_widths_in")
+        if widths is None:
+            widths = {a: [recipe_inputs["beam_width_in"]] * (bays[a] + 1) for a in ("x", "y")}
+        widths = {a: [float(w) for w in widths[a]] for a in ("x", "y")}
+        bands = {}
+        for axis in ("x", "y"):
+            length = lengths[axis]
+            if (len(widths[axis]) != bays[axis] + 1 or not math.isfinite(length) or length <= 0
+                    or any(not math.isfinite(w) or not 0 < w < length / 2 for w in widths[axis])):
+                raise ValueError("Local face refinement requires finite, supported bay and beam-face geometry")
+            bands[axis] = []
+            for left, right in zip(widths[axis], widths[axis][1:]):
+                def near(width):
+                    face = width / 2.0
+                    return (face * (4.0 / 7.0), face + 8.0 * ((length / 2.0 - face) / 113.0))
+                left_band, right_band = near(left), near(right)
+                bands[axis].append((left_band, (length - right_band[1], length - right_band[0])))
+        failed = [row for row in comparison["comparisons"] if row["within_tolerance"] is not True]
+        if not failed or comparison["all_within_tolerance"] is True:
+            raise ValueError("An extension needs a completed failed comparison")
+        actions = {"coarse": coarse_actions, "fine": fine_actions}
+        indexed = {}
+        for side, action in actions.items():
+            strips = action["strips"]
+            indexed[side] = {(s["panel_id"], s["axis"], s["face"]): s for s in strips}
+            if len(indexed[side]) != len(strips):
+                raise ValueError("Duplicate strip identities cannot select a refinement witness")
+        candidates = []
+        for row in failed:
+            match = re.fullmatch(r"panel_x(\d+)_y(\d+)", row["panel_id"])
+            if match is None:
+                raise ValueError("Failed strip has no supported panel-grid identity")
+            panel = dict(zip(("x", "y"), (int(v) - 1 for v in match.groups())))
+            if any(not 0 <= panel[a] < bays[a] for a in ("x", "y")):
+                raise ValueError("Failed strip lies outside the declared floor")
+            if row["metric"] not in ("mu_kip_in_per_ft", "vu_kip_per_ft"):
+                raise ValueError("Unsupported failed strip metric")
+            location = "moment_location" if row["metric"] == "mu_kip_in_per_ft" else "shear_location"
+            for side in ("coarse", "fine"):
+                strip = indexed[side][(row["panel_id"], row["axis"], row["face"])]
+                witness = strip[location]
+                local = {}
+                for axis in ("x", "y"):
+                    value = witness[f"{axis}_in"]
+                    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                        raise ValueError("Failed strip witness coordinates must be finite")
+                    local[axis] = value - panel[axis] * lengths[axis]
+                    if not -1e-8 <= local[axis] <= lengths[axis] + 1e-8:
+                        raise ValueError("Failed strip witness is outside its declared panel")
+                for axis in ("x", "y"):
+                    if axis in used_axes:
+                        continue
+                    pos, length, k = local[axis], lengths[axis], panel[axis]
+                    near_bands = bands[axis][k]
+                    if not any(lo - 1e-8 <= pos <= hi + 1e-8 for lo, hi in near_bands):
+                        continue
+                    faces = (widths[axis][k] / 2.0, length - widths[axis][k + 1] / 2.0)
+                    score = min(abs(pos - face) / (length / 2.0 - width / 2.0)
+                                for face, width in zip(faces, widths[axis][k:k + 2]))
+                    candidates.append({"axis": axis, "score": score, "rank_score": round(score, 12),
+                                       "panel_id": row["panel_id"], "strip_axis": row["axis"],
+                                       "face": row["face"], "metric": row["metric"], "side": side,
+                                       "witness_x_in": witness["x_in"], "witness_y_in": witness["y_in"]})
+        if not candidates:
+            return refused("no_supported_witness", "No failed witness lies in an unused axis's supported face band")
+        selected = min(candidates, key=lambda c: (c["rank_score"], c["axis"], c["panel_id"],
+                                                   c["strip_axis"], c["face"], c["metric"], c["side"]))
+        axis = selected["axis"]
+        result.update(selected_axis=axis, selected_witness=selected, candidate_count=len(candidates),
+                      ranking="nearest_normalized_face_distance_rounded_12_decimals_then_x_before_y")
+        spec = {"max_shells": previous_grid["shell_budget"]}
+        for a in ("x", "y"):
+            by_bay = previous_grid.get(f"{a}_offsets_by_bay_in")
+            values = by_bay if by_bay is not None else [previous_grid[f"{a}_offsets_in"]] * bays[a]
+            refined = []
+            for k, offsets in enumerate(values):
+                extra = ([(lo + hi) / 2.0 for lo, hi in zip(offsets, offsets[1:])
+                          if any(start <= (lo + hi) / 2.0 <= end for start, end in bands[a][k])]
+                         if a == axis else [])
+                refined.append(sorted(set(offsets) | set(extra)))
+            if len({len(v) for v in refined}) != 1:
+                raise ValueError("Local extension must retain equal cell counts across bays")
+            spec[f"{a}_offsets_in"] = refined if by_bay is not None else refined[0]
+        mx = len(spec["x_offsets_in"][0] if isinstance(spec["x_offsets_in"][0], list) else spec["x_offsets_in"]) - 1
+        my = len(spec["y_offsets_in"][0] if isinstance(spec["y_offsets_in"][0], list) else spec["y_offsets_in"]) - 1
+        result.update(mesh_spec=spec, cells_per_bay=[mx, my], shell_count=nx * ny * mx * my)
+        if result["shell_count"] > min(spec["max_shells"], MAX_EXPLICIT_SHELLS):
+            return refused("budget_exceeded", f"Local extension needs {result['shell_count']} shells; budget is {spec['max_shells']}")
+        grid = floor_mesh(nx, ny, lengths["x"], lengths["y"], 4, mesh_spec=spec)
+        nested_refinement(previous_grid, grid)
+        result.update(status="proposed", coordinate_sha256=grid["coordinate_sha256"])
+        return result
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError) as exc:
+        return refused("unsupported_evidence", str(exc))

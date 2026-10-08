@@ -32,7 +32,11 @@ BENCHMARK_60 = [0., 1., 2., 3., 4., 4.75, 5.5, 6.25, 7., 7.75, 8.5, 9.25, 10., 1
 
 
 def recipe_policy(**overrides):
-    return dict(PROBE_SLAB_REFINEMENT, **overrides)
+    # These fixtures exercise the original base recipe, including two-level
+    # plans. The optional four-base-level extension has separate tests.
+    result = dict(PROBE_SLAB_REFINEMENT, **overrides)
+    result.pop("local_extension", None)
+    return result
 
 
 class GradedFaceRecipeTests(unittest.TestCase):
@@ -189,6 +193,11 @@ class ProbeWorkflowTests(unittest.TestCase):
         self.assertTrue(a.verification.floor_hand_check_verified)
         self.assertEqual(b.verification.asserted_by, "")
         self.assertEqual(PROBE_SLAB_REFINEMENT["recipe"], "graded_face_v1")
+        self.assertEqual(PROBE_SLAB_REFINEMENT["local_extension"],
+                         {"method": "failed_witness_face_band_v1", "max_extra_levels": 2})
+        self.assertEqual(PROBE_SLAB_REFINEMENT["moment_tolerance"], .05)
+        self.assertEqual(PROBE_SLAB_REFINEMENT["shear_tolerance"], .05)
+        self.assertEqual(PROBE_SLAB_REFINEMENT["max_shells"], 130000)
 
     def test_methodology_identity_is_geometry_independent_with_a_recipe(self):
         from Design.Verify_Designs import probe_config, methodology_sha256

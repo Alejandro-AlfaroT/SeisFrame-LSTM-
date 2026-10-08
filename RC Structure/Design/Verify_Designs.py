@@ -53,7 +53,6 @@ import argparse
 import contextlib
 import csv
 import hashlib
-import io
 import json
 import os
 import random
@@ -63,7 +62,7 @@ import sys
 import time
 import traceback
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from itertools import product
@@ -84,6 +83,111 @@ STOP_NAME = "STOP_VERIFICATION"
 WORKER_TIMEOUT_S = 6 * 3600
 PLAN_KEYS = ("case_id", "num_bay_x", "num_bay_y", "num_floor", "story_height_ft",
              "bay_x_width_ft", "bay_y_width_ft", "seismic_site")
+
+
+class _ProgressLog:
+    """Append-only attempt events and an atomic latest snapshot; never a restart checkpoint."""
+
+    def __init__(self, out_dir, case_id, attempt_id, prefix="progress"):
+        self.out_dir = Path(out_dir)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.prefix = prefix
+        self.started = time.perf_counter()
+        self.warning_count, self.warnings = 0, []
+        self.state = {"schema": "verification_progress_v1", "case_id": case_id,
+                      "attempt_id": attempt_id, "pid": os.getpid(), "host": socket.gethostname(),
+                      "sequence": 0, "status": "running", "active_phase": None,
+                      "last_completed_phase": None, "last_completed_iteration": None,
+                      "note": "Diagnostic progress only; not a completed design or acceptance evidence."}
+
+    def __call__(self, event):
+        """Telemetry failures are warnings, never a reason to relabel a completed design."""
+        try:
+            self._write_event(event)
+        except Exception as exc:
+            self.warning_count += 1
+            warning = f"{type(exc).__name__}: {exc}"
+            if len(self.warnings) < 8:
+                self.warnings.append(warning)
+                try:
+                    print(f"[verification progress warning] {warning}", file=sys.stderr, flush=True)
+                except Exception:
+                    pass
+
+    def _write_event(self, event):
+        # Serialize before altering the current snapshot. The driver sends copied scalar summaries.
+        item = {**event, "case_id": self.state["case_id"], "attempt_id": self.state["attempt_id"],
+                "sequence": self.state["sequence"] + 1,
+                "time_utc": datetime.now(timezone.utc).isoformat(),
+                "elapsed_s": time.perf_counter() - self.started}
+        # A provisional failed trial can contain a nonfinite diagnostic value.
+        # Preserve it explicitly without aborting or altering the design search.
+        item = json.loads(json.dumps(item, default=str), parse_constant=lambda value: {"nonfinite": value})
+        line = json.dumps(item, allow_nan=False, default=str)
+        with (self.out_dir / f"{self.prefix}.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        self.state.update(sequence=item["sequence"], last_event=item)
+        kind = item.get("event")
+        if kind in ("phase_started", "candidate_started"):
+            self.state["active_phase"] = item.get("phase")
+        if kind == "candidate_started":
+            self.state["candidate"] = {key: item.get(key) for key in
+                                       ("candidate_attempt", "iteration", "column_section", "beam_section", "search_mode")}
+        if kind in ("phase_completed", "iteration_completed"):
+            self.state["last_completed_phase"] = item
+            self.state["active_phase"] = None
+        if kind == "iteration_completed":
+            self.state["last_completed_iteration"] = item
+        if kind in ("worker_completed", "worker_failed"):
+            self.state["status"] = "completed" if kind == "worker_completed" else "error"
+        snapshot = self.out_dir / f"{self.prefix}.json"
+        temporary = self.out_dir / f".{self.prefix}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            temporary.write_text(json.dumps(self.state, indent=1, allow_nan=False, default=str), encoding="utf-8")
+            os.replace(temporary, snapshot)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+
+def _saved_progress(out_dir, attempt_id, prefix="progress"):
+    """Never attach the progress of a previous attempt to a failed worker."""
+    try:
+        state = json.loads((Path(out_dir) / f"{prefix}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return state if isinstance(state, dict) and state.get("attempt_id") == attempt_id else None
+
+
+def _tail_text(path, limit=2000):
+    try:
+        with Path(path).open("rb") as handle:
+            handle.seek(max(0, handle.seek(0, 2) - limit * 4))
+            return handle.read().decode("utf-8", "replace")[-limit:]
+    except OSError:
+        return ""
+
+
+def _run_logged_process(command, out_dir, env, *, stage_only=False):
+    """OS-level output goes straight to disk, including native solver diagnostics before a crash."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prefix = "stage_" if stage_only else ""
+    with (out_dir / f"{prefix}worker_stdout.txt").open("ab", buffering=0) as stdout, \
+         (out_dir / f"{prefix}stderr.txt").open("ab", buffering=0) as stderr:
+        stamp = f"\n[worker launch {datetime.now(timezone.utc).isoformat()}]\n".encode("utf-8")
+        stdout.write(stamp)
+        stderr.write(stamp)
+        try:
+            proc = subprocess.run(command, stdout=stdout, stderr=stderr, cwd=str(RC_DIR),
+                                  timeout=WORKER_TIMEOUT_S, env=env)
+            return proc.returncode, False
+        except subprocess.TimeoutExpired:
+            # subprocess.run kills and waits for its direct child before raising.
+            stderr.write(f"\nworker killed after {WORKER_TIMEOUT_S:g} s\n".encode("utf-8"))
+            return None, True
 
 
 def plan_cases(num_cases, seed=SEED, geometry_offset=0, seismic_sites=SEISMIC_SITES):
@@ -229,13 +333,19 @@ def _run_worker(case, out_dir, probe, probe_date=None, attempt_id=None, max_sect
     """Design one case in this interpreter (and run its requested later stages); write result.json; never raise."""
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    attempt_id = attempt_id or uuid.uuid4().hex
     result = {"case": case, "status": "started", "attempt_id": attempt_id,
               "probe_assertions": probe, "probe_date": probe_date if probe else None,
               "max_section_iter": max_section_iter, "profile_id": profile_id, "stages": list(stages),
               "host": socket.gethostname(), "started": time.strftime("%Y-%m-%d %H:%M:%S")}
-    log = io.StringIO()
+    # Append preserves the evidence of an earlier refused attempt. A killed process
+    # still leaves every complete printed line; nothing waits in StringIO until finally.
+    log = (out_dir / "log.txt").open("a", encoding="utf-8", buffering=1)
+    log.write(f"\n[worker attempt {attempt_id} {datetime.now(timezone.utc).isoformat()}]\n")
+    progress = _ProgressLog(out_dir, case["case_id"], attempt_id)
     t0 = time.perf_counter()
     try:
+        progress({"event": "phase_started", "phase": "worker.configure"})
         import Structure_Parameters as sp
         from Design.Config import DesignConfig
         from Design.Design_Driver import load_or_create_design
@@ -246,8 +356,10 @@ def _run_worker(case, out_dir, probe, probe_date=None, attempt_id=None, max_sect
                                           "joint_model": sp.JOINT_MODEL, "member_material": sp.IMK_MATERIAL_TYPE,
                                           "analysis_profile_id": sp.ANALYSIS_PROFILE_ID}
             cfg = probe_config(probe_date) if probe else DesignConfig.from_structure_parameters()
+            progress({"event": "phase_completed", "phase": "worker.configure"})
             record, created = load_or_create_design(out_dir / "design.json", cfg=cfg, verbose=True,
-                                                    max_section_iter=max_section_iter)
+                                                    max_section_iter=max_section_iter, progress=progress)
+        progress({"event": "phase_started", "phase": "worker.design_summary"})
         q = record["qualification"]
         by_status = {}
         for c in q["checks"]:
@@ -274,19 +386,24 @@ def _run_worker(case, out_dir, probe, probe_date=None, attempt_id=None, max_sect
         })
         result["design_elapsed_s"] = result["elapsed_s"]
         result["overview"] = design_overview(record)
+        progress({"event": "phase_completed", "phase": "worker.design_summary"})
         # Later stages run on the selected design in this same interpreter, so they see exactly the
         # configuration the design was made under. A stage failure is recorded; the design stands.
         stage_results = {}
         for stage in STAGES[1:]:
             if stage not in stages:
                 continue
+            progress({"event": "phase_started", "phase": f"stage.{stage}"})
             with contextlib.redirect_stdout(log):
                 stage_results[stage] = STAGE_RUNNERS[stage](record, profile_id, out_dir)
             (out_dir / f"{stage}.json").write_text(json.dumps(stage_results[stage], indent=1, default=str), encoding="utf-8")
+            progress({"event": "phase_completed", "phase": f"stage.{stage}",
+                      "stage_status": stage_results[stage].get("status")})
         result["stage_results"] = {name: {key: value for key, value in stage.items() if key not in ("model_audit", "traceback")}
                                    for name, stage in stage_results.items()}
         result.update(status_fields(record, probe, probe_date, stages, stage_results))
         result["elapsed_s"] = time.perf_counter() - t0
+        progress({"event": "worker_completed", "phase": "worker", "result_status": result["status"]})
     except Exception as exc:                              # noqa: BLE001
         result.update({"status": "error", "elapsed_s": time.perf_counter() - t0,
                        "error": f"{type(exc).__name__}: {exc}", "traceback": traceback.format_exc(),
@@ -301,9 +418,12 @@ def _run_worker(case, out_dir, probe, probe_date=None, attempt_id=None, max_sect
         if evidence:
             (out_dir / "failure_evidence.json").write_text(json.dumps(evidence, indent=1, default=str), encoding="utf-8")
             result["failure_evidence"] = "failure_evidence.json"
+        progress({"event": "worker_failed", "phase": "worker", "error": result["error"]})
     finally:
         result["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        (out_dir / "log.txt").write_text(log.getvalue(), encoding="utf-8")
+        log.close()
+        result["progress"] = _saved_progress(out_dir, attempt_id)
+        result["progress_warnings"] = {"count": progress.warning_count, "first_warnings": progress.warnings}
         (out_dir / "result.json").write_text(json.dumps(result, indent=1, default=str), encoding="utf-8")
     return result
 
@@ -367,10 +487,13 @@ def attach_stage_files(row, out_dir):
 def _run_stage_worker(case, out_dir, probe, probe_date, profile_id, stages):
     """Run the requested later stages on a design that already exists; the design and its result are not rewritten."""
     out_dir = Path(out_dir).resolve()
-    log = io.StringIO()
     outcome = {}
     with exclusive_lease(out_dir / ".worker.lease"):
+        log = (out_dir / "stage_log.txt").open("a", encoding="utf-8", buffering=1)
+        progress = _ProgressLog(out_dir, case["case_id"], uuid.uuid4().hex, "stage_progress")
+        log.write(f"\n[stage attempt {progress.state['attempt_id']} {datetime.now(timezone.utc).isoformat()}]\n")
         try:
+            progress({"event": "phase_started", "phase": "stage.load_design"})
             from Design.Config import DesignConfig
             from Design.Design_Driver import load_or_create_design
             if not (out_dir / "design.json").exists():
@@ -381,23 +504,27 @@ def _run_stage_worker(case, out_dir, probe, probe_date, profile_id, stages):
                 record, created = load_or_create_design(out_dir / "design.json", cfg=cfg, verbose=False)
                 if created:                                 # cannot happen: the file exists and its identity was checked
                     raise RuntimeError("a design was created while running a stage")
+                progress({"event": "phase_completed", "phase": "stage.load_design"})
                 for stage in stages:
                     if stage == "design" or stage_file(out_dir, stage).exists():
                         continue                            # the first stage result stands; rerun in a new root
+                    progress({"event": "phase_started", "phase": f"stage.{stage}"})
                     result = STAGE_RUNNERS[stage](record, profile_id, out_dir)
                     stage_file(out_dir, stage).write_text(json.dumps(result, indent=1, default=str), encoding="utf-8")
                     outcome[stage] = result.get("status")
+                    progress({"event": "phase_completed", "phase": f"stage.{stage}", "stage_status": result.get("status")})
+                progress({"event": "worker_completed", "phase": "stage.worker"})
         except Exception as exc:                            # noqa: BLE001
             outcome["error"] = f"{type(exc).__name__}: {exc}"
             (out_dir / "stage_error.txt").write_text(traceback.format_exc(), encoding="utf-8")
+            progress({"event": "worker_failed", "phase": "stage.worker", "error": outcome["error"]})
         finally:
-            with (out_dir / "stage_log.txt").open("a", encoding="utf-8") as handle:
-                handle.write(log.getvalue())
+            log.close()
     return outcome
 
 
 def _worker_command(python_exe, case, out_dir, probe, probe_date, max_section_iter, profile_id, stages, extra):
-    command = [python_exe, "-B", str(Path(__file__).resolve()), "--worker", json.dumps(case), str(out_dir), *extra]
+    command = [python_exe, "-u", "-B", str(Path(__file__).resolve()), "--worker", json.dumps(case), str(out_dir), *extra]
     if probe:
         command.append("--probe-assertions")
         if probe_date:
@@ -415,6 +542,8 @@ def _launch(python_exe, case, out_dir, probe, probe_date=None, log=print, max_se
     out_dir = Path(out_dir)
     env = dict(os.environ)
     env.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     with exclusive_lease(out_dir / ".worker.lease"):
         saved = saved_result(out_dir)
         cached = bool(saved and saved.get("status") == "designed")
@@ -428,11 +557,7 @@ def _launch(python_exe, case, out_dir, probe, probe_date=None, log=print, max_se
             # A later stage on a design that already exists: its own fresh interpreter and its own file.
             command = _worker_command(python_exe, case, out_dir, probe, probe_date, max_section_iter, profile_id,
                                       ["design", *pending], ["--stage-only"])
-            try:
-                proc = subprocess.run(command, capture_output=True, text=True, cwd=str(RC_DIR), timeout=WORKER_TIMEOUT_S, env=env)
-                (out_dir / "stage_stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
-            except subprocess.TimeoutExpired:
-                (out_dir / "stage_stderr.txt").write_text(f"stage worker killed after {WORKER_TIMEOUT_S / 3600:.0f} h", encoding="utf-8")
+            _run_logged_process(command, out_dir, env, stage_only=True)
         return attach_stage_files(validated, out_dir), True
     attempt_id = uuid.uuid4().hex
     command = _worker_command(python_exe, case, out_dir, probe, probe_date, max_section_iter, profile_id, stages,
@@ -440,13 +565,13 @@ def _launch(python_exe, case, out_dir, probe, probe_date=None, log=print, max_se
     # Same child environment the generation scheduler gives its workers (env built above).
     t0 = time.perf_counter()
     try:
-        proc = subprocess.run(command, capture_output=True, text=True, cwd=str(RC_DIR), timeout=WORKER_TIMEOUT_S, env=env)
-        stderr, outcome = proc.stderr or "", f"worker exited {proc.returncode} without a result"
-    except subprocess.TimeoutExpired as exc:
-        stderr = exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        outcome = f"worker killed after {WORKER_TIMEOUT_S / 3600:.0f} h"
+        returncode, timed_out = _run_logged_process(command, out_dir, env)
+        outcome = (f"worker killed after {WORKER_TIMEOUT_S:g} s" if timed_out else
+                   f"worker exited {returncode} without a result")
+    except OSError as exc:
+        outcome = f"worker could not start: {type(exc).__name__}: {exc}"
     out_dir.mkdir(parents=True, exist_ok=True)   # a worker that never started left nothing behind
-    (out_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
+    stderr = _tail_text(out_dir / "stderr.txt")
     saved = saved_result(out_dir)
     if saved and saved.get("attempt_id") == attempt_id:
         return saved, False
@@ -456,6 +581,7 @@ def _launch(python_exe, case, out_dir, probe, probe_date=None, log=print, max_se
     result = {"case": case, "status": "error", "elapsed_s": time.perf_counter() - t0, "host": socket.gethostname(),
               "probe_assertions": probe, "probe_date": probe_date if probe else None, "profile_id": profile_id,
               "stages": list(stages), "attempt_id": attempt_id,
+              "progress": _saved_progress(out_dir, attempt_id),
               "error": outcome, "stderr_tail": stderr[-2000:], "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
               "numerical_completion": {"design": "error", "stages_requested": list(stages),
                                        "note": "the worker process ended without a result (crash or timeout); see stderr.txt"},
@@ -569,6 +695,8 @@ def write_case_summary(row, case_dir):
         if row.get(key) is not None:
             lines.append(f"## {key}\n\n```json\n{json.dumps(row[key], indent=1, default=str)}\n```\n")
     lines.append("Artifacts in this folder: design.json (full record and iteration history), result.json, log.txt, stderr.txt, "
+                 "worker_stdout.txt (native/process output), progress.jsonl and progress.json (incremental diagnostic progress; "
+                 "not restart or acceptance evidence), "
                  "and, when the stage ran, gravity_modal.json with gravity_modal/ (hinge spring table, schema, gravity-state arrays)."
                  + (" failure_evidence.json holds the trials and failing checks of the refused attempt."
                     if row.get("failure_evidence") else ""))

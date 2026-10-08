@@ -17,10 +17,96 @@ import copy
 import math
 import time
 
-from Design.SMRF_Floor_Mesh import floor_mesh, nested_refinement, resolve_recipe_plan
+from Design.SMRF_Floor_Mesh import (floor_mesh, nested_refinement, resolve_recipe_plan,
+                                    witness_face_band_extension, LOCAL_EXTENSION_METHOD)
 
 EXPLICIT_KEYS = {"meshes", "moment_tolerance", "shear_tolerance", "tolerance_basis"}
 RECIPE_KEYS = {"recipe", "levels", "max_shells", "moment_tolerance", "shear_tolerance", "tolerance_basis"}
+
+
+def _mesh_subdivision_label(mesh):
+    """Human label only; retain the original mesh evidence and axis counts."""
+    mesh = mesh or {}
+    scalar = mesh.get("subdivisions_per_bay")
+    if scalar is not None:
+        return str(scalar)
+    x = mesh.get("subdivisions_x_per_bay")
+    y = mesh.get("subdivisions_y_per_bay")
+    return f"{x}x{y}" if x is not None and y is not None else "unknown"
+
+
+def refinement_diagnostics(evidence):
+    """Serializable refusal evidence, with comparisons bound to completed solves.
+
+    A failed attempted fine mesh is not the fine side of the last comparison.
+    Keep solve errors and load cases, but omit the large successful action
+    records. Physical witnesses travel with the compared demands so a moving
+    governing location can be investigated without rerunning the design.
+    This is reporting only and never changes refinement acceptance.
+    """
+    report = evidence.get("refinement") or {}
+    levels = report.get("levels") or []
+    comparisons = report.get("comparisons") or []
+    result = {key: copy.deepcopy(report.get(key)) for key in
+              ("status", "status_detail", "policy", "tolerance_basis", "resolution")}
+    result["levels"] = [{key: copy.deepcopy(value) for key, value in level.items() if key != "actions"}
+                        for level in levels]
+    result["failed_levels"] = [level for level in result["levels"] if level.get("status") == "failed"]
+    if "extension_attempts" in report:
+        result["extension_attempts"] = copy.deepcopy(report["extension_attempts"])
+    result["last_completed_comparison"] = None
+    result["final_strip_comparisons"] = None  # retained compatibility; identities below govern its meaning
+    if comparisons:
+        last = copy.deepcopy(comparisons[-1])
+        pair = {}
+        for side in ("coarse", "fine"):
+            sha = last.get(f"{side}_analysis_sha256")
+            matches = [level for level in levels if level.get("status") == "completed" and sha is not None
+                       and (level.get("actions") or {}).get("analysis_model_sha256") == sha]
+            pair[side] = matches[0] if len(matches) == 1 else None
+            level = pair[side]
+            last[f"{side}_level"] = None if level is None else {
+                "index": level.get("index"), "requested_mesh": copy.deepcopy(level.get("requested_mesh")),
+                "analysis_model_sha256": sha}
+        for row in last.get("comparisons") or []:
+            location_key = "moment_location" if row.get("metric") == "mu_kip_in_per_ft" else "shear_location"
+            for side, level in pair.items():
+                if level is None:
+                    continue
+                matches = [strip for strip in level["actions"].get("strips", [])
+                           if all(strip.get(k) == row.get(k) for k in ("panel_id", "axis", "face"))]
+                if len(matches) == 1:
+                    strip = matches[0]
+                    row[f"{side}_witness"] = {key: copy.deepcopy(strip[key]) for key in
+                                              (location_key, "shear_basis", "demand_location",
+                                               "moment_source_floor", "shear_source_floor") if key in strip}
+        result["last_completed_comparison"] = last
+        result["final_strip_comparisons"] = last.get("comparisons")
+    details = []
+    for level in result["failed_levels"]:
+        mesh = _mesh_subdivision_label(level.get("requested_mesh"))
+        details.append(f"attempted level {level.get('index')} ({mesh} cells per bay) failed: "
+                       f"{level.get('error', 'see attempted_cases')}")
+    last = result["last_completed_comparison"]
+    if last is not None:
+        rows = last.get("comparisons") or []
+        failed = [row for row in rows if row.get("within_tolerance") is not True]
+        identities = [last[f"{side}_level"] for side in ("coarse", "fine")]
+        pair_text = ("[" + ", ".join(_mesh_subdivision_label(level.get("requested_mesh"))
+                                     for level in identities) + "]"
+                     if all(level is not None for level in identities) else "mesh identities unavailable")
+        worst = []
+        for metric in ("mu_kip_in_per_ft", "vu_kip_per_ft"):
+            changes = [row.get("relative_change") for row in rows if row.get("metric") == metric]
+            if changes:
+                value = "undefined (zero-to-nonzero)" if None in changes else f"{max(changes):.9g}"
+                worst.append(f"{metric} {value}")
+        details.append(f"last completed comparison {pair_text} cells per bay: {len(failed)} of {len(rows)} "
+                       f"strip comparisons outside tolerance; largest relative change " + ", ".join(worst))
+    if report.get("status_detail"):
+        details.append(report["status_detail"])
+    result["detail"] = "; ".join(details)
+    return result
 
 
 def _validate_policy(policy):
@@ -29,8 +115,18 @@ def _validate_policy(policy):
     keys = set(policy)
     if keys == EXPLICIT_KEYS:
         kind = "explicit"
-    elif keys == RECIPE_KEYS:
+    elif keys in (RECIPE_KEYS, RECIPE_KEYS | {"local_extension"}):
         kind = "recipe"
+        if "local_extension" in policy:
+            extension = policy["local_extension"]
+            if (not isinstance(extension, dict) or set(extension) != {"method", "max_extra_levels"}
+                    or extension["method"] != LOCAL_EXTENSION_METHOD
+                    or isinstance(extension["max_extra_levels"], bool)
+                    or not isinstance(extension["max_extra_levels"], int)
+                    or not 1 <= extension["max_extra_levels"] <= 2
+                    or policy["recipe"] != "graded_face_v1" or policy["levels"] != 4):
+                raise ValueError("Local extension requires graded_face_v1 with four base levels, "
+                                 f"method {LOCAL_EXTENSION_METHOD} and one or two extra levels")
     elif "meshes" in keys and "recipe" in keys:
         raise ValueError("Slab refinement takes an explicit mesh plan or a named recipe, not both")
     else:
@@ -72,11 +168,22 @@ def _plan(geometry, policy, *, sections=None, recipe_inputs=None):
             raise ValueError("A recipe plan needs the beam section to resolve")
         resolution = resolve_recipe_plan({"num_bay_x": nx, "num_bay_y": ny, "bay_x_in": lx, "bay_y_in": ly},
                                          source, policy)
+        if "local_extension" in policy and len(resolution["meshes"]) != 4 and resolution["status"] == "resolved":
+            resolution["status"] = "unresolved_budget"
+            resolution["detail"] = "Local extension requires all four original recipe levels within the declared shell budget"
         specs = resolution["meshes"]
     grids = [floor_mesh(nx, ny, lx, ly, 4, mesh_spec=spec) for spec in specs]
     for a, b in zip(grids, grids[1:]):
         nested_refinement(a, b)
     return grids, resolution
+
+
+def _next_local_extension(geometry, policy, recipe_inputs, coarse, fine, comparison, grid, attempts):
+    used = [item["selected_axis"] for item in attempts if item["status"] == "proposed"]
+    if len(used) >= policy["local_extension"]["max_extra_levels"]:
+        return {"method": LOCAL_EXTENSION_METHOD, "status": "limit_reached", "used_axes": used,
+                "detail": "Declared local extension level limit reached; failed comparison retained"}
+    return witness_face_band_extension(geometry, recipe_inputs, coarse, fine, comparison, grid, used)
 
 
 def refinement_verified(evidence):
@@ -95,9 +202,15 @@ def refinement_verified(evidence):
                                        or resolution["meshes"] != report["resolved_meshes"]):
             return False
         levels = report["levels"]
-        if len(levels) != len(grids) or any(level["status"] != "completed" for level in levels):
+        base_count = len(grids)
+        extension_enabled = "local_extension" in report["policy"]
+        attempts, comparisons = [], []
+        if len(levels) < base_count or any(level["status"] != "completed" for level in levels):
             return False
-        for level, grid in zip(levels, grids):
+        for index, level in enumerate(levels):
+            if index >= len(grids) or level.get("index") != index or level["requested_mesh"] != grids[index]:
+                return False
+            grid = grids[index]
             actions = level["actions"]
             meshes = actions["solved_meshes"]
             if [m["case_id"] for m in meshes] != [c["id"] for c in actions["cases"]]:
@@ -106,15 +219,30 @@ def refinement_verified(evidence):
                 return False
             if not actions["equilibrium"] or not all(r["numerical_balance_passed"] for r in actions["equilibrium"]):
                 return False
+            if index:
+                comparison = compare_slab_action_refinement(
+                    levels[index - 1]["actions"], actions,
+                    moment_tolerance=report["policy"]["moment_tolerance"],
+                    shear_tolerance=report["policy"]["shear_tolerance"])
+                comparisons.append(comparison)
+                if (extension_enabled and index >= base_count - 1
+                        and comparison["all_within_tolerance"] is not True):
+                    decision = _next_local_extension(report["geometry"], report["policy"], report["recipe_inputs"],
+                        levels[index - 1]["actions"], actions, comparison, grid, attempts)
+                    attempts.append(decision)
+                    if decision["status"] == "proposed":
+                        g = report["geometry"]
+                        grids.append(floor_mesh(g["num_bay_x"], g["num_bay_y"], g["bay_x_in"], g["bay_y_in"],
+                                                4, mesh_spec=decision["mesh_spec"]))
+        if (len(levels) != len(grids) or comparisons != report["comparisons"]
+                or attempts != report.get("extension_attempts", [])):
+            return False
         coarse, fine = levels[-2]["actions"], levels[-1]["actions"]
         for key in ("analysis_model_sha256", "physical_model_sha256", "slab_input_sha256", "cases",
                     "strips", "solved_meshes", "equilibrium", "shear_recovery", "max_abs_membrane_kip_per_in"):
             if evidence[key] != fine[key]:
                 return False
-        comparison = compare_slab_action_refinement(
-            coarse, fine, moment_tolerance=report["policy"]["moment_tolerance"],
-            shear_tolerance=report["policy"]["shear_tolerance"])
-        return comparison == report["comparisons"][-1] and comparison["all_within_tolerance"] is True
+        return comparisons[-1]["all_within_tolerance"] is True
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         return False
 
@@ -297,10 +425,15 @@ def build_refined_slab_action_evidence(slab_record, geometry, sections, live_loa
               "resolution": copy.deepcopy(resolution),
               "recipe_inputs": None if resolution is None else copy.deepcopy(resolution["inputs"]),
               "resolved_meshes": None if resolution is None else copy.deepcopy(resolution["meshes"])}
+    extension_enabled = "local_extension" in policy
+    if extension_enabled:
+        report["method"] = "bounded_slab_refinement_v3_witness_face_extension"
+        report["extension_attempts"] = []
+    base_count = len(grids)
     latest = {flag: False for flag in _FLAGS}
     latest.update(strips=[], cases=[], equilibrium=[], numerical_preconditions={},
                   numerical_basis={}, engineering_assertions=copy.deepcopy(assertions or {}))
-    specs = policy["meshes"] if resolution is None else resolution["meshes"]
+    specs = copy.deepcopy(policy["meshes"] if resolution is None else resolution["meshes"])
     if resolution is not None and resolution["status"] != "resolved":
         report["status"] = resolution["status"]
         report["status_detail"] = resolution["detail"]
@@ -331,6 +464,19 @@ def build_refined_slab_action_evidence(slab_record, geometry, sections, live_loa
                 report["comparisons"].append(compare_slab_action_refinement(
                     report["levels"][index - 1]["actions"], actions,
                     moment_tolerance=policy["moment_tolerance"], shear_tolerance=policy["shear_tolerance"]))
+                comparison = report["comparisons"][-1]
+                if (extension_enabled and index >= base_count - 1
+                        and comparison["all_within_tolerance"] is not True):
+                    decision = _next_local_extension(geometry, policy, report["recipe_inputs"],
+                        report["levels"][index - 1]["actions"], actions, comparison, grid, report["extension_attempts"])
+                    report["extension_attempts"].append(decision)
+                    if decision["status"] == "proposed":
+                        specs.append(decision["mesh_spec"])
+                        grids.append(floor_mesh(geometry["num_bay_x"], geometry["num_bay_y"],
+                                                geometry["bay_x_in"], geometry["bay_y_in"],
+                                                4, mesh_spec=decision["mesh_spec"]))
+                    else:
+                        report["status_detail"] = decision["detail"]
         except Exception as exc:
             level.update(status="failed", error=f"{type(exc).__name__}: {exc}")
             report["status"] = "analysis_failed"

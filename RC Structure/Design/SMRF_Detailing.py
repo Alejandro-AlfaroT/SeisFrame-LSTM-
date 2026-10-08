@@ -4,7 +4,8 @@ ACI 318-19: 18.6.2--18.6.4, 18.7.2, 18.7.4--18.7.5, 25.2.
 Units: kip, inch, ksi. Each member dictionary carries dimensions, bar areas,
 diameters, counts, clear cover to OUTSIDE of hoops, and hoop spacing. Columns
 use n_side_per_face (excluding corners). Geometry spans are center-to-center;
-column h is along X, b along Y. All bars occupy a single layer per face.
+column h is along X, b along Y. Beam bar_stacking supplies declared layers;
+records without it retain the legacy single-row geometry.
 
 This does not create a complete bar cage or certify hooks, anchorage, splices,
 confinement area, development, or capacity shear. Those remain explicit open
@@ -179,15 +180,19 @@ def evaluate_detailing(inputs):
             top, bottom = _count(member, "n_top", 2), _count(member, "n_bottom", 2)
             aggregate = _num(member, "aggregate_size_in", strictly_positive=True)
             clearance = max(1.0, db, 4 * aggregate / 3) if name == "beam" else max(1.5, 1.5 * db, 4 * aggregate / 3)
-            for face, count in (("top", top), ("bottom", bottom)):
-                spacing = (b - 2 * offset) / (count - 1) - db
-                check(f"{name}.bar_clear_spacing", "ACI 318-19 25.2.1; 25.2.3", spacing,
-                      clearance, ">=", face)
+            if name == "beam" and "bar_stacking" in member:
+                from Design.SMRF_Beam_Spacing import evaluate_layered_beam_spacing
+                checks.extend(evaluate_layered_beam_spacing(member, col))
+            else:
+                for face, count in (("top", top), ("bottom", bottom)):
+                    spacing = (b - 2 * offset) / (count - 1) - db
+                    check(f"{name}.bar_clear_spacing", "ACI 318-19 25.2.1; 25.2.3", spacing,
+                          clearance, ">=", face)
             if name == "column":
                 side = _count(member, "n_side_per_face")
                 check("column.side_bar_clear_spacing", "ACI 318-19 25.2.3",
                       (h - 2 * offset) / (side + 1) - db, clearance, ">=")
-        except (ValueError, TypeError, AttributeError) as exc:
+        except (ValueError, TypeError, AttributeError, KeyError, OverflowError) as exc:
             unknown(f"{name}.bar_fit_complete", "ACI 318-19 25.2", exc)
         # Steel ratios do not require an aggregate size; keep independent evidence.
         try:

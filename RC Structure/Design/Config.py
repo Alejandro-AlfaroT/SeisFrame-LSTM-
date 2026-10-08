@@ -465,11 +465,17 @@ class FloorAnalysisConfig:
 # unresolved result, and a genuine convergence rejection stays a rejection.
 # 2026-10-03: allow all four levels on the pilot's largest 6x6 floor
 # (129,600 shells at 60 cells/bay). Explicit smaller user budgets still apply.
+# 2026-10-07: after a completed but failing final comparison, permit at most
+# two nested face-band extensions selected from the failed strip witnesses.
+# The same tolerances and shell budget apply; unresolved or failed solves
+# remain unverified. This is a numerical investigation policy, not acceptance.
 PROBE_SLAB_REFINEMENT = {
     "recipe": "graded_face_v1", "levels": 4, "max_shells": 130000,
+    "local_extension": {"method": "failed_witness_face_band_v1", "max_extra_levels": 2},
     "moment_tolerance": 0.05, "shear_tolerance": 0.05,
     "tolerance_basis": "PROBE -- inherited 5% all-strip investigation screen of the 2026-09-24 "
-                       "fixed-candidate benchmark (graded face meshes 12/24/48/60 per bay); not an ACI "
+                       "fixed-candidate benchmark (graded face meshes 12/24/48/60 per bay with at most "
+                       "two failed-witness face-band extensions inside the same shell budget); not an ACI "
                        "acceptance limit, not a validated recipe for every geometry",
 }
 

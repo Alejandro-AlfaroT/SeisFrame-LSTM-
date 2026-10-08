@@ -1,0 +1,530 @@
+{
+  "case_0007": {
+    "geometry": {
+      "num_bay_x": 2,
+      "num_bay_y": 3,
+      "num_floor": 8,
+      "bay_x_in": 342.0,
+      "bay_y_in": 330.0,
+      "story_h_in": 144.0
+    },
+    "sections": {
+      "b_col_in": 38.0,
+      "h_col_in": 38.0,
+      "fc_col_ksi": 9.0,
+      "b_beam_in": 20.0,
+      "h_beam_in": 32.0,
+      "fc_beam_ksi": 5.0
+    },
+    "reinforcement": {
+      "col_bar_size": 9,
+      "col_top_bars": 5,
+      "col_bot_bars": 5,
+      "col_side_bars": 4,
+      "beam_bar_size": 8,
+      "beam_top_bars": 11,
+      "beam_bot_bars": 11,
+      "beam_side_bars": 0,
+      "col_stirrup_bar_size": 5,
+      "col_stirrup_legs": 5,
+      "col_stirrup_legs_by_direction": {
+        "across_b_face": 5,
+        "across_h_face": 5
+      },
+      "col_stirrup_spacing_in": 3.0,
+      "beam_stirrup_bar_size": 5,
+      "beam_stirrup_legs": 6,
+      "beam_stirrup_spacing_in": 6.0,
+      "legacy_centroid_offset_in": 1.5,
+      "cover_basis": "clear_cover_outside_hoops",
+      "beam_clear_cover_in": 1.5,
+      "col_clear_cover_in": 1.5,
+      "beam_longitudinal_centroid_offset_in": 2.625,
+      "beam_bar_stacking": {
+        "mode": "inner_over_outer",
+        "convention": "y_over_x",
+        "offsets_in": {
+          "x": {
+            "top": 6.443181818181818,
+            "bottom": 4.443181818181818
+          },
+          "y": {
+            "top": 4.443181818181818,
+            "bottom": 6.443181818181818
+          }
+        },
+        "max_layers": 2,
+        "layer_order": "interleaved",
+        "layers": {
+          "x": {
+            "top": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                5
+              ],
+              "offsets_in": [
+                4.625,
+                8.625
+              ],
+              "centroid_in": 6.443181818181818
+            },
+            "bottom": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                5
+              ],
+              "offsets_in": [
+                2.625,
+                6.625
+              ],
+              "centroid_in": 4.443181818181818
+            }
+          },
+          "y": {
+            "top": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                5
+              ],
+              "offsets_in": [
+                2.625,
+                6.625
+              ],
+              "centroid_in": 4.443181818181818
+            },
+            "bottom": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                5
+              ],
+              "offsets_in": [
+                4.625,
+                8.625
+              ],
+              "centroid_in": 6.443181818181818
+            }
+          }
+        },
+        "layer_pitch_in": 2.0,
+        "interlayer_clear_min_in": 1.0,
+        "basis": "orthogonal beam bars cannot share an elevation where they cross at a joint; the lower direction's cage runs straight below the upper direction's last layer, so each direction gives up depth at one face; bars the column lanes do not admit in one layer take a second layer directly below (25.2.2), up to max_layers (design-basis rules 2026-09-27)"
+      },
+      "col_longitudinal_centroid_offset_in": 2.689,
+      "col_bar_diameter_in": 1.128,
+      "beam_bar_diameter_in": 1.0,
+      "col_bar_area_in2": 1.0,
+      "beam_bar_area_in2": 0.79,
+      "col_stirrup_diameter_in": 0.625,
+      "beam_stirrup_diameter_in": 0.625
+    },
+    "materials": {
+      "fy_ksi": 60.0,
+      "fyt_ksi": 60.0,
+      "normalweight": true,
+      "aggregate_size_in": 0.75,
+      "es_ksi": 29000.0,
+      "reinforcement_specification": "ASTM A706 Grade 60",
+      "exposure": "sheltered_interior"
+    }
+  },
+  "case_0027": {
+    "geometry": {
+      "num_bay_x": 4,
+      "num_bay_y": 2,
+      "num_floor": 6,
+      "bay_x_in": 234.0,
+      "bay_y_in": 354.0,
+      "story_h_in": 162.0
+    },
+    "sections": {
+      "b_col_in": 30.0,
+      "h_col_in": 30.0,
+      "fc_col_ksi": 6.0,
+      "b_beam_in": 14.0,
+      "h_beam_in": 26.0,
+      "fc_beam_ksi": 8.0
+    },
+    "reinforcement": {
+      "col_bar_size": 8,
+      "col_top_bars": 3,
+      "col_bot_bars": 3,
+      "col_side_bars": 4,
+      "beam_bar_size": 8,
+      "beam_top_bars": 6,
+      "beam_bot_bars": 6,
+      "beam_side_bars": 0,
+      "col_stirrup_bar_size": 5,
+      "col_stirrup_legs": 3,
+      "col_stirrup_legs_by_direction": {
+        "across_b_face": 3,
+        "across_h_face": 4
+      },
+      "col_stirrup_spacing_in": 3.0,
+      "beam_stirrup_bar_size": 4,
+      "beam_stirrup_legs": 4,
+      "beam_stirrup_spacing_in": 4.0,
+      "legacy_centroid_offset_in": 1.5,
+      "cover_basis": "clear_cover_outside_hoops",
+      "beam_clear_cover_in": 1.5,
+      "col_clear_cover_in": 1.5,
+      "beam_longitudinal_centroid_offset_in": 2.5,
+      "beam_bar_stacking": {
+        "mode": "inner_over_outer",
+        "convention": "y_over_x",
+        "offsets_in": {
+          "x": {
+            "top": 5.833333333333333,
+            "bottom": 3.8333333333333335
+          },
+          "y": {
+            "top": 4.5,
+            "bottom": 6.5
+          }
+        },
+        "max_layers": 2,
+        "layer_order": "interleaved",
+        "layers": {
+          "x": {
+            "top": {
+              "layers": 2,
+              "per_layer": [
+                4,
+                2
+              ],
+              "offsets_in": [
+                4.5,
+                8.5
+              ],
+              "centroid_in": 5.833333333333333
+            },
+            "bottom": {
+              "layers": 2,
+              "per_layer": [
+                4,
+                2
+              ],
+              "offsets_in": [
+                2.5,
+                6.5
+              ],
+              "centroid_in": 3.8333333333333335
+            }
+          },
+          "y": {
+            "top": {
+              "layers": 2,
+              "per_layer": [
+                3,
+                3
+              ],
+              "offsets_in": [
+                2.5,
+                6.5
+              ],
+              "centroid_in": 4.5
+            },
+            "bottom": {
+              "layers": 2,
+              "per_layer": [
+                3,
+                3
+              ],
+              "offsets_in": [
+                4.5,
+                8.5
+              ],
+              "centroid_in": 6.5
+            }
+          }
+        },
+        "layer_pitch_in": 2.0,
+        "interlayer_clear_min_in": 1.0,
+        "basis": "orthogonal beam bars cannot share an elevation where they cross at a joint; the lower direction's cage runs straight below the upper direction's last layer, so each direction gives up depth at one face; bars the column lanes do not admit in one layer take a second layer directly below (25.2.2), up to max_layers (design-basis rules 2026-09-27)"
+      },
+      "col_longitudinal_centroid_offset_in": 2.625,
+      "col_bar_diameter_in": 1.0,
+      "beam_bar_diameter_in": 1.0,
+      "col_bar_area_in2": 0.79,
+      "beam_bar_area_in2": 0.79,
+      "col_stirrup_diameter_in": 0.625,
+      "beam_stirrup_diameter_in": 0.5
+    },
+    "materials": {
+      "fy_ksi": 60.0,
+      "fyt_ksi": 60.0,
+      "normalweight": true,
+      "aggregate_size_in": 0.75,
+      "es_ksi": 29000.0,
+      "reinforcement_specification": "ASTM A706 Grade 60",
+      "exposure": "sheltered_interior"
+    }
+  },
+  "case_0069": {
+    "geometry": {
+      "num_bay_x": 3,
+      "num_bay_y": 2,
+      "num_floor": 9,
+      "bay_x_in": 324.0,
+      "bay_y_in": 312.0,
+      "story_h_in": 174.0
+    },
+    "sections": {
+      "b_col_in": 42.0,
+      "h_col_in": 42.0,
+      "fc_col_ksi": 8.0,
+      "b_beam_in": 26.0,
+      "h_beam_in": 36.0,
+      "fc_beam_ksi": 5.0
+    },
+    "reinforcement": {
+      "col_bar_size": 10,
+      "col_top_bars": 6,
+      "col_bot_bars": 6,
+      "col_side_bars": 4,
+      "beam_bar_size": 9,
+      "beam_top_bars": 11,
+      "beam_bot_bars": 11,
+      "beam_side_bars": 0,
+      "col_stirrup_bar_size": 5,
+      "col_stirrup_legs": 6,
+      "col_stirrup_legs_by_direction": {
+        "across_b_face": 6,
+        "across_h_face": 6
+      },
+      "col_stirrup_spacing_in": 3.0,
+      "beam_stirrup_bar_size": 5,
+      "beam_stirrup_legs": 6,
+      "beam_stirrup_spacing_in": 6.0,
+      "legacy_centroid_offset_in": 1.5,
+      "cover_basis": "clear_cover_outside_hoops",
+      "beam_clear_cover_in": 1.5,
+      "col_clear_cover_in": 1.5,
+      "beam_longitudinal_centroid_offset_in": 2.689,
+      "beam_bar_stacking": {
+        "mode": "x_over_y",
+        "convention": "x_over_y",
+        "offsets_in": {
+          "x": {
+            "top": 4.739909090909091,
+            "bottom": 6.995909090909091
+          },
+          "y": {
+            "top": 6.995909090909091,
+            "bottom": 4.739909090909091
+          }
+        },
+        "max_layers": 2,
+        "layer_order": "interleaved",
+        "layers": {
+          "x": {
+            "top": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                5
+              ],
+              "offsets_in": [
+                2.689,
+                7.201
+              ],
+              "centroid_in": 4.739909090909091
+            },
+            "bottom": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                5
+              ],
+              "offsets_in": [
+                4.945,
+                9.456999999999999
+              ],
+              "centroid_in": 6.995909090909091
+            }
+          },
+          "y": {
+            "top": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                5
+              ],
+              "offsets_in": [
+                4.945,
+                9.456999999999999
+              ],
+              "centroid_in": 6.995909090909091
+            },
+            "bottom": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                5
+              ],
+              "offsets_in": [
+                2.689,
+                7.201
+              ],
+              "centroid_in": 4.739909090909091
+            }
+          }
+        },
+        "layer_pitch_in": 2.256,
+        "interlayer_clear_min_in": 1.0,
+        "basis": "orthogonal beam bars cannot share an elevation where they cross at a joint; the lower direction's cage runs straight below the upper direction's last layer, so each direction gives up depth at one face; bars the column lanes do not admit in one layer take a second layer directly below (25.2.2), up to max_layers (design-basis rules 2026-09-27)"
+      },
+      "col_longitudinal_centroid_offset_in": 2.76,
+      "col_bar_diameter_in": 1.27,
+      "beam_bar_diameter_in": 1.128,
+      "col_bar_area_in2": 1.27,
+      "beam_bar_area_in2": 1.0,
+      "col_stirrup_diameter_in": 0.625,
+      "beam_stirrup_diameter_in": 0.625
+    },
+    "materials": {
+      "fy_ksi": 60.0,
+      "fyt_ksi": 60.0,
+      "normalweight": true,
+      "aggregate_size_in": 0.75,
+      "es_ksi": 29000.0,
+      "reinforcement_specification": "ASTM A706 Grade 60",
+      "exposure": "sheltered_interior"
+    }
+  },
+  "case_0085": {
+    "geometry": {
+      "num_bay_x": 4,
+      "num_bay_y": 4,
+      "num_floor": 5,
+      "bay_x_in": 312.0,
+      "bay_y_in": 318.0,
+      "story_h_in": 204.0
+    },
+    "sections": {
+      "b_col_in": 40.0,
+      "h_col_in": 40.0,
+      "fc_col_ksi": 9.0,
+      "b_beam_in": 28.0,
+      "h_beam_in": 32.0,
+      "fc_beam_ksi": 5.0
+    },
+    "reinforcement": {
+      "col_bar_size": 11,
+      "col_top_bars": 5,
+      "col_bot_bars": 5,
+      "col_side_bars": 3,
+      "beam_bar_size": 10,
+      "beam_top_bars": 10,
+      "beam_bot_bars": 10,
+      "beam_side_bars": 0,
+      "col_stirrup_bar_size": 5,
+      "col_stirrup_legs": 5,
+      "col_stirrup_legs_by_direction": {
+        "across_b_face": 5,
+        "across_h_face": 5
+      },
+      "col_stirrup_spacing_in": 3.0,
+      "beam_stirrup_bar_size": 5,
+      "beam_stirrup_legs": 6,
+      "beam_stirrup_spacing_in": 6.0,
+      "legacy_centroid_offset_in": 1.5,
+      "cover_basis": "clear_cover_outside_hoops",
+      "beam_clear_cover_in": 1.5,
+      "col_clear_cover_in": 1.5,
+      "beam_longitudinal_centroid_offset_in": 2.76,
+      "beam_bar_stacking": {
+        "mode": "x_over_y",
+        "convention": "x_over_y",
+        "offsets_in": {
+          "x": {
+            "top": 4.792,
+            "bottom": 7.331999999999999
+          },
+          "y": {
+            "top": 7.331999999999999,
+            "bottom": 4.792
+          }
+        },
+        "max_layers": 2,
+        "layer_order": "interleaved",
+        "layers": {
+          "x": {
+            "top": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                4
+              ],
+              "offsets_in": [
+                2.76,
+                7.84
+              ],
+              "centroid_in": 4.792
+            },
+            "bottom": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                4
+              ],
+              "offsets_in": [
+                5.3,
+                10.379999999999999
+              ],
+              "centroid_in": 7.331999999999999
+            }
+          },
+          "y": {
+            "top": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                4
+              ],
+              "offsets_in": [
+                5.3,
+                10.379999999999999
+              ],
+              "centroid_in": 7.331999999999999
+            },
+            "bottom": {
+              "layers": 2,
+              "per_layer": [
+                6,
+                4
+              ],
+              "offsets_in": [
+                2.76,
+                7.84
+              ],
+              "centroid_in": 4.792
+            }
+          }
+        },
+        "layer_pitch_in": 2.54,
+        "interlayer_clear_min_in": 1.0,
+        "basis": "orthogonal beam bars cannot share an elevation where they cross at a joint; the lower direction's cage runs straight below the upper direction's last layer, so each direction gives up depth at one face; bars the column lanes do not admit in one layer take a second layer directly below (25.2.2), up to max_layers (design-basis rules 2026-09-27)"
+      },
+      "col_longitudinal_centroid_offset_in": 2.83,
+      "col_bar_diameter_in": 1.41,
+      "beam_bar_diameter_in": 1.27,
+      "col_bar_area_in2": 1.56,
+      "beam_bar_area_in2": 1.27,
+      "col_stirrup_diameter_in": 0.625,
+      "beam_stirrup_diameter_in": 0.625
+    },
+    "materials": {
+      "fy_ksi": 60.0,
+      "fyt_ksi": 60.0,
+      "normalweight": true,
+      "aggregate_size_in": 0.75,
+      "es_ksi": 29000.0,
+      "reinforcement_specification": "ASTM A706 Grade 60",
+      "exposure": "sheltered_interior"
+    }
+  }
+}
