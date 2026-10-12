@@ -20,6 +20,12 @@ min(8h, sw/2, ln/8) each side; perimeter beams add min(6h, sw/2, ln/12) on
 their one slab side. h is the slab thickness, sw the clear distance to the
 adjacent web and ln the clear span. Slab mats are continuous and uniform, so
 the bars inside the flange are developed at every beam end.
+
+Since 2026-10-11 (user decision) the same developed mats are also the
+credit the beam's top bars are sized and checked with in hogging
+(hogging_slab_credit): the second office practice NIST GCR 16-917-40
+Sec. 5.2 describes, so the beam the strong-column rule protects against
+is the beam the bars were sized for.
 """
 from __future__ import annotations
 
@@ -324,6 +330,124 @@ def exterior_ends(kind, span_index, num_bay_x, num_bay_y):
     """Which ends of a beam terminate at the building perimeter in the beam's own direction."""
     last = (num_bay_x if kind == "beam_x" else num_bay_y) - 1
     return {"i": span_index == 0, "j": span_index == last}
+
+
+def hogging_slab_credit(layout, slab_thickness_in, beam_width_in, geometry, beam_clear_cover_in, hoop_db_in,
+                        fc_beam_ksi, fy_ksi):
+    """The developed slab mats each beam's top bars may be sized and checked with in hogging.
+
+    The second office practice in NIST GCR 16-917-40 Sec. 5.2 (user decision
+    2026-10-11): the developed longitudinal reinforcement within the ACI
+    318-19 6.3.2 effective flange is beam flexural tension reinforcement
+    when the slab is in tension, the same steel 18.7.3.2 counts in the
+    strong-column rule. Per family (axis, edge or interior line) the mats
+    inside the flange are the layers composite_beam_strengths uses; per
+    member the credit is that of its least-credited end: a member with an
+    exterior end whose perimeter hook does not develop the mats
+    (perimeter_slab_bar_anchorage) is credited nothing, because the uniform
+    bars must carry that end's hogging on the web alone. The pre-yield slab
+    participation of about 1.5 beam depths each side that Pantazopoulou and
+    Moehle (1990) measured is of the order of the 6.3.2 width, which this
+    design-strength credit keeps; the wider post-yield participation belongs
+    to the hinge strengths, not to the bar sizing.
+
+    Returns {"families": {key: {effective_flange_width_in, slab_steel_in_flange_in2,
+    layers_from_top: [{face, depth_in, area_in2}]}}, "members": {tag: {family, credited, reason}},
+    "anchorage": {axis: record}, "basis"}; without a layout every member is uncredited.
+    """
+    nbx, nby, nf = geometry["num_bay_x"], geometry["num_bay_y"], geometry["num_floor"]
+    families, anchorage, members = {}, {}, {}
+    if layout is not None:
+        t = slab_thickness_in
+        for axis in ("x", "y"):
+            anchorage[axis] = perimeter_slab_bar_anchorage(layout, axis, beam_width_in, beam_clear_cover_in,
+                                                           hoop_db_in, fc_beam_ksi, fy_ksi)
+            if axis == "x":
+                clear_span, clear_web = geometry["bay_x_in"] - geometry["h_col_in"], geometry["bay_y_in"] - beam_width_in
+            else:
+                clear_span, clear_web = geometry["bay_y_in"] - geometry["b_col_in"], geometry["bay_x_in"] - beam_width_in
+            for position in ("edge", "interior"):
+                bf, _overhang = effective_flange_width(beam_width_in, t, clear_span, clear_web,
+                                                       2 if position == "interior" else 1)
+                layers = _slab_layers_from_top(t, layout, axis, bf)
+                families[f"{axis}_{position}"] = {
+                    "effective_flange_width_in": bf,
+                    "slab_steel_in_flange_in2": sum(area for _, area, _ in layers),
+                    "layers_from_top": [{"face": face, "depth_in": y, "area_in2": area} for y, area, face in layers]}
+    for tag, kind, line, span in beam_members_with_spans(nbx, nby, nf):
+        axis, position = beam_family(kind, line, nbx, nby)
+        family = f"{axis}_{position}"
+        if layout is None:
+            members[tag] = {"family": family, "credited": False, "reason": "slab reinforcement not established"}
+            continue
+        exterior = exterior_ends(kind, span, nbx, nby)
+        if (exterior["i"] or exterior["j"]) and not anchorage[axis]["developed"]:
+            members[tag] = {"family": family, "credited": False,
+                            "reason": "exterior end: the perimeter hook does not develop the slab mats (ACI 318-19 25.4.3.1)"}
+        else:
+            members[tag] = {"family": family, "credited": True, "reason": None}
+    return {"families": families, "members": members, "anchorage": anchorage,
+            "basis": ("developed slab mats within the ACI 318-19 6.3.2 effective flange as beam tension steel in hogging "
+                      "(NIST GCR 16-917-40 Sec. 5.2, second practice; the steel 18.7.3.2 counts); per member the "
+                      "least-credited end: an exterior end whose perimeter hook does not develop the mats credits nothing")}
+
+
+def family_hogging_layers(credit, family, beam_depth_in):
+    """[(depth from the compression face, area)] of one family's slab mats in hogging; [] for an unknown family."""
+    record = (credit or {}).get("families", {}).get(family)
+    if not record:
+        return []
+    return [(beam_depth_in - layer["depth_in"], layer["area_in2"]) for layer in record["layers_from_top"]]
+
+
+def credited_hogging_layers(credit, tag, beam_depth_in):
+    """[(depth from the compression face, area)] of the slab mats credited to member ``tag``; [] when none."""
+    member = (credit or {}).get("members", {}).get(tag)
+    if not member or not member.get("credited"):
+        return []
+    return family_hogging_layers(credit, member["family"], beam_depth_in)
+
+
+def hogging_strength_kip_in(as_top_in2, d_in, beam_depth_in, beam_width_in, fc_ksi, fy_ksi, slab_layers=()):
+    """Nominal hogging moment of one top-bar layer at ``d_in`` with the credited slab layers (strain compatibility).
+
+    Without slab layers this is the singly reinforced rectangular section the beam flexure check and
+    the bar sizing used before 2026-10-11 (one steel layer at its effective depth, Whitney block).
+    """
+    layers = [(d_in, as_top_in2)] + list(slab_layers)
+    return section_moment(layers, fc_ksi, fy_ksi, beam_depth_in, beam_width_in)["mn_kip_in"]
+
+
+def web_top_steel_for_hogging(mn_required_kip_in, d_in, beam_depth_in, beam_width_in, fc_ksi, fy_ksi, slab_layers=(),
+                              as_max_in2=None, tol_in2=1e-3):
+    """The least top-bar area whose section, with the credited slab layers, reaches ``mn_required_kip_in``.
+
+    Bisection on hogging_strength_kip_in between no web steel and ``as_max_in2`` (default: the 18.6.3.1
+    ratio 0.025 b d). math.inf when even that area is short; zero when the slab layers alone suffice
+    (the code minimum then governs the bars).
+    """
+    if mn_required_kip_in <= 0.0:
+        return 0.0
+    slab_layers = list(slab_layers)
+    high = 0.025 * beam_width_in * d_in if as_max_in2 is None else as_max_in2
+
+    def strength(area):
+        if area <= 0.0 and not slab_layers:
+            return 0.0
+        return hogging_strength_kip_in(area, d_in, beam_depth_in, beam_width_in, fc_ksi, fy_ksi, slab_layers)
+
+    if strength(high) < mn_required_kip_in:
+        return math.inf
+    if strength(0.0) >= mn_required_kip_in:
+        return 0.0
+    low = 0.0
+    while high - low > tol_in2:
+        mid = 0.5 * (low + high)
+        if strength(mid) >= mn_required_kip_in:
+            high = mid
+        else:
+            low = mid
+    return high
 
 
 def beam_slab_strengths(record):

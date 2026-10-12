@@ -61,7 +61,7 @@ class BoundedUniformSearch(unittest.TestCase):
         self.assertFalse(state["trials"][0]["material_dominance"])                # recorded: the grade went up
         self.assertEqual([t["phase"] for t in state["trials"]], ["size", "grade"])
         report = search.summary(state, columns, beams)
-        self.assertEqual((report["policy"], report["stop_reason"]), ("uniform_size_first_v2", "declared_descent_complete"))
+        self.assertEqual((report["policy"], report["stop_reason"]), ("uniform_size_first_v3", "declared_descent_complete"))
 
     def test_the_grade_descent_keeps_the_lowest_passing_grade_and_three_failures_end_the_size_descent(self):
         columns = [(s, s, g) for s in (20., 22., 24., 26., 28., 30.) for g in (5., 6., 8., 10.)]
@@ -79,6 +79,30 @@ class BoundedUniformSearch(unittest.TestCase):
         self.assertEqual(state["accepted"]["entry"]["column_section"], [28., 28., 6.])
         report = search.summary(state, columns, beams)
         self.assertEqual(report["untested_count"], 0)
+
+    def test_the_beam_grade_descends_after_the_column_grade(self):
+        """Grade before geometry (2026-10-11): the search lands a dimension step at the top beam grade; after the
+        column grades the descent tries the held beam's lower grades under the selected column, highest first,
+        until one fails, and the lowest passing grade is the design."""
+        columns = [(28., 28., 8.), (28., 28., 10.), (30., 30., 10.)]
+        beams = [(16., 22., 5.), (16., 22., 6.), (16., 22., 8.)]
+        state = search.start(columns, beams, 2, 2, snapshot(columns[2], beams[2]), 24)
+        tried = []
+        ci = search.next_pair(state)
+        while ci is not None:
+            bi = state["beam"]
+            tried.append((columns[ci], beams[bi]))
+            ok = columns[ci] == (28., 28., 10.) and beams[bi][2] >= 6.      # 28 in only at 10 ksi; the beam down to 6
+            ci = search.advance(state, columns, beams, ci, ok, snapshot=snapshot(columns[ci], beams[bi]) if ok else None,
+                                actual_beam_index=bi)
+        self.assertEqual(tried, [((28., 28., 10.), (16., 22., 8.)), ((28., 28., 8.), (16., 22., 8.)),
+                                 ((28., 28., 10.), (16., 22., 6.)), ((28., 28., 10.), (16., 22., 5.))])
+        self.assertEqual([t["phase"] for t in state["trials"]], ["size", "grade", "beam_grade", "beam_grade"])
+        self.assertEqual(state["accepted"]["entry"]["column_section"], [28., 28., 10.])
+        self.assertEqual(state["accepted"]["entry"]["beam_section"], [16., 22., 6.])
+        report = search.summary(state, columns, beams)
+        self.assertEqual((report["stop_reason"], report["untested_count"]), ("declared_descent_complete", 0))
+        self.assertEqual(report["selected_beam"], [16., 22., 6.])
 
     def test_a_size_that_fails_joint_shear_alone_is_retried_with_a_confining_beam(self):
         """r5 screen: 34 in at 10 ksi missed joint shear by 1 to 5 percent under a 24-in beam (0.71 of the column);

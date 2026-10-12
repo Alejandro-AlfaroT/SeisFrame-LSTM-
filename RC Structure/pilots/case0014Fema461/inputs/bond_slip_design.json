@@ -1,0 +1,640 @@
+{
+  "geometry": {
+    "num_bay_x": 6,
+    "num_bay_y": 2,
+    "num_floor": 4,
+    "bay_x_in": 234.0,
+    "bay_y_in": 300.0,
+    "story_h_in": 162.0
+  },
+  "sections": {
+    "b_col_in": 26.0,
+    "h_col_in": 26.0,
+    "fc_col_ksi": 8.0,
+    "b_beam_in": 20.0,
+    "h_beam_in": 22.0,
+    "fc_beam_ksi": 5.0
+  },
+  "materials": {
+    "fy_ksi": 60.0,
+    "fyt_ksi": 60.0,
+    "normalweight": true,
+    "aggregate_size_in": 0.75,
+    "es_ksi": 29000.0,
+    "reinforcement_specification": "ASTM A706 Grade 60",
+    "exposure": "sheltered_interior"
+  },
+  "reinforcement": {
+    "col_bar_size": 8,
+    "col_top_bars": 4,
+    "col_bot_bars": 4,
+    "col_side_bars": 2,
+    "beam_bar_size": 8,
+    "beam_top_bars": 5,
+    "beam_bot_bars": 5,
+    "beam_side_bars": 0,
+    "col_stirrup_bar_size": 5,
+    "col_stirrup_legs": 4,
+    "col_stirrup_legs_by_direction": {
+      "across_b_face": 4,
+      "across_h_face": 4
+    },
+    "col_stirrup_spacing_in": 4.0,
+    "beam_stirrup_bar_size": 4,
+    "beam_stirrup_legs": 3,
+    "beam_stirrup_spacing_in": 4.0,
+    "legacy_centroid_offset_in": 1.5,
+    "cover_basis": "clear_cover_outside_hoops",
+    "beam_clear_cover_in": 1.5,
+    "col_clear_cover_in": 1.5,
+    "beam_longitudinal_centroid_offset_in": 2.5,
+    "beam_bar_stacking": {
+      "mode": "x_over_y",
+      "convention": "x_over_y",
+      "offsets_in": {
+        "x": {
+          "top": 2.5,
+          "bottom": 4.5
+        },
+        "y": {
+          "top": 4.5,
+          "bottom": 2.5
+        }
+      },
+      "max_layers": 2,
+      "layer_order": "interleaved",
+      "layers": {
+        "x": {
+          "top": {
+            "layers": 1,
+            "per_layer": [
+              5
+            ],
+            "offsets_in": [
+              2.5
+            ],
+            "centroid_in": 2.5
+          },
+          "bottom": {
+            "layers": 1,
+            "per_layer": [
+              5
+            ],
+            "offsets_in": [
+              4.5
+            ],
+            "centroid_in": 4.5
+          }
+        },
+        "y": {
+          "top": {
+            "layers": 1,
+            "per_layer": [
+              5
+            ],
+            "offsets_in": [
+              4.5
+            ],
+            "centroid_in": 4.5
+          },
+          "bottom": {
+            "layers": 1,
+            "per_layer": [
+              5
+            ],
+            "offsets_in": [
+              2.5
+            ],
+            "centroid_in": 2.5
+          }
+        }
+      },
+      "layer_pitch_in": 2.0,
+      "interlayer_clear_min_in": 1.0,
+      "basis": "orthogonal beam bars cannot share an elevation where they cross at a joint; the lower direction's cage runs straight below the upper direction's last layer, so each direction gives up depth at one face; bars the column lanes do not admit in one layer take a second layer directly below (25.2.2), up to max_layers (design-basis rules 2026-09-27)"
+    },
+    "col_longitudinal_centroid_offset_in": 2.625,
+    "col_bar_diameter_in": 1.0,
+    "beam_bar_diameter_in": 1.0,
+    "col_bar_area_in2": 0.79,
+    "beam_bar_area_in2": 0.79,
+    "col_stirrup_diameter_in": 0.625,
+    "beam_stirrup_diameter_in": 0.5
+  },
+  "source": {
+    "path": "D:\\v3DesignVerification100_V2_CD_Fc6_20261008_shard_02\\case_0014\\design.json",
+    "sha256": "ec32a1bb180d85895137b71bed5acaf01f7a3fb4765f7b23f223cdbb42b93cf8",
+    "protocol_match": true,
+    "original_qualification": {
+      "result_accepted": false,
+      "qualification_accepted": false,
+      "counts": {
+        "pass": 967,
+        "fail": 0,
+        "not_evaluated": 1
+      },
+      "fail_ids": [],
+      "not_evaluated_ids": [
+        "demands.torsional_irregularity"
+      ]
+    },
+    "matching_trial_manifests": [
+      "D:\\device_01\\case_0014_pair_20\\trial_01\\case_0014\\peer_20_scale_1\\manifest.json",
+      "D:\\device_01\\case_0014_pair_20\\trial_02\\case_0014\\peer_20_scale_2\\manifest.json",
+      "D:\\device_01\\case_0014_pair_20\\trial_03\\case_0014\\peer_20_scale_1.41421\\manifest.json",
+      "D:\\device_01\\case_0014_pair_20\\trial_04\\case_0014\\peer_20_scale_1.68179\\manifest.json",
+      "D:\\device_01\\case_0014_pair_20\\trial_05\\case_0014\\peer_20_scale_1.54221\\manifest.json"
+    ],
+    "unavailable_trial_manifests": []
+  },
+  "anchorage": {
+    "directions": {
+      "x": {
+        "ldh_required_in": 10.320313742306721,
+        "embedment_available_in": 23.875,
+        "hook": "standard 90-degree hook into the confined core, 18.8.5.1",
+        "passes": true,
+        "through_bars_present": true,
+        "through_bar_depth_required_in": 20.0,
+        "through_bar_depth_available_in": 26.0,
+        "through_bar_passes": true
+      },
+      "y": {
+        "ldh_required_in": 10.320313742306721,
+        "embedment_available_in": 23.875,
+        "hook": "standard 90-degree hook into the confined core, 18.8.5.1",
+        "passes": true,
+        "through_bars_present": true,
+        "through_bar_depth_required_in": 20.0,
+        "through_bar_depth_available_in": 26.0,
+        "through_bar_passes": true
+      }
+    },
+    "all_pass": true,
+    "basis": "ldh = fy db / (65 lambda sqrt(fc)) >= max(8db, 6 in); embedment = column depth - cover - hoop; through bars need a joint depth of 20 db (normalweight, 18.8.2.3) where an interior joint exists"
+  },
+  "slab": {
+    "method_version": "aci318_19_uniform_beam_supported_slab_screen_v1",
+    "stage": "thickness_screen_only",
+    "thickness_screen_passed": true,
+    "thickness_in": 6.5,
+    "uniform_thickness_all_floors_including_roof": true,
+    "concrete_fc_ksi": 5.0,
+    "concrete_type": "normalweight",
+    "concrete_unit_weight_kcf": 0.15,
+    "superimposed_dead_load_ksf": 0.05,
+    "self_weight_ksf": 0.08125,
+    "total_dead_load_ksf": 0.13125,
+    "live_load_mass_fraction": 0.0,
+    "panel_count_per_floor": 12,
+    "panel_count_building": 48,
+    "governing_panel_id": "panel_x1_y1",
+    "required_thickness_in": 6.44679186228482,
+    "stiffness_basis": "Gross monolithic T/L beam per ACI 8.4.1.8; same Ec for slab/beam; full transverse bay slab strip even at perimeter (conservative)."
+  },
+  "slab_reinforcement": {
+    "layout": {
+      "bar_size": 4,
+      "outer_axis": "x",
+      "mat_clear_gap_in": 3.0,
+      "minimum_mat_clear_gap_in": 1.0,
+      "uniform_all_panels_and_floors": true,
+      "layers": {
+        "x_top": {
+          "bar_size": 4,
+          "bar_diameter_in": 0.5,
+          "bar_area_in2": 0.2,
+          "spacing_in": 12.0,
+          "clear_cover_outer_mat_in": 0.75,
+          "layer": "outer",
+          "axis": "x",
+          "effective_depth_in": 5.5,
+          "area_in2_per_ft": 0.20000000000000004,
+          "minimum_area_in2_per_ft": 0.1404,
+          "horizontal_clear_spacing_in": 11.5,
+          "minimum_clear_spacing_in": 1.0,
+          "maximum_spacing_in": 13.0,
+          "flexure": {
+            "beta1": 0.7999999999999999,
+            "neutral_axis_in": 0.2941176470588236,
+            "stress_block_in": 0.23529411764705885,
+            "steel_stress_ksi": 60.0,
+            "tension_strain": 0.05309999999999999,
+            "minimum_tension_controlled_strain": 0.00506896551724138,
+            "tension_controlled": true,
+            "phi": 0.9,
+            "mn_kip_in_per_ft": 64.58823529411767,
+            "phi_mn_kip_in_per_ft": 58.1294117647059
+          },
+          "one_way_shear": {
+            "rho_longitudinal": 0.0030303030303030307,
+            "lambda_s": 1.0,
+            "lambda": 1.0,
+            "vc_psi": 81.85973653430234,
+            "vc_kip_per_ft": 5.402742611263955,
+            "phi": 0.75,
+            "phi_vc_kip_per_ft": 4.052056958447967
+          },
+          "face": "top",
+          "demand_envelope": {
+            "mu_kip_in_per_ft": 46.412129317215374,
+            "vu_kip_per_ft": 1.7657250880852053
+          },
+          "corner_moment_demand_kip_in_per_ft": 42.469099722774054,
+          "selection_flexural_demand_kip_in_per_ft": 46.412129317215374
+        },
+        "x_bottom": {
+          "bar_size": 4,
+          "bar_diameter_in": 0.5,
+          "bar_area_in2": 0.2,
+          "spacing_in": 12.0,
+          "clear_cover_outer_mat_in": 0.75,
+          "layer": "outer",
+          "axis": "x",
+          "effective_depth_in": 5.5,
+          "area_in2_per_ft": 0.20000000000000004,
+          "minimum_area_in2_per_ft": 0.1404,
+          "horizontal_clear_spacing_in": 11.5,
+          "minimum_clear_spacing_in": 1.0,
+          "maximum_spacing_in": 13.0,
+          "flexure": {
+            "beta1": 0.7999999999999999,
+            "neutral_axis_in": 0.2941176470588236,
+            "stress_block_in": 0.23529411764705885,
+            "steel_stress_ksi": 60.0,
+            "tension_strain": 0.05309999999999999,
+            "minimum_tension_controlled_strain": 0.00506896551724138,
+            "tension_controlled": true,
+            "phi": 0.9,
+            "mn_kip_in_per_ft": 64.58823529411767,
+            "phi_mn_kip_in_per_ft": 58.1294117647059
+          },
+          "one_way_shear": {
+            "rho_longitudinal": 0.0030303030303030307,
+            "lambda_s": 1.0,
+            "lambda": 1.0,
+            "vc_psi": 81.85973653430234,
+            "vc_kip_per_ft": 5.402742611263955,
+            "phi": 0.75,
+            "phi_vc_kip_per_ft": 4.052056958447967
+          },
+          "face": "bottom",
+          "demand_envelope": {
+            "mu_kip_in_per_ft": 42.469099722774054,
+            "vu_kip_per_ft": 1.2404362316190947
+          },
+          "corner_moment_demand_kip_in_per_ft": 42.469099722774054,
+          "selection_flexural_demand_kip_in_per_ft": 42.469099722774054
+        },
+        "y_top": {
+          "bar_size": 4,
+          "bar_diameter_in": 0.5,
+          "bar_area_in2": 0.2,
+          "spacing_in": 10.0,
+          "clear_cover_outer_mat_in": 0.75,
+          "layer": "inner",
+          "axis": "y",
+          "effective_depth_in": 5.0,
+          "area_in2_per_ft": 0.24000000000000005,
+          "minimum_area_in2_per_ft": 0.1404,
+          "horizontal_clear_spacing_in": 9.5,
+          "minimum_clear_spacing_in": 1.0,
+          "maximum_spacing_in": 13.0,
+          "flexure": {
+            "beta1": 0.7999999999999999,
+            "neutral_axis_in": 0.3529411764705883,
+            "stress_block_in": 0.28235294117647064,
+            "steel_stress_ksi": 60.0,
+            "tension_strain": 0.039499999999999987,
+            "minimum_tension_controlled_strain": 0.00506896551724138,
+            "tension_controlled": true,
+            "phi": 0.9,
+            "mn_kip_in_per_ft": 69.96705882352941,
+            "phi_mn_kip_in_per_ft": 62.97035294117647
+          },
+          "one_way_shear": {
+            "rho_longitudinal": 0.004000000000000001,
+            "lambda_s": 1.0,
+            "lambda": 1.0,
+            "vc_psi": 89.79696386474986,
+            "vc_kip_per_ft": 5.387817831884991,
+            "phi": 0.75,
+            "phi_vc_kip_per_ft": 4.040863373913743
+          },
+          "face": "top",
+          "demand_envelope": {
+            "mu_kip_in_per_ft": 57.92557813477394,
+            "vu_kip_per_ft": 1.782380976865037
+          },
+          "corner_moment_demand_kip_in_per_ft": 42.469099722774054,
+          "selection_flexural_demand_kip_in_per_ft": 57.92557813477394
+        },
+        "y_bottom": {
+          "bar_size": 4,
+          "bar_diameter_in": 0.5,
+          "bar_area_in2": 0.2,
+          "spacing_in": 12.0,
+          "clear_cover_outer_mat_in": 0.75,
+          "layer": "inner",
+          "axis": "y",
+          "effective_depth_in": 5.0,
+          "area_in2_per_ft": 0.20000000000000004,
+          "minimum_area_in2_per_ft": 0.1404,
+          "horizontal_clear_spacing_in": 11.5,
+          "minimum_clear_spacing_in": 1.0,
+          "maximum_spacing_in": 13.0,
+          "flexure": {
+            "beta1": 0.7999999999999999,
+            "neutral_axis_in": 0.2941176470588236,
+            "stress_block_in": 0.23529411764705885,
+            "steel_stress_ksi": 60.0,
+            "tension_strain": 0.047999999999999994,
+            "minimum_tension_controlled_strain": 0.00506896551724138,
+            "tension_controlled": true,
+            "phi": 0.9,
+            "mn_kip_in_per_ft": 58.58823529411766,
+            "phi_mn_kip_in_per_ft": 52.729411764705894
+          },
+          "one_way_shear": {
+            "rho_longitudinal": 0.003333333333333334,
+            "lambda_s": 1.0,
+            "lambda": 1.0,
+            "vc_psi": 84.50217828085741,
+            "vc_kip_per_ft": 5.070130696851445,
+            "phi": 0.75,
+            "phi_vc_kip_per_ft": 3.8025980226385836
+          },
+          "face": "bottom",
+          "demand_envelope": {
+            "mu_kip_in_per_ft": 37.73820713361221,
+            "vu_kip_per_ft": 1.2113357473463666
+          },
+          "corner_moment_demand_kip_in_per_ft": 42.469099722774054,
+          "selection_flexural_demand_kip_in_per_ft": 42.469099722774054
+        }
+      }
+    }
+  },
+  "resolved_family": {
+    "axis": "y",
+    "position": "interior",
+    "slab_sides": 2,
+    "centroid_offsets_in": {
+      "top": 4.5,
+      "bottom": 2.5
+    },
+    "bar_rows": {
+      "top": [
+        {
+          "bars": 5,
+          "elevation_from_face_in": 4.5
+        }
+      ],
+      "bottom": [
+        {
+          "bars": 5,
+          "elevation_from_face_in": 2.5
+        }
+      ]
+    },
+    "steel_area_in2": {
+      "top": 3.95,
+      "bottom": 3.95
+    },
+    "effective_flange_width_in": 88.5,
+    "flange_overhang_in": 34.25,
+    "clear_span_in": 274.0,
+    "clear_to_adjacent_web_in": 214.0,
+    "slab_steel_in_flange_in2": 3.245,
+    "slab_layers_from_top": [
+      {
+        "face": "top",
+        "depth_in": 1.5,
+        "area_in2": 1.77
+      },
+      {
+        "face": "bottom",
+        "depth_in": 5.0,
+        "area_in2": 1.4749999999999999
+      }
+    ],
+    "rectangular": {
+      "positive": {
+        "mn_kip_in": 4348.037578451018,
+        "neutral_axis_in": 4.048665113437211,
+        "stress_block_in": 3.2389320907497687,
+        "tension_strain": 0.011449206926461503,
+        "tension_controlled": true,
+        "beta1": 0.7999999999999999,
+        "steel_forces_kip": [
+          [
+            4.5,
+            -38.30922771373042
+          ],
+          [
+            19.5,
+            -237.0
+          ]
+        ]
+      },
+      "negative": {
+        "mn_kip_in": 3818.653070821032,
+        "neutral_axis_in": 2.8557465946629943,
+        "stress_block_in": 2.284597275730395,
+        "tension_strain": 0.015383984103531954,
+        "tension_controlled": true,
+        "beta1": 0.7999999999999999,
+        "steel_forces_kip": [
+          [
+            2.5,
+            42.80923156291637
+          ],
+          [
+            17.5,
+            -237.0
+          ]
+        ]
+      }
+    },
+    "composite": {
+      "positive": {
+        "mn_kip_in": 5708.961972744286,
+        "neutral_axis_in": 1.7871613870110576,
+        "stress_block_in": 1.429729109608846,
+        "tension_strain": 0.02973347355486371,
+        "tension_controlled": true,
+        "beta1": 0.7999999999999999,
+        "steel_forces_kip": [
+          [
+            4.5,
+            -237.0
+          ],
+          [
+            19.5,
+            -237.0
+          ],
+          [
+            1.5,
+            24.74313864837276
+          ],
+          [
+            5.0,
+            -88.49999999999999
+          ]
+        ]
+      },
+      "negative": {
+        "mn_kip_in": 6980.412505663413,
+        "neutral_axis_in": 4.260368791092249,
+        "stress_block_in": 3.408295032873799,
+        "tension_strain": 0.011435370038524994,
+        "tension_controlled": true,
+        "beta1": 0.7999999999999999,
+        "steel_forces_kip": [
+          [
+            2.5,
+            141.99492220572708
+          ],
+          [
+            17.5,
+            -237.0
+          ],
+          [
+            20.5,
+            -106.2
+          ],
+          [
+            17.0,
+            -88.49999999999999
+          ]
+        ]
+      }
+    },
+    "undeveloped": {
+      "positive": {
+        "mn_kip_in": 5389.328015952144,
+        "neutral_axis_in": 1.5752741774675973,
+        "stress_block_in": 1.2602193419740777,
+        "tension_strain": 0.03413639240506328,
+        "tension_controlled": true,
+        "beta1": 0.7999999999999999,
+        "steel_forces_kip": [
+          [
+            4.5,
+            -237.0
+          ],
+          [
+            19.5,
+            -237.0
+          ]
+        ]
+      },
+      "negative": {
+        "mn_kip_in": 3818.653070821032,
+        "neutral_axis_in": 2.8557465946629943,
+        "stress_block_in": 2.284597275730395,
+        "tension_strain": 0.015383984103531954,
+        "tension_controlled": true,
+        "beta1": 0.7999999999999999,
+        "steel_forces_kip": [
+          [
+            2.5,
+            42.80923156291637
+          ],
+          [
+            17.5,
+            -237.0
+          ]
+        ]
+      }
+    },
+    "mn_positive_kip_in": 5708.961972744286,
+    "mn_negative_kip_in": 6980.412505663413,
+    "mn_undeveloped_positive_kip_in": 5389.328015952144,
+    "mn_undeveloped_negative_kip_in": 3818.653070821032,
+    "slab_increment_positive_kip_in": 1360.924394293268,
+    "slab_increment_negative_kip_in": 3161.759434842381,
+    "flange_concrete_increment_positive_kip_in": 1041.2904375011258,
+    "basis": "ACI 318-19 6.3.2.1 effective flange; 18.7.3.2 slab mats within it as discrete layers; 22.2 strain compatibility, ecu = 0.003, Whitney block, EPP steel, zero axial force; continuous uniform slab mats are developed at interior beam ends by continuity (25.4.2.4 within half the adjacent clear span); exterior ends are credited per the perimeter hook check",
+    "exterior_anchorage": {
+      "axis": "y",
+      "bar_size": 4,
+      "ldh_required_in": 6.0,
+      "embedment_available_in": 18.0,
+      "developed": true,
+      "governing": {
+        "face": "top",
+        "spacing_in": 10.0,
+        "psi_e": 1.0,
+        "psi_r": 1.0,
+        "psi_o": 1.0,
+        "psi_c": 0.9333333333333333,
+        "db_in": 0.5
+      },
+      "hook": "standard 90-degree hook into the perimeter beam, ACI 318-19 25.4.3.1 (not the 18.8.5.1 joint formula)",
+      "basis": "slab mats parallel to the beam terminate at the building edge; the perimeter beam is the only embedment beyond the exterior critical section"
+    }
+  },
+  "resolved_end_strengths": {
+    "165/j/positive": {
+      "slab_basis": "developed_effective_width",
+      "slab_mn_kip_in": 1360.924394293268,
+      "section_compatibility_verified": true,
+      "family": "y_interior",
+      "mn_composite_kip_in": 5708.961972744286,
+      "mn_rectangular_kip_in": 4348.037578451018,
+      "effective_flange_width_in": 88.5,
+      "slab_steel_in_flange_in2": 3.245,
+      "exterior_end": true,
+      "exterior_anchorage": {
+        "axis": "y",
+        "bar_size": 4,
+        "ldh_required_in": 6.0,
+        "embedment_available_in": 18.0,
+        "developed": true,
+        "governing": {
+          "face": "top",
+          "spacing_in": 10.0,
+          "psi_e": 1.0,
+          "psi_r": 1.0,
+          "psi_o": 1.0,
+          "psi_c": 0.9333333333333333,
+          "db_in": 0.5
+        },
+        "hook": "standard 90-degree hook into the perimeter beam, ACI 318-19 25.4.3.1 (not the 18.8.5.1 joint formula)",
+        "basis": "slab mats parallel to the beam terminate at the building edge; the perimeter beam is the only embedment beyond the exterior critical section"
+      },
+      "basis": "ACI 318-19 6.3.2.1 effective flange; 18.7.3.2 slab mats within it as discrete layers; 22.2 strain compatibility, ecu = 0.003, Whitney block, EPP steel, zero axial force; continuous uniform slab mats are developed at interior beam ends by continuity (25.4.2.4 within half the adjacent clear span); exterior ends are credited per the perimeter hook check ; exterior end: slab bars hooked into the perimeter beam, ldh per 25.4.3.1 fits"
+    },
+    "165/j/negative": {
+      "slab_basis": "developed_effective_width",
+      "slab_mn_kip_in": 3161.759434842381,
+      "section_compatibility_verified": true,
+      "family": "y_interior",
+      "mn_composite_kip_in": 6980.412505663413,
+      "mn_rectangular_kip_in": 3818.653070821032,
+      "effective_flange_width_in": 88.5,
+      "slab_steel_in_flange_in2": 3.245,
+      "exterior_end": true,
+      "exterior_anchorage": {
+        "axis": "y",
+        "bar_size": 4,
+        "ldh_required_in": 6.0,
+        "embedment_available_in": 18.0,
+        "developed": true,
+        "governing": {
+          "face": "top",
+          "spacing_in": 10.0,
+          "psi_e": 1.0,
+          "psi_r": 1.0,
+          "psi_o": 1.0,
+          "psi_c": 0.9333333333333333,
+          "db_in": 0.5
+        },
+        "hook": "standard 90-degree hook into the perimeter beam, ACI 318-19 25.4.3.1 (not the 18.8.5.1 joint formula)",
+        "basis": "slab mats parallel to the beam terminate at the building edge; the perimeter beam is the only embedment beyond the exterior critical section"
+      },
+      "basis": "ACI 318-19 6.3.2.1 effective flange; 18.7.3.2 slab mats within it as discrete layers; 22.2 strain compatibility, ecu = 0.003, Whitney block, EPP steel, zero axial force; continuous uniform slab mats are developed at interior beam ends by continuity (25.4.2.4 within half the adjacent clear span); exterior ends are credited per the perimeter hook check ; exterior end: slab bars hooked into the perimeter beam, ldh per 25.4.3.1 fits"
+    }
+  }
+}

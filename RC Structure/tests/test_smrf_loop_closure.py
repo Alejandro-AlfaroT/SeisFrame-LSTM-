@@ -18,7 +18,7 @@ from Design.Section_Design import beam_ladder, column_ladder
 from RC_Design_Check import get_element_tags
 
 
-# The column ladder's largest size (36 in until 2026-09-27, 42 in since): the scenarios below that need
+# The column ladder's largest size (36 in until 2026-09-27, 42 in until 2026-10-11, 36 in since): the scenarios below that need
 # "no larger column left" use it rather than a fixed number.
 TOP = column_ladder()[-1][0]
 
@@ -69,12 +69,19 @@ class PlannerTests(unittest.TestCase):
     def test_drift_failure_takes_the_next_beam_depth_and_holds_the_column(self):
         ci = next(i for i, r in enumerate(self.columns) if r == (30., 30., 6.))
         bi = next(i for i, r in enumerate(self.beams) if r == (10., 18., 6.))
-        worst = {"beam": 0.87, "column": 0.75}       # in band; column well under its ceiling
+        worst = {"beam": 0.75, "column": 0.75}       # at target; column well under its ceiling
         next_column, next_beam, reasons = driver._plan_next_rungs(
             self.columns, self.beams, ci, bi, worst, 0.75, 1.0, scwb_index=0, flags=flags(drift_ok=False))
         self.assertIn("drift", reasons)
-        self.assertGreater(self.beams[next_beam][1], 18.)
+        # grade before geometry (2026-10-11): the same beam at the top beam grade first ...
+        self.assertEqual(self.beams[next_beam], (10., 18., 8.))
         self.assertGreaterEqual(next_column, ci)      # never steps down while a requirement is unmet
+        # ... and only a beam already at the top grade takes the next depth, at the top grade
+        deeper_column, deeper, _r = driver._plan_next_rungs(
+            self.columns, self.beams, ci, next_beam, worst, 0.75, 1.0, scwb_index=0, flags=flags(drift_ok=False))
+        self.assertGreater(self.beams[deeper][1], 18.)
+        self.assertEqual(self.beams[deeper][2], 8.)
+        self.assertGreaterEqual(deeper_column, ci)
 
     def test_compatible_beam_index_prefers_the_next_feasible_rung_above(self):
         sp_saved = {k: getattr(sp, k) for k in ("BAY_X", "BAY_Y", "STORY_H", "B_COL", "H_COL", "SLAB_THICKNESS_IN",
@@ -94,13 +101,19 @@ class PlannerTests(unittest.TestCase):
     def test_beam_capacity_shear_takes_the_wider_variant_first(self):
         ci = next(i for i, r in enumerate(self.columns) if r == (30., 30., 6.))
         bi = next(i for i, r in enumerate(self.beams) if r == (10., 20., 5.))
-        worst = {"beam": 0.86, "column": 0.75}
+        worst = {"beam": 0.75, "column": 0.75}
         _c, next_beam, reasons = driver._plan_next_rungs(
             self.columns, self.beams, ci, bi, worst, 0.75, 1.0, scwb_index=0,
             flags=flags(beam_section_adequate=False))
         self.assertIn("beam_capacity_shear", reasons)
-        # width first: the shear section answers to bw d and short spans cap d
-        self.assertEqual(self.beams[next_beam][:2], (14., 20.))
+        # grade first (2026-10-11): the section limit 8 sqrt(f'c) bw d grows with the grade ...
+        self.assertEqual(self.beams[next_beam], (10., 20., 8.))
+        # ... then width: the shear section answers to bw d and short spans cap d; the wider rung at the top grade
+        _c, wider, reasons = driver._plan_next_rungs(
+            self.columns, self.beams, ci, next_beam, worst, 0.75, 1.0, scwb_index=0,
+            flags=flags(beam_section_adequate=False))
+        self.assertIn("beam_capacity_shear", reasons)
+        self.assertEqual(self.beams[wider], (14., 20., 8.))
 
     def test_joint_scwb_failure_takes_the_next_column_size(self):
         ci = next(i for i, r in enumerate(self.columns) if r == (26., 26., 8.))
@@ -141,9 +154,10 @@ class PlannerTests(unittest.TestCase):
         self.assertIn("joint_shear_or_anchorage", reasons)
         b, h, fc = self.columns[next_column]
         self.assertGreaterEqual(b * h * fc ** .5, 24. * 24. * 6. ** .5 * 1.6 - 1e-9)
-        # and not further than the first rung that covers it
-        b0, h0, fc0 = self.columns[next_column - 1]
-        self.assertLess(b0 * h0 * fc0 ** .5, 24. * 24. * 6. ** .5 * 1.6)
+        # the smallest size whose top-grade rung covers it, taken at that grade (no size step at a low grade,
+        # 2026-10-11): 26 in cannot cover the shortfall even at 10 ksi
+        self.assertEqual((b, fc), (28., 10.))
+        self.assertLess(26. * 26. * 10. ** .5, 24. * 24. * 6. ** .5 * 1.6)
 
     def test_top_of_beam_ladder_falls_back_to_the_column(self):
         ci = next(i for i, r in enumerate(self.columns) if r == (30., 30., 6.))
@@ -164,9 +178,9 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(beams[driver._next_stronger_index(beams, bi)], (20., 32., 6.))
         self.assertIsNone(driver._next_stronger_index(beams, next(i for i, r in enumerate(beams) if r == (20., 32., 8.))))
 
-    def test_beam_shear_at_the_top_dimensions_takes_the_next_concrete_strength(self):
+    def test_beam_shear_at_the_top_dimensions_takes_the_top_concrete_strength(self):
         """case_0013: the widest, deepest rung its span allows (20x32 fc-4 on the two-width ladder of the
-        run, 28x32 since 2026-09-27) leaves fc 5/6/8 as candidates."""
+        run, 28x32 since 2026-09-27) leaves fc 6/8 as candidates; the top grade is the step (2026-10-11)."""
         beams = beam_ladder(span_in=168., story_height_in=156.)
         ci = next(i for i, r in enumerate(self.columns) if r == (36., 36., 6.))
         top_width = max(r[0] for r in beams if r[1] == 32.)
@@ -177,7 +191,7 @@ class PlannerTests(unittest.TestCase):
             self.columns, beams, ci, bi, {"beam": 0.84, "column": 0.44}, 0.85, 1.0, scwb_index=0,
             flags=flags(beam_section_adequate=False, capacity_accepted=False))
         self.assertEqual(reasons, ["beam_capacity_shear"])
-        self.assertEqual(beams[next_beam], (top_width, 32., 6.))
+        self.assertEqual(beams[next_beam], (top_width, 32., 8.))
         self.assertEqual(next_column, ci)                                             # the column is not the lever
 
     def test_column_shear_at_the_largest_size_takes_the_next_concrete_strength(self):
@@ -191,6 +205,32 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(reasons, ["column_capacity_shear"])
         self.assertEqual(self.columns[next_column], (TOP, TOP, 10.))                   # the top grade (2026-10-03)
         self.assertEqual(next_beam, bi)
+
+    def test_the_ladder_tops_out_at_36_in(self):
+        """User decision 2026-10-11: 38, 40 and 42 in are no longer offered."""
+        self.assertEqual(TOP, 36.)
+        self.assertEqual(sorted({r[0] for r in self.columns})[-3:], [32., 34., 36.])
+
+    def test_column_steps_follow_the_lever_order(self):
+        """Grade, then reinforcement, then geometry (2026-10-11): the same size at each higher grade, then every
+        larger size at its top grade; a size is never proposed at a low grade."""
+        ci = self.columns.index((24., 24., 7.))
+        steps = [self.columns[i] for i in driver._column_steps_in_lever_order(self.columns, ci)]
+        self.assertEqual(steps[:3], [(24., 24., 8.), (24., 24., 9.), (24., 24., 10.)])
+        self.assertEqual(steps[3:5], [(26., 26., 10.), (28., 28., 10.)])
+        self.assertEqual(steps[-1], (TOP, TOP, 10.))
+        self.assertTrue(all(r[2] == 10. for r in steps[3:]))
+        self.assertEqual(self.columns[driver._top_grade_index(self.columns, ci)], (24., 24., 10.))
+        self.assertEqual(driver._column_steps_in_lever_order(self.columns, len(self.columns) - 1), [])
+
+    def test_a_column_strength_step_to_a_larger_size_lands_at_the_top_grade(self):
+        ci = self.columns.index((24., 24., 6.))
+        bi = next(i for i, r in enumerate(self.beams) if r == (10., 18., 6.))
+        worst = {"beam": 0.75, "column": 1.3}                                        # the proxy asks for 26 in at 7 ksi
+        next_column, _b, reasons = driver._plan_next_rungs(
+            self.columns, self.beams, ci, bi, worst, 0.75, 1.0, scwb_index=0, flags=flags())
+        self.assertIn("column_strength", reasons)
+        self.assertEqual(self.columns[next_column], (26., 26., 10.))
 
 
 class CandidatePlanTests(unittest.TestCase):

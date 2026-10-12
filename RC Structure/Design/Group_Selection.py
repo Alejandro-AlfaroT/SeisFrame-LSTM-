@@ -95,7 +95,7 @@ def beam_cage_candidates(design, cfg, through_depth_in=None):
         if through_depth_in is not None and 20.0 * sp.rebar_diameter(bar_size) > through_depth_in:
             continue                                                    # 18.8.2.3: through-bar joint depth
         for n_top in cfg.rebar.beam_n_iter():
-            for n_bot in ((n_top,) if cfg.rebar.beam_symmetric else cfg.rebar.beam_n_iter()):
+            for n_bot in ((n_top,) if cfg.rebar.grouped_beam_symmetric else cfg.rebar.beam_n_iter()):
                 if n_top < 2 or n_bot < 2:
                     continue
                 result.append(replace(design, bar_size=bar_size, top_bars=n_top, bot_bars=n_bot))

@@ -93,6 +93,33 @@ def _beam_As_for_Mu(Mu, fc, fy, b, d, phi=PHI_FLEX):
     return (B - math.sqrt(disc)) / (2.0 * A)
 
 
+def _web_top_steel(Mu, slab_layers, fc, fy, b, d, phi=PHI_FLEX):
+    """Top-bar area for a hogging moment: the rectangular solution without slab layers, else the least web
+    steel whose section with the credited slab mats reaches Mu / phi (Design.SMRF_Beam_Slab_Strength)."""
+    if not slab_layers:
+        return _beam_As_for_Mu(Mu, fc, fy, b, d, phi)
+    from Design.SMRF_Beam_Slab_Strength import web_top_steel_for_hogging
+    return web_top_steel_for_hogging(Mu / phi, d, sp.H_BEAM, b, fc, fy, slab_layers)
+
+
+def _hogging_demands(beams, mu_neg_of, cfg):
+    """[(Mu_neg, slab layers)]: the hogging demands the top bars are sized for, one entry per distinct slab credit
+    (the largest moment among the members sharing it), so an uncredited exterior member governs when its moment asks
+    for more web steel than a credited interior member's. One entry without layers when nothing is credited (legacy
+    route, slab reinforcement not established, or cfg.rebar.beam_slab_steel_in_hogging off)."""
+    from Design.ACI_Checks import hogging_slab_credit_from_state
+    from Design.SMRF_Beam_Slab_Strength import family_hogging_layers
+    credit = hogging_slab_credit_from_state(cfg)
+    if credit is None:
+        return [(max(mu_neg_of(r) for r in beams.values()), [])]
+    grouped = {}
+    for key, r in beams.items():
+        member = credit["members"].get(getattr(r, "ele_tag", key))
+        group = member["family"] if member and member["credited"] else None
+        grouped[group] = max(grouped.get(group, 0.0), mu_neg_of(r))
+    return [(mu, family_hogging_layers(credit, group, sp.H_BEAM) if group else []) for group, mu in grouped.items()]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Column: P-M interaction for explicit Ast  (mirrors RC_Design_Check but
 # accepts Ast as a parameter instead of reading from sp)
@@ -619,9 +646,13 @@ def _beam_candidate_layers(bar_size, n_top, n_bot):
     return math.ceil(n / fit) if fit > 0 else 99
 
 
-def _pick_beam(candidates, Mu_pos: float = 0.0, Mu_neg: float = 0.0, cfg=None):
+def _pick_beam(candidates, Mu_pos: float = 0.0, Mu_neg: float = 0.0, cfg=None, hogging=None):
     """
     Select the best beam candidate according to the objective function.
+
+    ``hogging`` = [(Mu_neg, slab layers)] from _hogging_demands prices the
+    hogging DCR of every candidate with the slab mats credited to the members
+    (2026-10-11); without it ``Mu_neg`` on the web bars alone, as before.
 
     "min_deviation"  → candidate whose governing DCR is closest to dcr_target.
     "min_volume"     → smallest total As (original behaviour).
@@ -641,7 +672,11 @@ def _pick_beam(candidates, Mu_pos: float = 0.0, Mu_neg: float = 0.0, cfg=None):
     d      = sp.H_BEAM - sp.beam_worst_centroid_offset_in()
     prefer_fewest_layers = cfg.rebar.beam_prefer_fewest_layers and sp.SLAB_THICKNESS_IN is not None
 
+    estimates = {}
+
     def _dcr_estimate(c):
+        if c in estimates:
+            return estimates[c]
         bar_size, n_top, n_bot = c
         candidate_d = (sp.H_BEAM - sp.beam_worst_centroid_offset_in(bar_size, n_top, n_bot)
                        if sp.SLAB_THICKNESS_IN is not None else d)
@@ -652,9 +687,20 @@ def _pick_beam(candidates, Mu_pos: float = 0.0, Mu_neg: float = 0.0, cfg=None):
         a_bot    = As_bot * fy / (0.85 * fc * b)
         phi_Mn_neg = PHI_FLEX * As_top * fy * (candidate_d - a_top / 2.0) if As_top > 0 else 1e-9
         phi_Mn_pos = PHI_FLEX * As_bot * fy * (candidate_d - a_bot / 2.0) if As_bot > 0 else 1e-9
-        dcr_neg    = Mu_neg / phi_Mn_neg if phi_Mn_neg > 1e-6 else 0.0
+        if hogging:
+            # Each credited demand against the candidate's top bars plus its slab mats (one strain-
+            # compatibility solve, the check's own); an uncredited demand against the web bars alone.
+            from Design.SMRF_Beam_Slab_Strength import hogging_strength_kip_in
+            dcr_neg = 0.0
+            for mu, layers in hogging:
+                cap = (PHI_FLEX * hogging_strength_kip_in(As_top, candidate_d, sp.H_BEAM, b, fc, fy, layers)
+                       if layers and As_top > 0 else phi_Mn_neg)
+                dcr_neg = max(dcr_neg, mu / cap if cap > 1e-6 else 0.0)
+        else:
+            dcr_neg = Mu_neg / phi_Mn_neg if phi_Mn_neg > 1e-6 else 0.0
         dcr_pos    = Mu_pos / phi_Mn_pos if phi_Mn_pos > 1e-6 else 0.0
-        return max(dcr_neg, dcr_pos)
+        estimates[c] = max(dcr_neg, dcr_pos)
+        return estimates[c]
 
     if prefer_fewest_layers:
         # Layers first, among the cages that keep the estimated DCR within the ceiling (every cage
@@ -920,8 +966,15 @@ def redesign_steel(design_results: dict, cfg: Optional[DesignConfig] = None):
 
         As_code_min = _beam_As_min(fc, fy, b, d)
 
-        As_top_lo = max(_beam_As_for_Mu(Mu_neg_crit, fc, fy, b, d), As_code_min)
-        As_top_hi = max(_beam_As_for_Mu(Mu_neg_crit / DCR_MIN, fc, fy, b, d), As_code_min)
+        # The top bars are sized for the hogging demand that needs the most web steel once each member's
+        # developed slab mats are credited (user decision 2026-10-11; _hogging_demands): the slab carries
+        # part of the hogging at credited members, and an uncredited exterior member governs when its
+        # moment asks for more. The bottom bars follow the sagging demand (beam_symmetric False) within the
+        # 18.6.3.2 floors _beam_candidates enforces on the web bars.
+        hogging = _hogging_demands(beams, _mu_neg, cfg)
+        As_top_lo = max(max(_web_top_steel(mu, layers, fc, fy, b, d) for mu, layers in hogging), As_code_min)
+        As_top_hi = max(max(_web_top_steel(mu / DCR_MIN, layers, fc, fy, b, d) for mu, layers in hogging),
+                        As_code_min)
         As_bot_lo = max(_beam_As_for_Mu(Mu_pos_crit, fc, fy, b, d), As_code_min)
         As_bot_hi = max(_beam_As_for_Mu(Mu_pos_crit / DCR_MIN, fc, fy, b, d), As_code_min)
 
@@ -932,9 +985,11 @@ def redesign_steel(design_results: dict, cfg: Optional[DesignConfig] = None):
 
         candidates = _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg)
 
-        if not candidates and cfg.rebar.beam_symmetric:
+        if not candidates and (cfg.rebar.beam_symmetric or sp.SLAB_THICKNESS_IN is not None):
+            # The demand minima are kept on both faces (the symmetric rule's fallback, extended to the
+            # asymmetric SMRF search on 2026-10-11); the legacy no-slab search keeps its code-min fallback.
             penalty_log.append(
-                "Beam: no symmetric candidate in the soft As band; "
+                "Beam: no candidate in the soft As band; "
                 "relaxing the economy upper bound while retaining both demand minima."
             )
             candidates = _beam_candidates(
@@ -954,7 +1009,7 @@ def redesign_steel(design_results: dict, cfg: Optional[DesignConfig] = None):
                 cfg,
             )
 
-        best = _pick_beam(candidates, Mu_pos=Mu_pos_crit, Mu_neg=Mu_neg_crit, cfg=cfg)
+        best = _pick_beam(candidates, Mu_pos=Mu_pos_crit, Mu_neg=Mu_neg_crit, cfg=cfg, hogging=hogging)
         if best:
             bar_size, n_top, n_bot = best
             beam_update = {"bar_size": bar_size, "n_top": n_top, "n_bot": n_bot}

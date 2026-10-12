@@ -1834,6 +1834,24 @@ def _next_stronger_index(ladder, index):
     return None
 
 
+def _top_grade_index(ladder, index):
+    """The rung with the dimensions of ladder[index] at the highest concrete strength the ladder offers for them."""
+    b, h, _fc = ladder[index]
+    return max((i for i, rung in enumerate(ladder) if rung[:2] == (b, h)), key=lambda i: ladder[i][2])
+
+
+def _column_steps_in_lever_order(ladder, index):
+    """Column rungs the search may step to from ladder[index], in the lever order of 2026-10-11 (user decision:
+    concrete grade first, then reinforcement, then geometry): the same size at each higher grade, ascending, then
+    every larger size at its top grade. A size is never proposed at a low grade; the step-down pass
+    (Design.Uniform_Search) walks the grades back down at the size that passes."""
+    b, _h, fc = ladder[index]
+    same = sorted((i for i, rung in enumerate(ladder) if rung[0] == b and rung[2] > fc), key=lambda i: ladder[i][2])
+    larger = [max((i for i, rung in enumerate(ladder) if rung[0] == size), key=lambda i: ladder[i][2])
+              for size in sorted({rung[0] for rung in ladder if rung[0] > b})]
+    return same + larger
+
+
 def _column_index_for_joint_shear(ladder, index, ratio):
     """First rung whose joint area covers the worst joint-shear ratio.
 
@@ -1876,6 +1894,18 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
     cannot trade one failure for another and cycle. Returns
     (next_column, next_beam, reasons); feasibility against the clear span
     and the visited set are applied by _plan_next_candidate.
+
+    Lever order (user decision 2026-10-11): the concrete grade is tried
+    before anything else, reinforcement next (the steel pass at every rung
+    pair, before this planner runs), geometry last. A beam requirement takes
+    the same beam at the top beam grade before a dimension; a column
+    requirement the same size at the top column grade before a size; and a
+    dimension step of either member lands at the top grade of the new
+    dimensions, never at a low grade. Among geometry the beam moves before
+    the column. Only the failures a grade cannot answer (room for bars in
+    the lanes, the 20 db joint depth, the layer limit) go to a dimension
+    directly. The step-down pass (Design.Uniform_Search) walks the grades
+    back down afterwards.
     """
     reasons = []
     next_beam = suggest_rung_index(beams, beam_index, max(worst["beam"], 1e-6), target)
@@ -1897,30 +1927,39 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
     if not flags["scwb_ok"] and scwb_index > column_index:
         reasons.append("scwb_screen")
     larger_column = _next_larger_column_index(columns, column_index)
-    stronger_column = _next_stronger_index(columns, column_index)
     top_grade_column, larger_at_top_grade = _column_strength_first_steps(columns, column_index)
     deeper_beam = _next_deeper_beam_index(beams, beam_index)
     wider_beam = _next_wider_beam_index(beams, beam_index)
-    stronger_beam = _next_stronger_index(beams, beam_index)
+    # The same beam at the top beam grade; None when it is there already.
+    top_grade_beam = _top_grade_index(beams, beam_index)
+    if top_grade_beam == beam_index:
+        top_grade_beam = None
 
     # The dimension a beam step pulls on (depth for drift, width for the shear section and the bar
     # threading) is held as a floor: the ladder is proxy-ordered, so a wider, shallower rung can sit
     # above the step and the index alone would not keep the lever (2026-09-27, four width variants).
     floors = {"depth": 0.0, "width": 0.0}
 
-    def grow_beam(prefer_width=False):
+    def grow_beam(prefer_width=False, grade_first=True):
+        # Grade before geometry (user decision 2026-10-11): the same beam at the top beam grade first, unless
+        # the failure is room for bars, which a grade cannot make (grade_first False); a dimension step
+        # lands at the top grade of the new dimensions, and the step-down pass lowers the grade again.
         nonlocal next_beam, next_column
-        order = ([wider_beam, deeper_beam] if prefer_width else [deeper_beam, wider_beam]) + [stronger_beam]
-        step = next((candidate for candidate in order if candidate is not None), None)
-        if step is not None:
+        if grade_first and top_grade_beam is not None:
+            next_beam = max(next_beam, top_grade_beam)
+            return
+        order = [wider_beam, deeper_beam] if prefer_width else [deeper_beam, wider_beam]
+        raw = next((candidate for candidate in order if candidate is not None), None)
+        if raw is not None:
+            step = _top_grade_index(beams, raw)
             next_beam = max(next_beam, step)
             floors["depth"] = max(floors["depth"], beams[step][1])
-            if step != deeper_beam:
+            if raw != deeper_beam:
                 floors["width"] = max(floors["width"], beams[step][0])
         elif larger_column is not None:
             next_column = max(next_column, larger_column)
-        elif stronger_column is not None:
-            next_column = max(next_column, stronger_column)
+        elif top_grade_column is not None:
+            next_column = max(next_column, top_grade_column)
 
     def grow_column():
         # Strength before geometry (user decision 2026-10-03): a failed column requirement takes the same
@@ -1943,11 +1982,11 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
             roomier = _next_larger_column_same_grade(columns, column_index)
             if roomier is not None:
                 reasons.append("beam_bars_need_column_room")
-                next_column = max(next_column, roomier)
+                next_column = max(next_column, roomier)          # taken at the top grade below (2026-10-11)
             else:
-                grow_beam(prefer_width=True)
+                grow_beam(prefer_width=True, grade_first=False)
         else:
-            grow_beam(prefer_width=True)
+            grow_beam(prefer_width=True, grade_first=False)
     if not flags["drift_ok"]:
         reasons.append("drift")
         grow_beam()
@@ -1965,7 +2004,7 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
             grow_column()
         else:
             # No cage at this column admits the bars: the beam band is too narrow, width is the lever.
-            grow_beam(prefer_width=True)
+            grow_beam(prefer_width=True, grade_first=False)
     if not flags.get("column_bar_bond_ok", True):
         # ACI 318-19 18.7.4.3: the installed bars do not develop in half the clear height at Ktr = 0. ld
         # falls with sqrt(f'c) and a larger section admits smaller bars, so the column steps.
@@ -1986,10 +2025,14 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
         # the column (r2 screen, 2026-10-02: roof joints at gamma 12 held 0004 at 30 in and 0005 at 40 in).
         width_target = flags.get("joint_confinement_width_in")
         widened = None
-        if width_target and flags["anchorage_all_pass"]:
+        if width_target and flags["anchorage_all_pass"] and top_grade_column is None:
+            # Grade before geometry (user decision 2026-10-11): the widening is a geometry step, offered only
+            # once the column is at its top grade, and the wider rung is taken at the top beam grade.
             widened = next((i for i in range(beam_index + 1, len(beams))
                             if beams[i][1] == beams[beam_index][1] and beams[i][2] == beams[beam_index][2]
                             and beams[i][0] >= width_target), None)
+            if widened is not None:
+                widened = _top_grade_index(beams, widened)
         if widened is not None:
             reasons.append("joint_confinement_width")
             next_beam = max(next_beam, widened)
@@ -2005,6 +2048,13 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
                      if beams[i][1] >= floors["depth"] and beams[i][0] >= floors["width"]), None)
         if held is not None:
             next_beam = held
+    # No dimension step at a low grade (user decision 2026-10-11): a larger column, or a beam of other
+    # dimensions above the current rung, is taken at the top grade of those dimensions; a step that only
+    # changes the grade, and a step down of an oversize member, stay as proposed.
+    if columns[next_column][0] > columns[column_index][0]:
+        next_column = _top_grade_index(columns, next_column)
+    if next_beam > beam_index and beams[next_beam][:2] != beams[beam_index][:2]:
+        next_beam = _top_grade_index(beams, next_beam)
     unmet = (reasons or not flags["scwb_ok"] or not flags["capacity_accepted"]
              or not flags["drift_ok"])
     if unmet:
@@ -2078,7 +2128,9 @@ def _plan_next_candidate(columns, beams, column_index, beam_index, worst, target
         if beam_moves:
             found = next(((column, j) for j in feasible_beams(column) if j > beam and (column, j) not in visited), None)
         if found is None and column_moves:
-            for c in range(column + 1, len(columns)):
+            # The lever order (2026-10-11): the same size at each higher grade, then larger sizes at the top
+            # grade; the lower grades of a larger size are the step-down pass's, not this search's.
+            for c in _column_steps_in_lever_order(columns, column):
                 j = settle(c, beam)
                 if j is not None and (c, j) not in visited:
                     found = (c, j)
@@ -2715,6 +2767,10 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     scwb_satisfied = (not joint_scwb_failed) if joint_scwb_complete else (scwb_screen_satisfied and not joint_scwb_failed)
     drift_screen = final["drift_screen"]
     core = _state_record_core()
+    # The slab mats the top bars were sized and checked with in hogging (user decision 2026-10-11), per
+    # family and member; None when nothing was credited.
+    from Design.ACI_Checks import hogging_slab_credit_from_state
+    core["reinforcement"]["hogging_slab_credit"] = hogging_slab_credit_from_state(cfg)
 
     # What the beam rung answers to. In band it is the DCR target; below the
     # band it is whichever requirement moved the beam off the strength rung

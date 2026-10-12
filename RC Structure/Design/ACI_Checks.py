@@ -98,6 +98,42 @@ def _beam_As_min(fc_ksi: float, fy_ksi: float, b: float, d: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Slab mats credited to the beam top bars in hogging (user decision 2026-10-11)
+# ---------------------------------------------------------------------------
+
+def hogging_slab_credit_from_state(cfg: DesignConfig):
+    """The slab mats credited to each beam's top bars in hogging, from the live state (Structure_Parameters).
+
+    None on the legacy route (no slab), while the slab reinforcement is not
+    established, or when cfg.rebar.beam_slab_steel_in_hogging is off: the
+    checks and the bar sizing then use the web bars alone. One source for
+    both (Design.SMRF_Beam_Slab_Strength.hogging_slab_credit), so the DCR the
+    steel pass converges on is the DCR the record reports.
+    """
+    if sp.SLAB_THICKNESS_IN is None or not getattr(cfg.rebar, "beam_slab_steel_in_hogging", False):
+        return None
+    layout = (sp.SLAB_REINFORCEMENT or {}).get("layout")
+    if layout is None:
+        return None
+    from Design.SMRF_Beam_Slab_Strength import hogging_slab_credit
+    geometry = {"num_bay_x": sp.NUM_BAY_X, "num_bay_y": sp.NUM_BAY_Y, "num_floor": sp.NUM_FLOOR,
+                "bay_x_in": sp.BAY_X, "bay_y_in": sp.BAY_Y, "h_col_in": sp.H_COL, "b_col_in": sp.B_COL}
+    return hogging_slab_credit(layout, sp.SLAB_THICKNESS_IN, cfg.sections.b_beam_in, geometry,
+                               sp.BEAM_CLEAR_COVER_IN, sp.rebar_diameter(sp.BEAM_STIRRUP_BAR_SIZE),
+                               cfg.materials.fc_beam_ksi if isinstance(cfg.materials.fc_beam_ksi, float) else sp.FC_BEAM_KSI,
+                               cfg.materials.fy_ksi if isinstance(cfg.materials.fy_ksi, float) else sp.FY_KSI)
+
+
+def _hogging_credit_summary(credit, tag, slab_layers):
+    """What the hogging check of member ``tag`` credited, for the check record; None without a credit basis."""
+    if credit is None:
+        return None
+    member = credit["members"].get(tag) or {"family": None, "credited": False, "reason": "member not in the credit"}
+    return {**member, "slab_steel_in2": sum(area for _, area in slab_layers),
+            "layers_from_compression_face": [{"depth_in": y, "area_in2": area} for y, area in slab_layers]}
+
+
+# ---------------------------------------------------------------------------
 # Column P-M interaction diagram
 # ---------------------------------------------------------------------------
 
@@ -414,6 +450,7 @@ def check_beam_flexure_neg(
     Mu_neg: float,
     cfg: DesignConfig,
     axis: Optional[str] = None,
+    slab_layers: Optional[List[Tuple[float, float]]] = None,
 ) -> LimitStateResult:
     """
     ACI 318-19 §22.3 — negative (hogging) beam flexure.
@@ -430,6 +467,12 @@ def check_beam_flexure_neg(
     As_top = sp.BEAM_TOP_BARS * sp.BEAM_BAR_AREA
     a      = As_top * fy / (0.85 * fc * b)
     phi_Mn = PHI_FLEX * As_top * fy * (d - a / 2.0)
+    if slab_layers:
+        # ``slab_layers`` = [(depth from the compression face, area)] of the developed slab mats credited
+        # to this member (hogging_slab_credit_from_state, user decision 2026-10-11): the top bars and the
+        # mats are one tension section under strain compatibility, the same solve the sizing used.
+        from Design.SMRF_Beam_Slab_Strength import hogging_strength_kip_in
+        phi_Mn = PHI_FLEX * hogging_strength_kip_in(As_top, d, cfg.sections.h_beam_in, b, fc, fy, slab_layers)
 
     As_min        = _beam_As_min(fc, fy, b, d)
     min_controlled = As_top <= As_min * 1.01
@@ -702,6 +745,9 @@ def run_checks_phase1(
 
     pm_diagrams = build_pm_diagrams(cfg)
     results: Dict[int, MemberCheckResult] = {}
+    # The slab mats each beam's top bars may count in hogging (None: web bars alone).
+    from Design.SMRF_Beam_Slab_Strength import credited_hogging_layers
+    hogging_credit = hogging_slab_credit_from_state(cfg)
 
     def _captured(tag):
         if member_actions is None:
@@ -794,8 +840,9 @@ def run_checks_phase1(
         Vu     = math.sqrt(Vy**2 + Vz**2)
         axis   = "x" if tag in beam_x_set else "y"
 
+        slab_layers = credited_hogging_layers(hogging_credit, tag, cfg.sections.h_beam_in)
         ls_flex_pos = check_beam_flexure_pos(Mu_pos, cfg, axis)
-        ls_flex_neg = check_beam_flexure_neg(Mu_neg, cfg, axis)
+        ls_flex_neg = check_beam_flexure_neg(Mu_neg, cfg, axis, slab_layers)
         ls_shear    = check_shear(
             Vu, 0.0,
             bw=cfg.sections.b_beam_in, d=min(_beam_d(cfg, axis, "top"), _beam_d(cfg, axis, "bottom")),
@@ -819,6 +866,7 @@ def run_checks_phase1(
                 "n_bot":       sp.BEAM_BOT_BARS,
                 "As_top_in2":  sp.BEAM_TOP_BARS * sp.BEAM_BAR_AREA,
                 "As_bot_in2":  sp.BEAM_BOT_BARS * sp.BEAM_BAR_AREA,
+                "hogging_slab_credit": _hogging_credit_summary(hogging_credit, tag, slab_layers),
                 "span_bending": span_actions[tag],
                 "b_in":        cfg.sections.b_beam_in,
                 "h_in":        cfg.sections.h_beam_in,

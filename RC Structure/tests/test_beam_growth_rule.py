@@ -52,7 +52,9 @@ class MomentSizedJump(unittest.TestCase):
                                                     {**worst, "beam_flexure_demand_kip_in": 9200.0}, 0.85, 1.0, 40, FLAGS)
         self.assertIn("beam_strength", reasons)
         self.assertLess(beam, proxy)
-        self.assertEqual(beam, suggest_beam_rung_for_moment(self.beams, self.start, 9200.0, sp.FY_KSI))
+        named = suggest_beam_rung_for_moment(self.beams, self.start, 9200.0, sp.FY_KSI)
+        self.assertEqual(self.beams[beam][:2], self.beams[named][:2])            # the dimensions the moment names ...
+        self.assertEqual(self.beams[beam][2], 8.0)                               # ... at the top beam grade (2026-10-11)
         b, h, fc = self.beams[beam]
         self.assertLess(b * h * h * fc ** 0.5, 0.5 * 30.0 * 36.0 * 36.0 * 8.0 ** 0.5)
 

@@ -45,8 +45,10 @@ class RebarConfig:
     col_n_top_range / beam_n_range
         Inclusive (min, max) bar count search bounds.
         Column: n_top == n_bot enforced (symmetric section).
-        Beam: equal top/bottom counts by default; set beam_symmetric=False
-        explicitly to reproduce the independent-layer design search.
+        Beam: independent top and bottom counts by default since 2026-10-11
+        (the bottom bars follow the sagging demand within the 18.6.3.2
+        floors); beam_symmetric=True restores the equal counts of every
+        design made before that date.
 
     col_n_side_options
         Candidate side-bar counts per face (total side = 2 × value).
@@ -101,7 +103,25 @@ class RebarConfig:
     # ceiling excluded reinforced candidates even when the two-layer cage fit.
     # Actual lanes, layer count, steel ratio and joint depth still screen each cage.
     beam_n_range: Tuple[int, int] = (2, 14)
-    beam_symmetric: bool = True                  # same bar size and count on both faces
+    # One bar size on both faces always; equal counts only when True. User decision 2026-10-11 (third
+    # verification batch: every design above 32 in carried equal top and bottom bars): the bottom bars
+    # are sized to the sagging demand within the 18.6.3.2 floors (half the hogging strength at the
+    # joint face, a quarter of the maximum along the span), not copied from the top.
+    beam_symmetric: bool = False
+    # The grouped design (Design/Group_Selection, 2026-10-02) keeps equal faces: its cage enumeration has no
+    # hoop-ladder pre-filter, so unequal faces there select cages beam.cage_layout / beam.hoops_selected then
+    # reject (the grouped record fixture's seed stopped being feasible on 2026-10-11). Carrying the asymmetric
+    # rule into that route needs the same pre-filter the uniform _beam_candidates applies; until then this
+    # flag, not beam_symmetric, governs it.
+    grouped_beam_symmetric: bool = True
+    # Developed slab mats inside the ACI 318-19 6.3.2 effective flange count as beam tension steel when
+    # the top bars are sized and checked in hogging (user decision 2026-10-11): the second office
+    # practice NIST GCR 16-917-40 Sec. 5.2 describes, with the same steel 18.7.3.2 already counts in the
+    # strong-column rule, so the beam the columns are protected against is the beam the bars were sized
+    # for. The credit is per member and takes its least-credited end: an exterior end whose perimeter
+    # hook does not develop the mats credits nothing. False sizes and checks on the web bars alone,
+    # as every design before 2026-10-11 did.
+    beam_slab_steel_in_hogging: bool = True
     # 2026-09-27 (user decision, "the larger bars per layer option"): among
     # beam cages whose estimated DCR is within the ceiling, the pick takes the
     # fewest layers first (larger bars in one layer keep the depth the second

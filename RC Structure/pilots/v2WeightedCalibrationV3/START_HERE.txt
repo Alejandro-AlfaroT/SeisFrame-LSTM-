@@ -1,0 +1,104 @@
+SEISMIC CALIBRATION FROM V3 VERIFICATION DESIGNS / V2 MODEL
+
+Ready for the results being collected Friday, October 9, 2026.
+The final case roster and master plan must be created AFTER those results arrive.
+This setup does not contain or claim the school results.
+
+SETUP ON EVERY DEVICE
+Use the same OpPy environment as V3 verification. Start in the repository root:
+
+    Set-Location '.\RC Structure'
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py setup
+
+Stop at a mismatch. Do not rewrite any baseline to silence it.
+The new pilot folder may be committed/pushed and pulled on every device.
+The ZIP also contains a complete frozen repository_overlay for standalone use.
+The processed motion files are not in Git: copy the package's Ground_Motions
+folder into RC Structure on each device, preserving paths and exact bytes.
+Use this new V3 folder, not the old v2WeightedCalibration100 setup/overlay.
+Keep the local checkout path short (for example C:\SFCal) and outputs off OneDrive.
+
+ONE COORDINATOR AFTER DESIGN VERIFICATION FINISHES
+Collect all FOUR complete result folders, including failed/error cases, under
+the coordinator's RC Structure\outputs, retaining these names:
+
+    v3DesignVerification100_V2_CD_Fc6_20261008_shard_01
+    v3DesignVerification100_V2_CD_Fc6_20261008_shard_02
+    v3DesignVerification100_V2_CD_Fc6_20261008_shard_03
+    v3DesignVerification100_V2_CD_Fc6_20261008_shard_04
+
+They may currently be in each school's user-profile SeisFrameRuns folder.
+COPY them after their processes stop; keep the original verification evidence.
+Do not substitute the older v2ResearchPilot100_CD results or budget24 diagnostics.
+
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py inventory
+
+Review pilots/v2WeightedCalibrationV3/prepared/wcalV3_r1/design_inventory.json.
+Every one of the original 100 case IDs must appear as eligible or excluded.
+Missing, failed, stale, duplicate or incompatible cases are explicitly excluded.
+Zero failed checks and passing gravity/modal are required. Only the already
+declared open M1 torsion item may remain; it stays open and is not asserted.
+
+If all cases are eligible:
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py prepare
+
+If exclusions exist, STOP and review them. To deliberately calibrate only the
+listed eligible subset after review, use:
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py prepare --allow-excluded
+
+This never repairs or accepts an excluded design. Fewer than 100 eligible
+designs means fewer calibration searches, explicitly recorded in the plan.
+For different folder names, append --design-root outputs/NAME four times to
+both inventory and prepare. Inputs must remain inside RC Structure.
+
+BUILD THE PLAN ONCE. Then copy the complete prepared\wcalV3_r1 folder AND all
+four complete design roots to the same relative locations on every device.
+All devices need the same inputs even though each runs only its assigned jobs.
+Do not rebuild the plan per device. Inventory refuses to overwrite a frozen plan.
+
+FOUR DEVICES
+First check that device's inputs (change the number to 1, 2, 3 or 4):
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py run --device 1 --preflight-only
+
+Run only the one assigned command on each respective device:
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py run --device 1
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py run --device 2
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py run --device 3
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py run --device 4
+
+Each command runs the first FULL-RECORD search and continues only if it has usable
+evidence and reaches the weighted target. Add --first-job-only to stop there.
+After reviewing a stop, repeat with --resume. The first-search gate is rechecked
+on resume too. Completed trials are preserved; interrupted trials are not retried.
+Keep the terminal open and device awake. Start with the frozen one-worker setting.
+
+COLLECTION
+Return each complete RC Structure\outputs\wcalV3_r1\device_01 ... device_04 folder,
+including all trials, full histories, logs and manifests. On the coordinator:
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py collect
+
+Results: outputs/wcalV3_r1_collection/calibration_summary.json and .csv.
+Complete collection and successful calibration are reported separately.
+Read README.txt for the scoring, failure/recovery rules and remaining live checks.
+
+MOST-DAMAGED BEAM HINGE GRAPHS (AUTOMATIC)
+After a device command finishes or stops, each usable trial in a completed search
+gets a six-panel PNG: moment versus rotation, moment versus time, and rotation
+versus time for BOTH local bending axes. The highest saved damage ratio among
+BEAM ends selects the hinge; the graph labels its member, end, floor, pair and scale.
+The calibration score still uses the structure-wide peak damage across all members.
+The selected calibration trial is marked, and failed/unmet searches stay labeled.
+CSV values and JSON provenance accompany every PNG. No new NTHA is needed.
+
+Device graphs: outputs/wcalV3_r1_beam_plots/device_01_report (number matches device).
+Keep the complete original device result folders; graphs do not replace them.
+Collection regenerates graphs in outputs/wcalV3_r1_collection/peak_beam_hinge_plots.
+To regenerate only a device's graphs from saved results:
+    python -X utf8 -B pilots/v2WeightedCalibrationV3/school.py plots --device 1
+
+Beam-hinge selection is per usable trial. It can change as intensity changes.
+All-zero beam damage is labeled, and there is no column fallback. For the previous
+all-member selection, use school.py plots --member-scope all with a fresh output.
+Read peak_hinge_plots.json for skipped or invalid trials and any export errors.
+The plots use scheduled committed snapshots, including the gravity response;
+they do not represent every adaptive substep or a fitted fatigue-damage history.

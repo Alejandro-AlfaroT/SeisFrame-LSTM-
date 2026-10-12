@@ -8,11 +8,16 @@ passing designs the smallest column wins, then the smallest beam, then the lower
 rule adopted a candidate only on material dominance with no concrete grade raised, so a smaller column at a
 higher grade could never replace a larger one at a lower grade (the 3 October screens kept 40-in columns at
 4 ksi beside passing 34-in columns at 8 ksi). ``dominates`` is kept and reported for each feasible trial.
+
+Beam grade phase (user decision 2026-10-11, grade before geometry): the search lands every dimension step at
+the top grade of the new dimensions, so after the column grades the descent tries the held beam's lower
+grades at its dimensions under the selected column, highest first, until one fails. The geometry alternatives
+queued beside a failed candidate are taken at the top beam grade for the same reason.
 """
 from __future__ import annotations
 import math
 
-POLICY = "uniform_size_first_v2"
+POLICY = "uniform_size_first_v3"
 METRICS = ("concrete_total_in3", "total_steel_in3", "column_fc_ksi", "beam_fc_ksi",
            "distinct_form_size_count")
 
@@ -41,14 +46,16 @@ def targeted_alternatives(columns, beams, ci, bi, reasons, failed_checks=()):
                           key=lambda i: columns[i][2])
         if stronger:
             alternatives.append((stronger[0], bi, "same column size, next concrete grade"))
+    # Geometry alternatives at the top beam grade (grade before geometry, 2026-10-11): the narrowest wider
+    # rung of the same depth, the shallowest deeper rung at least as wide, each at the top grade offered.
     if joint or geometry:
-        wider = sorted((i for i, r in enumerate(beams) if r[1:] == b[1:] and r[0] > b[0]),
-                       key=lambda i: beams[i][0])
+        wider = sorted((i for i, r in enumerate(beams) if r[1] == b[1] and r[0] > b[0]),
+                       key=lambda i: (beams[i][0], -beams[i][2]))
         if wider:
             alternatives.append((ci, wider[0], "same column and beam depth, wider beam for cage/confinement"))
     if geometry:
-        deeper = sorted((i for i, r in enumerate(beams) if r[0] >= b[0] and r[1] > b[1] and r[2] == b[2]),
-                        key=lambda i: (beams[i][1], beams[i][0]))
+        deeper = sorted((i for i, r in enumerate(beams) if r[0] >= b[0] and r[1] > b[1]),
+                        key=lambda i: (beams[i][1], beams[i][0], -beams[i][2]))
         if deeper:
             alternatives.append((ci, deeper[0], "deeper beam for unresolved bar stacking"))
     return alternatives
@@ -99,14 +106,16 @@ def preference(column, beam):
     return (column[0] * column[1], beam[0] * beam[1], column[2], beam[2])
 
 
-def _plan(search, columns):
+def _plan(search, columns, beams):
     """Queue the next trial (at most one is pending), or none when the descent is complete.
 
     Size phase: the column sizes below the first passing one, nearest first, each at the top concrete grade
     with the beam held. A failure prunes nothing (feasibility is not monotone in size: a smaller island can
     pass where a larger size failed), but SIZE_FAILURES_TO_STOP consecutive failures end the phase. Grade
     phase: at the smallest passing size, the grades below the one it passed at, highest first, until one fails
-    (every capacity falls with the grade, so the first failure ends it).
+    (every capacity falls with the grade, so the first failure ends it). Beam grade phase (2026-10-11): under
+    the selected column, the held beam's dimensions at the grades below the one it passed at, highest first,
+    until one fails.
     """
     search["pending"] = []
     if search.get("retry") is not None:
@@ -119,9 +128,19 @@ def _plan(search, columns):
             return
         search["phase"] = "grade"
         search["grade_queue"] = sorted((g for g in search["grades"] if g < search["best"][1]), reverse=True)
-    if search["grade_queue"]:
-        size = search["best"][0]
-        search["pending"] = [(columns.index((size, size, search["grade_queue"][0])), search["beam_held"])]
+    if search["phase"] == "grade":
+        if search["grade_queue"]:
+            size = search["best"][0]
+            search["pending"] = [(columns.index((size, size, search["grade_queue"][0])), search["beam_held"])]
+            return
+        search["phase"] = "beam_grade"
+        held = beams[search["beam_held"]]
+        search["beam_grade_queue"] = sorted({r[2] for r in beams if r[:2] == held[:2] and r[2] < held[2]}, reverse=True)
+    if search["beam_grade_queue"]:
+        size, grade = search["best"]
+        held = beams[search["beam_held"]]
+        search["pending"] = [(columns.index((size, size, grade)),
+                              beams.index((held[0], held[1], search["beam_grade_queue"][0])))]
 
 
 def start(columns, beams, column_index, beam_index, snapshot, budget):
@@ -132,10 +151,10 @@ def start(columns, beams, column_index, beam_index, snapshot, budget):
               "first_passing_column": list(col), "first_passing_beam": list(beams[beam_index]), "trials": [],
               "phase": "size", "grades": sorted({c[2] for c in columns}),
               "sizes": sorted({c[0] for c in columns if c[0] < col[0]}, reverse=True),
-              "size_failures": 0, "best": (col[0], col[2]), "grade_queue": [], "retry": None,
+              "size_failures": 0, "best": (col[0], col[2]), "grade_queue": [], "beam_grade_queue": [], "retry": None,
               "feasible": [{"column": list(col), "beam": list(beams[beam_index]),
                             "quantities": snapshot["entry"].get("quantities", {}), "decision": "incumbent"}]}
-    _plan(search, columns)
+    _plan(search, columns, beams)
     return search
 
 
@@ -182,22 +201,32 @@ def advance(search, columns, beams, column_index, accepted, note=None, snapshot=
                     search["beam_held"] = beam            # the confining width is kept for the smaller sizes
             else:
                 search["size_failures"] += 1
-    else:
+    elif search["phase"] == "grade":
         search["grade_queue"].pop(0)
         if accepted:
             search["best"] = (column[0], column[2])
         else:
             search["grade_queue"] = []                     # a lower grade only lowers every capacity
+    else:
+        search["beam_grade_queue"].pop(0)
+        if accepted:
+            search["beam_held"] = beam                     # the lower beam grade is the held beam from here
+        else:
+            search["beam_grade_queue"] = []                # a lower beam grade only lowers every capacity
     search["trials"].append(trial)
-    _plan(search, columns)
+    _plan(search, columns, beams)
     return next_pair(search)
 
 
 def summary(search, columns, beams):
     held = list(beams[search["beam_held"]])
-    untested = ([{"column": [size, size, search["grades"][-1]], "beam": held} for size in search["sizes"]]
-                if search["phase"] == "size" else
-                [{"column": [search["best"][0], search["best"][0], grade], "beam": held} for grade in search["grade_queue"]])
+    best = [search["best"][0], search["best"][0], search["best"][1]]
+    if search["phase"] == "size":
+        untested = [{"column": [size, size, search["grades"][-1]], "beam": held} for size in search["sizes"]]
+    elif search["phase"] == "grade":
+        untested = [{"column": [best[0], best[0], grade], "beam": held} for grade in search["grade_queue"]]
+    else:
+        untested = [{"column": best, "beam": [held[0], held[1], grade]} for grade in search["beam_grade_queue"]]
     budget_hit = len(search["trials"]) >= search["budget"] and bool(search["pending"])
     return {"policy": POLICY, "first_passing_column": search["first_passing_column"],
             "first_passing_beam": search["first_passing_beam"],
@@ -211,4 +240,5 @@ def summary(search, columns, beams):
                      f"nearest first, ended by {SIZE_FAILURES_TO_STOP} consecutive failures (no monotonicity assumed "
                      "before that); a size that fails joint shear alone under a beam narrower than 3/4 of the column is "
                      "retried once with the beam widened to that width; then lower grades at the smallest passing size "
-                     "until one fails; the smallest column is selected, then the lowest passing grade; no global-minimum claim"}
+                     "until one fails; then the held beam's lower grades at its dimensions until one fails (2026-10-11); "
+                     "the smallest column is selected, then the lowest passing grades; no global-minimum claim"}

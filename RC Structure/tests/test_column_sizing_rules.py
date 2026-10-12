@@ -150,13 +150,14 @@ class SearchRepairsAfterTheSecondScreen(unittest.TestCase):
         self.assertIn("beam_strength", reasons)
         self.assertGreater(beam, self.bi)
         self.assertEqual(self.beams[beam][1], 22.0)                              # same depth,
-        self.assertGreater(self.beams[beam][0], 12.0)                            # wider web
+        self.assertGreater(self.beams[beam][0], 12.0)                            # wider web,
+        self.assertEqual(self.beams[beam][2], 8.0)                               # at the top beam grade (2026-10-11)
         self.assertEqual(column, self.ci)
 
     def test_a_wide_beam_that_cannot_be_reinforced_grows_the_column_in_size_not_grade(self):
         """case_0010 of the r4 screen: the section carries the moment, the beam is already three quarters of the
-        column, and it sits on its seed bars: the column lanes are the limit, so the column takes the next size at
-        the same grade and the beam is held."""
+        column, and it sits on its seed bars: the column lanes are the limit, so the column takes the next size (at
+        the top grade, 2026-10-11) and the beam is held."""
         ci = self.columns.index((22.0, 22.0, 10.0))
         bi = self.beams.index((20.0, 22.0, 5.0))
         column, beam, reasons = driver._plan_next_rungs(self.columns, self.beams, ci, bi,
@@ -168,13 +169,23 @@ class SearchRepairsAfterTheSecondScreen(unittest.TestCase):
         self.assertIn("beam_bars_need_column_room", driver.COLUMN_STEP_REASONS)
         self.assertIsNone(driver._next_larger_column_same_grade(self.columns, len(self.columns) - 1))
 
-    def test_a_joint_short_of_confinement_width_widens_the_beam_first(self):
+    def test_a_joint_short_of_confinement_width_takes_the_column_grade_then_widens_the_beam(self):
         worst = {"beam": 0.8, "column": 0.4}
+        # grade before geometry (2026-10-11): below the top column grade the grade is the step and the beam waits
         column, beam, reasons = self.plan(worst, joints_all_pass=False, capacity_accepted=False, joint_shear_ratio=1.1,
                                           joint_confinement_width_in=0.75 * 26.0)
+        self.assertEqual(reasons, ["joint_shear_or_anchorage"])
+        self.assertEqual(self.columns[column], (26.0, 26.0, 10.0))
+        self.assertEqual(beam, self.bi)
+        # at the top grade the beam widens to three quarters of the column, at the top beam grade; the column waits
+        top = self.columns.index((26.0, 26.0, 10.0))
+        column, beam, reasons = driver._plan_next_rungs(
+            self.columns, self.beams, top, self.bi, worst, 0.85, 1.0, top,
+            {**PASSING, "joints_all_pass": False, "capacity_accepted": False, "joint_shear_ratio": 1.1,
+             "joint_confinement_width_in": 0.75 * 26.0})
         self.assertEqual(reasons, ["joint_shear_or_anchorage", "joint_confinement_width"])
-        self.assertEqual(column, self.ci)                                        # the column waits
-        self.assertEqual(self.beams[beam][1:], (22.0, 5.0))
+        self.assertEqual(column, top)                                            # the column waits
+        self.assertEqual(self.beams[beam][1:], (22.0, 8.0))
         self.assertGreaterEqual(self.beams[beam][0], 19.5)
         # no variant that wide at this depth, or an anchorage failure: the column grows as before
         for flags in ({"joint_confinement_width_in": 40.0}, {"joint_confinement_width_in": None},

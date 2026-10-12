@@ -2236,6 +2236,72 @@ hashes, every level and comparison, recovered demands and subsequent slab
 reinforcement selection. The optional `--max-shells` changes the declared
 budget for that replay only, within the explicit mesh limit.
 
+## Design search levers, slab credit and the 36-in column cap (2026-10-11)
+
+User decisions after the third 100-design verification batch (source
+db7ecfe16304; 100 of 100 designed, 99 with no failed check): 41 of the 99
+sat above 32 in, every one with equal top and bottom beam bars sized on the
+web alone, and what held the columns up at 34 in and below was the joint
+shear those bars deliver (joint.shear_screen in 79 of the infeasible
+step-down trials, beam.bar_stacking_clear_of_slab_mats in 80, scwb_screen
+in 40). Three changes, all in the design search, none in the hinge or
+capacity models:
+
+1. Asymmetric beam bars. `RebarConfig.beam_symmetric` is False: one bar
+   size on both faces, the bottom count sized to the sagging demand within
+   the ACI 318-19 18.6.3.2 floors `Redesign._beam_candidates` enforces on
+   the web bars (half the hogging strength at the joint face, a quarter of
+   the maximum along the span). `beam_symmetric=True` restores the equal
+   counts of every earlier design. The grouped route (`Group_Selection`)
+   keeps equal faces under its own `grouped_beam_symmetric` flag: its cage
+   enumeration has no hoop-ladder pre-filter, and with unequal faces its
+   seed candidates select cages that `beam.cage_layout` then rejects.
+   The Haselton hinge equations were fitted
+   to symmetric sections; the hinges are being recalibrated on the new
+   designs, and the asymmetric beams are a declared transfer assumption of
+   that calibration.
+
+2. Slab steel credited to the top bars. The developed slab mats inside the
+   6.3.2 effective flange count as beam tension steel when the top bars are
+   sized (`Redesign._hogging_demands`, `_web_top_steel`) and checked
+   (`ACI_Checks.check_beam_flexure_neg`) in hogging: the second office
+   practice NIST GCR 16-917-40 Sec. 5.2 describes, with the steel 18.7.3.2
+   already counts in the strong-column rule, so the beam the columns are
+   protected against is the beam the bars were sized for. One source
+   (`SMRF_Beam_Slab_Strength.hogging_slab_credit`), the same layers and
+   strain-compatibility solve as the composite hinge strengths. The credit
+   is per member and takes the least-credited end: a member with an
+   exterior end whose perimeter hook does not develop the mats
+   (`perimeter_slab_bar_anchorage`) is credited nothing. Pantazopoulou and
+   Moehle (1990) measured about 1.5 beam depths of slab each side before
+   yield, of the order of the 6.3.2 width; their wider post-yield widths
+   belong to the hinge strengths, not to the bar sizing. The 18.6.3.2
+   floors stay on the web bars (the clause names the strength "provided";
+   18.7.3.2 is the clause that names the slab). The record carries the
+   credit under `reinforcement.hogging_slab_credit` and each beam check
+   under `section_info.hogging_slab_credit`; `beam_slab_steel_in_hogging`
+   False sizes and checks on the web bars alone.
+
+3. Lever order and the ladder. Concrete grade first, reinforcement next
+   (the steel pass at every rung pair), geometry last, and the beam before
+   the column: a beam requirement takes the same beam at the top beam grade
+   before a dimension, a column requirement the same size at the top column
+   grade before a size, and a dimension step of either member lands at the
+   top grade of the new dimensions (`Design_Driver._plan_next_rungs`, the
+   visited-pair advance of `_plan_next_candidate` through
+   `_column_steps_in_lever_order`, and the geometry alternatives of
+   `Uniform_Search.targeted_alternatives`). Only the failures a grade cannot
+   answer (room for bars in the lanes, the 20 db joint depth, the layer
+   limit) go to a dimension directly, and the joint-confinement widening is
+   offered once the column is at its top grade. The step-down pass
+   (`uniform_size_first_v3`) walks back: the sizes, then the column grades,
+   then the held beam's grades at its dimensions, highest first, until one
+   fails. The column ladder stops at 36 in (`Section_Design.COLUMN_SIZES_IN`);
+   32 in stays the last-resort size the exception record reports against.
+
+The request identity changes with the source; designs made before this
+section are read as they were made.
+
 ## Reference basis
 
 - [ACI 318-19 / reapproved 2022, publisher](https://www.concrete.org/store/productdetail.aspx?ItemID=318U19)

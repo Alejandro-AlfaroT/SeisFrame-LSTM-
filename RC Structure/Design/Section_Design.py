@@ -36,7 +36,14 @@ import math
 # strong enough for the strong-column check leaves the beam bars only three
 # lanes per layer on the faces the y beams meet. Steps (user decision
 # 2026-10-02, V2): 1 in from 14 to 24, then 2 in from 24 to 42.
-COLUMN_SIZES_IN = tuple(float(size) for size in (*range(14, 25), *range(26, 43, 2)))
+# Capped at 36 in again (user decision 2026-10-11) after the third 100-design
+# verification batch: 41 of the 99 passing designs sat above 32 in, every one
+# with equal top and bottom beam bars sized on the web alone, and the joint
+# shear those bars deliver was what drove the columns. With the developed slab
+# mats credited to the top bars in hogging, the bottom bars sized to the
+# sagging demand and the concrete grade tried before any size, 38 to 42 in are
+# no longer offered: 1 in from 14 to 24, then 2 in from 24 to 36.
+COLUMN_SIZES_IN = tuple(float(size) for size in (*range(14, 25), *range(26, 37, 2)))
 
 # ACI 318-19 18.6.2.1(b) uses min(0.3h, 10 in). The ladder's
 # max(0.3h, 10 in) is a stricter PRACTICAL sizing preference, not that rule.
