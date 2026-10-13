@@ -114,7 +114,7 @@ def _hogging_demands(beams, mu_neg_of, cfg):
         return [(max(mu_neg_of(r) for r in beams.values()), [])]
     grouped = {}
     for key, r in beams.items():
-        member = credit["members"].get(getattr(r, "ele_tag", key))
+        member = credit["members"].get(str(getattr(r, "ele_tag", key)))
         group = member["family"] if member and member["credited"] else None
         grouped[group] = max(grouped.get(group, 0.0), mu_neg_of(r))
     return [(mu, family_hogging_layers(credit, group, sp.H_BEAM) if group else []) for group, mu in grouped.items()]
@@ -524,6 +524,13 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
                 if (sp.B_BEAM - 2 * cover) / (n_top - 1) - db < clear_min:
                     continue
                 d, code_min = sp.H_BEAM - cover, 0.0
+            if sp.SLAB_THICKNESS_IN is not None:
+                # ACI 318-19 9.6.1.2 on the nominal single-row depth as well, the detailing check's basis (h less
+                # the bar's own cover): a stacked or layered row lowers d and with it the minimum, and bars sized
+                # to the slab credit sit at that minimum (2026-10-12, V4 cases 0022 and 0087: two #7 at 1.20 in2
+                # against 1.25 on the nominal depth).
+                code_min = max(code_min, _beam_As_min(sp.FC_BEAM_KSI, sp.FY_KSI, sp.B_BEAM,
+                                                      sp.H_BEAM - sp.longitudinal_cover_in("beam", bar_size)))
             if d <= 0 or As_top > 0.025 * sp.B_BEAM * d:
                 continue
             if not (max(As_top_lo, code_min) <= As_top <= As_top_hi):
@@ -964,7 +971,9 @@ def redesign_steel(design_results: dict, cfg: Optional[DesignConfig] = None):
         Mu_neg_crit = max(_mu_neg(r) for r in beams.values())
         Mu_pos_crit = max(_mu_pos(r) for r in beams.values())
 
-        As_code_min = _beam_As_min(fc, fy, b, d)
+        # The minimum on the stacked-cage depth and on the nominal single-row depth (the detailing check's basis),
+        # whichever is larger (2026-10-12).
+        As_code_min = max(_beam_As_min(fc, fy, b, d), _beam_As_min(fc, fy, b, sp.H_BEAM - sp.longitudinal_cover_in("beam")))
 
         # The top bars are sized for the hogging demand that needs the most web steel once each member's
         # developed slab mats are credited (user decision 2026-10-11; _hogging_demands): the slab carries

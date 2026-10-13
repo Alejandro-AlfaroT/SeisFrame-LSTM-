@@ -353,7 +353,11 @@ def hogging_slab_credit(layout, slab_thickness_in, beam_width_in, geometry, beam
 
     Returns {"families": {key: {effective_flange_width_in, slab_steel_in_flange_in2,
     layers_from_top: [{face, depth_in, area_in2}]}}, "members": {tag: {family, credited, reason}},
-    "anchorage": {axis: record}, "basis"}; without a layout every member is uncredited.
+    "anchorage": {axis: record}, "basis"}; without a layout every member is uncredited. The member
+    keys are the tags as strings, so the record is the same object before and after a JSON round
+    trip: the analysis-input signature hashes the reinforcement block with sorted keys, and integer
+    keys sorted numerically in memory but lexically once reloaded (V4 shard 3, 2026-10-12: four
+    two-bay frames whose beam tags cross a digit boundary failed requalification on that alone).
     """
     nbx, nby, nf = geometry["num_bay_x"], geometry["num_bay_y"], geometry["num_floor"]
     families, anchorage, members = {}, {}, {}
@@ -377,15 +381,16 @@ def hogging_slab_credit(layout, slab_thickness_in, beam_width_in, geometry, beam
     for tag, kind, line, span in beam_members_with_spans(nbx, nby, nf):
         axis, position = beam_family(kind, line, nbx, nby)
         family = f"{axis}_{position}"
+        key = str(tag)
         if layout is None:
-            members[tag] = {"family": family, "credited": False, "reason": "slab reinforcement not established"}
+            members[key] = {"family": family, "credited": False, "reason": "slab reinforcement not established"}
             continue
         exterior = exterior_ends(kind, span, nbx, nby)
         if (exterior["i"] or exterior["j"]) and not anchorage[axis]["developed"]:
-            members[tag] = {"family": family, "credited": False,
+            members[key] = {"family": family, "credited": False,
                             "reason": "exterior end: the perimeter hook does not develop the slab mats (ACI 318-19 25.4.3.1)"}
         else:
-            members[tag] = {"family": family, "credited": True, "reason": None}
+            members[key] = {"family": family, "credited": True, "reason": None}
     return {"families": families, "members": members, "anchorage": anchorage,
             "basis": ("developed slab mats within the ACI 318-19 6.3.2 effective flange as beam tension steel in hogging "
                       "(NIST GCR 16-917-40 Sec. 5.2, second practice; the steel 18.7.3.2 counts); per member the "
@@ -402,7 +407,7 @@ def family_hogging_layers(credit, family, beam_depth_in):
 
 def credited_hogging_layers(credit, tag, beam_depth_in):
     """[(depth from the compression face, area)] of the slab mats credited to member ``tag``; [] when none."""
-    member = (credit or {}).get("members", {}).get(tag)
+    member = (credit or {}).get("members", {}).get(str(tag))
     if not member or not member.get("credited"):
         return []
     return family_hogging_layers(credit, member["family"], beam_depth_in)

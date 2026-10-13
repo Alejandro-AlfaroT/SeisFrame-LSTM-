@@ -1990,6 +1990,15 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
     if not flags["drift_ok"]:
         reasons.append("drift")
         grow_beam()
+    if not flags.get("floor_compatibility_ok", True):
+        # This is a load-path discrepancy, not a strength deficiency. A
+        # higher grade alone must not substitute for the requested depth.
+        reasons.append("floor_frame_compatibility")
+        if deeper_beam is not None:
+            step = _top_grade_index(beams, deeper_beam)
+            next_beam = max(next_beam, step)
+            floors["depth"] = max(floors["depth"], beams[step][1])
+            floors["width"] = max(floors["width"], beams[beam_index][0])
     if not flags["beam_section_adequate"] or not flags["beam_hoops_selected"]:
         reasons.append("beam_capacity_shear")
         grow_beam(prefer_width=True)
@@ -2064,7 +2073,8 @@ def _plan_next_rungs(columns, beams, column_index, beam_index, worst, target, ha
 
 
 # Which member a step reason moves; drift moves the beam first and falls to the column.
-BEAM_STEP_REASONS = ("beam_strength", "drift", "beam_capacity_shear", "beam_bar_threading", "joint_confinement_width")
+BEAM_STEP_REASONS = ("beam_strength", "drift", "beam_capacity_shear", "beam_bar_threading", "joint_confinement_width",
+                     "floor_frame_compatibility")
 COLUMN_STEP_REASONS = ("column_strength", "scwb_screen", "joint_scwb", "column_capacity_shear",
                        "joint_shear_or_anchorage", "drift", "column_cage_threading", "column_bar_bond",
                        "beam_bars_need_column_room")
@@ -2096,6 +2106,10 @@ def _plan_next_candidate(columns, beams, column_index, beam_index, worst, target
                                                                target, hard_max, scwb_index, flags)
     plan = {"reasons": reasons, "proposed": {"column": proposed_column, "beam": proposed_beam},
             "substitutions": [], "candidate": None, "stop_reason": None, "stop_detail": None}
+    if not flags.get("floor_compatibility_ok", True) and _next_deeper_beam_index(beams, beam_index) is None:
+        plan.update(stop_reason="no_candidate_under_strategy",
+                    stop_detail="Floor/frame compatibility failed and the declared beam depth ladder is exhausted.")
+        return plan
     beam_moves = any(reason in BEAM_STEP_REASONS for reason in reasons)
     column_moves = any(reason in COLUMN_STEP_REASONS for reason in reasons)
     if not beam_moves and not column_moves:
@@ -2103,6 +2117,9 @@ def _plan_next_candidate(columns, beams, column_index, beam_index, worst, target
 
     def settle(column, preferred):
         options = feasible_beams(column)
+        if not flags.get("floor_compatibility_ok", True):
+            options = [j for j in options if beams[j][1] > beams[beam_index][1]
+                       and beams[j][0] >= beams[beam_index][0]]
         if not options:
             return None
         above = [j for j in options if j >= preferred]
@@ -2589,6 +2606,23 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
         slab_screen = _slab_candidate_screen(sp.SLAB_REINFORCEMENT)
         if not slab_screen["accepted"]:
             deviation += 5.0
+        # Run the existing independent load-path check before accepting an
+        # otherwise feasible candidate, including every step-down trial.
+        # A solver failure propagates as unresolved numerical evidence.
+        otherwise_accepted = (worst["beam"] <= cfg.dcr.dcr_hard_max
+                              and worst["column"] <= cfg.dcr.dcr_hard_max
+                              and scwb_ok and capacity["accepted"]
+                              and drift_screen["accepted"] and slab_screen["accepted"])
+        candidate_comparison = None
+        if otherwise_accepted and sp.FLOOR_TRANSFER is not None:
+            from Design.SMRF_Coupled_Comparison import compare_transfer_to_coupled
+            _notify_progress(progress, "phase_started", "candidate.coupled_comparison", iteration=iteration)
+            candidate_comparison = compare_transfer_to_coupled(slab, combination_actions=combination_actions)
+            _notify_progress(progress, "phase_completed", "candidate.coupled_comparison", iteration=iteration)
+        compatibility_ok = (candidate_comparison is None or candidate_comparison["vertical_path_within_tolerance"])
+        entry["coupled_comparison"] = candidate_comparison
+        if not compatibility_ok:
+            deviation += 20.0
         if best is None or deviation < best["deviation"]:
             best = {"deviation": deviation, "entry": entry, "state": _capture_state(),
                     "combination_actions": combination_actions, "capacity": capacity,
@@ -2603,9 +2637,11 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
             and capacity["accepted"]
             and drift_screen["accepted"]
             and slab_screen["accepted"]
+            and compatibility_ok
         )
         entry["constraints"] = _constraint_summary(worst, cfg.dcr.dcr_hard_max, scwb_screen_ok, joint_scwb,
                                                    capacity, drift_screen, accepted, slab_screen)
+        entry["constraints"]["floor_compatibility_accepted"] = compatibility_ok
         _notify_progress(progress, "iteration_completed", "candidate.checks", iteration=iteration,
                          candidate_attempt=candidate_attempt,
                          column_section=entry["column_section"], beam_section=entry["beam_section"],
@@ -2665,6 +2701,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
         plan = _plan_next_candidate(
             columns, beams, column_index, beam_index, worst, target, cfg.dcr.dcr_hard_max, scwb_index,
             {"drift_ok": drift_screen["accepted"], "scwb_ok": scwb_ok, "joint_scwb_failed": joint_scwb_failed,
+             "floor_compatibility_ok": compatibility_ok,
              "capacity_accepted": capacity["accepted"],
              "beam_section_adequate": capacity["beams"]["section_adequate"],
              "beam_hoops_selected": capacity["transverse"]["beam"] is not None,
@@ -2743,8 +2780,8 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     governing = max(final["column_dcr"], final["beam_dcr"])
     # Load-path check of the selected frame: the bare frame with its transfer
     # against the monolithic coupled model, same slab, sections and loads.
-    coupled_comparison = None
-    if sp.FLOOR_TRANSFER is not None:
+    coupled_comparison = final.get("coupled_comparison")
+    if coupled_comparison is None and sp.FLOOR_TRANSFER is not None:
         _notify_progress(progress, "phase_started", "design.coupled_comparison")
         from Design.SMRF_Coupled_Comparison import compare_transfer_to_coupled
         coupled_comparison = compare_transfer_to_coupled(final["slab"],

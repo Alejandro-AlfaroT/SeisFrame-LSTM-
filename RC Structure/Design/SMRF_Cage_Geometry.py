@@ -242,7 +242,10 @@ def joint_assembly(record, stacking="x_over_y", pass_clearance_in=None, max_laye
 
     # Column bar plan positions and the beam bars threading them (shared with the column cage rule).
     column_bars = column_bars_plan(bc, hc, col_cover, col_tie_db, col_db, r["col_top_bars"], r["col_side_bars"])
-    directions = beam_bars_threading(bc, hc, bw, beam_cover, beam_tie_db, beam_db, r["beam_top_bars"],
+    # Both faces cross the same column cage. Independent face counts can
+    # make the bottom face govern; checking only the top accepted V4 case 0009.
+    threading_count = max(r["beam_top_bars"], r["beam_bot_bars"])
+    directions = beam_bars_threading(bc, hc, bw, beam_cover, beam_tie_db, beam_db, threading_count,
                                      column_bars, col_db, clear)
 
     # Vertical stacking of the two orthogonal cages at the joint (top and, mirrored, bottom). Where the
@@ -362,13 +365,17 @@ def joint_assembly(record, stacking="x_over_y", pass_clearance_in=None, max_laye
 
     checks = []
     for axis, d in directions.items():
+        fit = d["bars_per_layer_that_fit"]
+        d["layers_needed_by_face"] = {face: math.ceil(count / fit) if fit else None
+                                      for face, count in (("top", r["beam_top_bars"]),
+                                                          ("bottom", r["beam_bot_bars"]))}
         d["fits_within_layer_limit"] = d["layers_needed"] is not None and d["layers_needed"] <= max_layers
         checks.append({"rule": f"fit: beam bars pass between the column bars in at most {max_layers} layer(s) (clearance per 25.2.1)",
                        "direction": axis,
                        "passes": d["fits_within_layer_limit"],
-                       "detail": f"{r['beam_top_bars']} #{r['beam_bar_size']} bars, {d['bars_per_layer_that_fit']} fit per layer "
+                       "detail": f"top/bottom {r['beam_top_bars']}/{r['beam_bot_bars']} #{r['beam_bar_size']} bars, {d['bars_per_layer_that_fit']} fit per layer "
                                  f"between column bar lanes at {[round(o, 1) for o in d['column_bar_lanes_blocked_in']]} in; "
-                                 f"layers needed {d['layers_needed']}, placed as {layers_by[axis]}; "
+                                 f"governing layers needed {d['layers_needed']}, top placed as {layers_by[axis]}; "
                                  f"nominal positions in conflict: {len(d['nominal_positions_in_conflict'])}"
                                  + (f"; two layers would put the group centroid {d['two_layer_centroid_from_face_in']:.2f} in from the face "
                                     f"(lever-arm ratio {d['two_layer_lever_arm_ratio']:.3f})" if d.get("two_layer_centroid_from_face_in") else "")})

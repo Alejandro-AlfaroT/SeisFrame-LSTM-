@@ -128,7 +128,7 @@ def _hogging_credit_summary(credit, tag, slab_layers):
     """What the hogging check of member ``tag`` credited, for the check record; None without a credit basis."""
     if credit is None:
         return None
-    member = credit["members"].get(tag) or {"family": None, "credited": False, "reason": "member not in the credit"}
+    member = credit["members"].get(str(tag)) or {"family": None, "credited": False, "reason": "member not in the credit"}
     return {**member, "slab_steel_in2": sum(area for _, area in slab_layers),
             "layers_from_compression_face": [{"depth_in": y, "area_in2": area} for y, area in slab_layers]}
 

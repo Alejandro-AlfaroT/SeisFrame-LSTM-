@@ -19,6 +19,37 @@ FLAGS = {"drift_ok": True, "scwb_ok": True, "joint_scwb_failed": False, "capacit
 
 
 class MomentSizedJump(unittest.TestCase):
+    def test_floor_compatibility_failure_moves_depth_without_growing_column(self):
+        beams = [(10., 18., 5.), (10., 18., 8.), (10., 20., 5.), (10., 20., 8.)]
+        columns = [(20., 20., 6.), (20., 20., 10.), (22., 22., 10.)]
+        c, b, reasons = driver._plan_next_rungs(columns, beams, 0, 0,
+                                               {"beam": .85, "column": .5}, .85, 1., 0,
+                                               {**FLAGS, "floor_compatibility_ok": False})
+        self.assertEqual(c, 0)
+        self.assertEqual(beams[b], (10., 20., 8.))
+        self.assertIn("floor_frame_compatibility", reasons)
+
+    def test_floor_failure_cannot_substitute_a_shallower_feasible_beam(self):
+        beams = [(10., 18., 8.), (10., 20., 8.)]
+        columns = [(20., 20., 10.)]
+        result = driver._plan_next_candidate(columns, beams, 0, 0,
+                                              {"beam": .85, "column": .5}, .85, 1., 0,
+                                              {**FLAGS, "floor_compatibility_ok": False},
+                                              {(0, 0)}, lambda c: [0])
+        self.assertIsNone(result["candidate"])
+        self.assertIsNotNone(result["stop_reason"])
+
+    def test_floor_failure_at_depth_limit_stops_instead_of_growing_columns(self):
+        beams = [(10., 36., 8.)]
+        columns = [(20., 20., 6.), (22., 22., 10.)]
+        result = driver._plan_next_candidate(columns, beams, 0, 0,
+                                              {"beam": .85, "column": .5}, .85, 1., 0,
+                                              {**FLAGS, "floor_compatibility_ok": False},
+                                              {(0, 0)}, lambda c: [0])
+        self.assertIsNone(result["candidate"])
+        self.assertEqual(result["stop_reason"], "no_candidate_under_strategy")
+
+
     def setUp(self):
         self.beams = beam_ladder(span_in=360.0, story_height_in=168.0)
         self.columns = column_ladder()

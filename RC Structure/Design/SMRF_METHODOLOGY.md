@@ -2302,6 +2302,47 @@ capacity models:
 The request identity changes with the source; designs made before this
 section are read as they were made.
 
+V4 findings (2026-10-12, 75 of 100 cases): column median 22 in against 30
+in V3 on the same cases, five above 32 in against 28; eleven cases with
+failed checks. Two were repaired the same day: the credit's member keys
+are strings (integer keys sorted differently after the JSON round trip
+and broke the analysis-input signature on four two-bay frames), and the
+beam minimum steel is sized on the nominal single-row depth as well as
+the stacked one (two #7 at 1.20 in2 against 1.25 on cases 0022 and
+0087). Open: five SDC C frames whose slab-credited search chose 10 to
+18 in deep beams on 22 to 30 ft bays and then failed the slab-to-frame
+compatibility check by 5 to 16 percent (a beam depth minimum is to be
+decided), and one bar-lane case (0009).
+
+## V4 lane and floor compatibility closure (2026-10-12)
+
+The joint assembly's lane screen now uses the larger of the top and bottom
+beam bar counts. V4 case 0009 had two top bars but three bottom bars in a
+column cage admitting one bar per layer with a two-layer limit. Checking
+only the top face accepted the capacity screen while the independent saved
+row check rejected the bottom face. Both faces now govern the screen; old
+records are not repaired by changing their saved rows.
+
+The existing shell/web/column comparison now runs before acceptance of an
+otherwise feasible uniform-search candidate, including step-down trials.
+The 5% per-column reaction tolerance and total-load tolerance are unchanged.
+An evaluated failure requests a deeper beam at the current column size,
+holds beam width, and uses the top grade at the new dimensions. No deeper
+feasible rung means a recorded search stop, not a column-growth substitute.
+Numerical analysis failures remain unresolved errors, not instructions to
+grow a section. The selected candidate's comparison is reused at final
+qualification, preserving the independent saved-row checks and signature.
+
+The global span/20 preliminary floor is unchanged. A case 0011 diagnostic
+holding its 11-in slab, column and beam width fixed reproduced the saved
+12.12% reaction disagreement at 18-in beam depth. At depths 22 and 30 in,
+the disagreement was 9.30% and 4.51%, respectively. Thus a blanket span/16
+floor (22 in here) would not itself guarantee compatibility. These are
+load-path sensitivities, not redesigned or fully qualified structures; a
+fresh search reselects slab thickness, reinforcement and all frame checks.
+Existing V4 records retain their frozen source identity and require fresh
+design verification under this source before joining a post-fix batch.
+
 ## Reference basis
 
 - [ACI 318-19 / reapproved 2022, publisher](https://www.concrete.org/store/productdetail.aspx?ItemID=318U19)

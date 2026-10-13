@@ -80,6 +80,22 @@ class Clearances(unittest.TestCase):
 
 
 class JointAssembly(unittest.TestCase):
+    def test_bottom_face_cannot_exceed_column_lane_layer_limit(self):
+        # V4 case 0009: one lane per direction, two top bars fit in two
+        # layers, but three bottom bars cannot fit under the same limit.
+        data = record(sections={"b_col_in": 17., "h_col_in": 17.,
+                                "b_beam_in": 10., "h_beam_in": 18.},
+                      reinforcement={"col_bar_size": 6, "col_top_bars": 4,
+                                     "col_bot_bars": 4, "col_side_bars": 2,
+                                     "beam_bar_size": 6, "beam_top_bars": 2,
+                                     "beam_bot_bars": 3,
+                                     "beam_longitudinal_centroid_offset_in": 2.375,
+                                     "beam_bar_area_in2": .44})
+        result = cg.joint_assembly(data, max_layers=2, layer_order="interleaved")
+        for direction in result["directions"].values():
+            self.assertEqual(direction["bars_per_layer_that_fit"], 1)
+            self.assertFalse(direction["fits_within_layer_limit"])
+
     def test_case_0002_like_joint(self):
         res = cg.evaluate_cage_geometry(record())
         self.assertTrue(res["column"]["passes"])

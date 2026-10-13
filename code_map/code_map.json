@@ -11,8 +11,8 @@
   "RC Hybrid Surrogate Model"
  ],
  "counts": {
-  "nodes": 275,
-  "edges": 1208,
+  "nodes": 276,
+  "edges": 1213,
   "packages": 2
  },
  "nodes": [
@@ -1768,7 +1768,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 38,
+   "imported_by": 39,
    "imports_count": 3,
    "unresolved_imports": []
   },
@@ -2421,7 +2421,7 @@
    "name": "SMRF_Beam_Slab_Strength.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 553,
+   "lines": 558,
    "module": "Design.SMRF_Beam_Slab_Strength",
    "root": "RC Structure",
    "summary": "Developed beam-plus-slab flexural strengths for capacity design and hinges.",
@@ -2455,7 +2455,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 24,
+   "imported_by": 25,
    "imports_count": 1,
    "unresolved_imports": []
   },
@@ -2863,7 +2863,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 9,
+   "imported_by": 10,
    "imports_count": 7,
    "unresolved_imports": []
   },
@@ -4960,7 +4960,7 @@
    "name": "Redesign.py",
    "package": "RC Structure",
    "folder": "RC Structure",
-   "lines": 1223,
+   "lines": 1232,
    "module": "Redesign",
    "root": "RC Structure",
    "summary": "Redesign.py Iterative ACI 318-19 steel redesign for the RC frame.",
@@ -5005,7 +5005,7 @@
    "external": [
     "openseespy"
    ],
-   "imported_by": 13,
+   "imported_by": 14,
    "imports_count": 12,
    "unresolved_imports": []
   },
@@ -5297,7 +5297,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 128,
+   "imported_by": 129,
    "imports_count": 1,
    "unresolved_imports": []
   },
@@ -6141,6 +6141,32 @@
    ],
    "imported_by": 0,
    "imports_count": 12,
+   "unresolved_imports": []
+  },
+  {
+   "id": "RC Structure/tests/test_hogging_slab_credit.py",
+   "name": "test_hogging_slab_credit.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/tests",
+   "lines": 98,
+   "module": "tests.test_hogging_slab_credit",
+   "root": "RC Structure",
+   "summary": "The slab credit to the beam top bars (2026-10-11) and the two V4 repairs of 2026-10-12.",
+   "summary_source": "docstring",
+   "docstring_full": "The slab credit to the beam top bars (2026-10-11) and the two V4 repairs of 2026-10-12.\n\nNo structural analyses are launched: a hand-written slab layout on a small grid.",
+   "functions": [
+    "credit"
+   ],
+   "classes": [
+    "HoggingSlabCreditTests",
+    "MinimumSteelOnTheNominalDepth"
+   ],
+   "is_cli": true,
+   "has_main_guard": true,
+   "is_test": true,
+   "external": [],
+   "imported_by": 0,
+   "imports_count": 5,
    "unresolved_imports": []
   },
   {
@@ -20880,24 +20906,24 @@
    "module_as_written": "Structure_Parameters",
    "names": {},
    "attributes_used": {
-    "SLAB_THICKNESS_IN": 24,
+    "SLAB_THICKNESS_IN": 25,
     "H_COL": 14,
+    "B_BEAM": 14,
     "B_COL": 13,
-    "B_BEAM": 13,
+    "H_BEAM": 12,
     "rebar_diameter": 11,
-    "H_BEAM": 10,
-    "FY_KSI": 9,
+    "FY_KSI": 10,
     "BEAM_TOP_BARS": 8,
     "BEAM_BOT_BARS": 8,
     "rebar_area": 8,
     "BEAM_BAR_SIZE": 7,
+    "longitudinal_cover_in": 6,
     "COL_TOP_BARS": 6,
     "COL_BOT_BARS": 6,
     "COL_SIDE_BARS": 6,
+    "FC_BEAM_KSI": 6,
     "beam_worst_centroid_offset_in": 5,
-    "FC_BEAM_KSI": 5,
     "COL_BAR_SIZE": 5,
-    "longitudinal_cover_in": 4,
     "COL_CLEAR_COVER_IN": 4,
     "COL_STIRRUP_BAR_SIZE": 4,
     "BEAM_BAR_MAX_LAYERS": 4,
@@ -20921,12 +20947,12 @@
    "calls": {
     "rebar_diameter": 11,
     "rebar_area": 8,
+    "longitudinal_cover_in": 6,
     "beam_worst_centroid_offset_in": 5,
-    "longitudinal_cover_in": 4,
     "beam_bars_per_layer": 3,
     "longitudinal_clear_spacing_in": 2
    },
-   "how": "imports Structure_Parameters; uses SLAB_THICKNESS_IN, H_COL, B_COL, B_BEAM, rebar_diameter, H_BEAM, FY_KSI, BEAM_TOP_BARS ...; calls rebar_diameter (11x), rebar_area (8x), beam_worst_centroid_offset_in (5x), longitudinal_cover_in (4x), beam_bars_per_layer (3x), longitudinal_clear_spacing_in (2x)",
+   "how": "imports Structure_Parameters; uses SLAB_THICKNESS_IN, H_COL, B_BEAM, B_COL, H_BEAM, rebar_diameter, FY_KSI, BEAM_TOP_BARS ...; calls rebar_diameter (11x), rebar_area (8x), longitudinal_cover_in (6x), beam_worst_centroid_offset_in (5x), beam_bars_per_layer (3x), longitudinal_clear_spacing_in (2x)",
    "used_count": 37
   },
   {
@@ -21047,7 +21073,7 @@
    "lines": [
     101,
     111,
-    693
+    700
    ],
    "module_as_written": "Design.SMRF_Beam_Slab_Strength",
    "names": {
@@ -21097,7 +21123,7 @@
    "lines": [
     279,
     284,
-    562
+    569
    ],
    "module_as_written": "Design.SMRF_Capacity_Design",
    "names": {
@@ -21135,7 +21161,7 @@
    "target": "RC Structure/Design/SMRF_Cage_Layout.py",
    "kind": "lazy_import",
    "lines": [
-    563
+    570
    ],
    "module_as_written": "Design.SMRF_Cage_Layout",
    "names": {
@@ -25728,6 +25754,108 @@
    },
    "how": "imports inside a function rc_hybrid_surrogate.schema_v3; uses load_sample, validate; calls load_sample (2x), validate (2x)",
    "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_hogging_slab_credit.py",
+   "target": "RC Structure/Structure_Parameters.py",
+   "kind": "import",
+   "lines": [
+    13
+   ],
+   "module_as_written": "Structure_Parameters",
+   "names": {},
+   "attributes_used": {
+    "longitudinal_cover_in": 1,
+    "beam_worst_centroid_offset_in": 1
+   },
+   "calls": {
+    "longitudinal_cover_in": 1,
+    "beam_worst_centroid_offset_in": 1
+   },
+   "how": "imports Structure_Parameters; uses longitudinal_cover_in, beam_worst_centroid_offset_in; calls longitudinal_cover_in (1x), beam_worst_centroid_offset_in (1x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_hogging_slab_credit.py",
+   "target": "RC Structure/Redesign.py",
+   "kind": "import",
+   "lines": [
+    14
+   ],
+   "module_as_written": "Redesign",
+   "names": {},
+   "attributes_used": {
+    "_beam_As_min": 2,
+    "_beam_candidates": 1
+   },
+   "calls": {
+    "_beam_As_min": 2,
+    "_beam_candidates": 1
+   },
+   "how": "imports Redesign; uses _beam_As_min, _beam_candidates; calls _beam_As_min (2x), _beam_candidates (1x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_hogging_slab_credit.py",
+   "target": "RC Structure/Design/Config.py",
+   "kind": "import",
+   "lines": [
+    15
+   ],
+   "module_as_written": "Design.Config",
+   "names": {
+    "DesignConfig": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "DesignConfig": 1
+   },
+   "how": "imports Design.Config: DesignConfig; calls DesignConfig (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_hogging_slab_credit.py",
+   "target": "RC Structure/Design/SMRF_Beam_Slab_Strength.py",
+   "kind": "import",
+   "lines": [
+    16
+   ],
+   "module_as_written": "Design.SMRF_Beam_Slab_Strength",
+   "names": {
+    "credited_hogging_layers": 4,
+    "family_hogging_layers": 2,
+    "hogging_strength_kip_in": 2,
+    "web_top_steel_for_hogging": 2,
+    "hogging_slab_credit": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "credited_hogging_layers": 4,
+    "family_hogging_layers": 2,
+    "hogging_strength_kip_in": 2,
+    "web_top_steel_for_hogging": 2,
+    "hogging_slab_credit": 1
+   },
+   "how": "imports Design.SMRF_Beam_Slab_Strength: credited_hogging_layers, family_hogging_layers, hogging_strength_kip_in, web_top_steel_for_hogging, hogging_slab_credit; calls credited_hogging_layers (4x), family_hogging_layers (2x), hogging_strength_kip_in (2x), web_top_steel_for_hogging (2x), hogging_slab_credit (1x)",
+   "used_count": 5
+  },
+  {
+   "source": "RC Structure/tests/test_hogging_slab_credit.py",
+   "target": "RC Structure/Design/SMRF_Design_Evidence.py",
+   "kind": "import",
+   "lines": [
+    18
+   ],
+   "module_as_written": "Design.SMRF_Design_Evidence",
+   "names": {
+    "analysis_input_signature": 2
+   },
+   "attributes_used": {},
+   "calls": {
+    "analysis_input_signature": 2
+   },
+   "how": "imports Design.SMRF_Design_Evidence: analysis_input_signature; calls analysis_input_signature (2x)",
+   "used_count": 1
   },
   {
    "source": "RC Structure/tests/test_imk_deterioration_mapping.py",
