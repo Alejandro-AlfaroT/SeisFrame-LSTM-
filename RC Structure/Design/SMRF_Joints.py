@@ -371,6 +371,11 @@ def evaluate_joints(inputs):
             for axis in ("x", "y"):
                 states = directions.get(axis, {})
                 states = states if isinstance(states, Mapping) else {}
+                if states.get("required") is False:
+                    # The column is not part of the seismic force-resisting system in this direction (ACI 318-19 18.14;
+                    # the perimeter-frame basis of 2026-10-16): 18.7.3.2 does not apply there. The evidence block
+                    # records the basis; nothing is evaluated and nothing is left open.
+                    continue
                 for sign in ("positive", "negative"):
                     checks.append(scwb_check(states.get(sign), location=f"{location}/{axis}/{sign}"))
     groups = (("beam_capacity_shear", BEAM_SHEAR_CLAUSE, beam_capacity_shear_checks),

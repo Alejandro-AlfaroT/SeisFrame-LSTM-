@@ -32,6 +32,7 @@ from dataclasses import replace
 
 import Structure_Parameters as sp
 from Design import Group_Checks as checks
+from Design.SMRF_Beam_Slab_Strength import BeamBarRowsError
 from Design.SMRF_Transitions import column_transition
 from Model import Member_Bar_Layers as bar_layers
 from Model import Member_Groups as mg
@@ -39,7 +40,47 @@ from Model import Member_Properties as mp
 from Model.IMK_Calibration import column_moment_at_axial
 
 RULES_ID = "group_reinforcement_selection_v1"
+# Under the system policy (Model.Member_Groups.SYSTEM_POLICY_ID, 2026-10-16) the groups of a design tie select one
+# cage together, and the strong-column rule applies only in the directions in which a column is part of a
+# perimeter frame (ACI 318-19 18.7.3.2 is a special-moment-frame rule; an interior column and the gravity
+# direction of an edge column are members not designated as part of the SFRS, 18.14).
+SYSTEM_RULES_ID = "system_reinforcement_selection_v1"
+BEAM_UNIT_SWEEPS = 3                      # beam units re-selected within a pass until none changes (crossing beams share joints)
 COLUMN_SUPPORTED_BAR_HX_MAX_IN = 14.0
+
+
+def _trial_state(state, gid, design):
+    """A trial with one group's design changed; under the system policy the whole design tie moves with it."""
+    tie = state.tie_of(gid)
+    return state.with_tied_designs({tie: design}) if tie else state.with_designs({gid: design})
+
+
+def _scwb_axes(state, member):
+    """The directions in which 18.7.3.2 applies at this column's joints: both under the band policy (every frame is
+    part of the SFRS); under the system policy the perimeter-frame directions of the column
+    (Model.Member_Groups.column_sfrs_directions), none for an interior column."""
+    if state.policy_id != mg.SYSTEM_POLICY_ID:
+        return ("x", "y")
+    directions = mg.column_sfrs_directions(member.grid_i, member.grid_j, sp.NUM_BAY_X, sp.NUM_BAY_Y)
+    return tuple(axis for axis in ("x", "y") if axis in directions)
+
+
+def _beam_units(state):
+    """[(label, group ids)] selected together: each beam group alone under the band policy, each beam tie under
+    the system policy."""
+    ties = state.ties()
+    if ties:
+        return [(tie, tuple(gids)) for tie, gids in sorted(ties.items()) if mg.SYSTEM_DESIGN_TIES[tie]["member_type"] == "beam"]
+    return [(gid, (gid,)) for gid in sorted(g for g, group in state.groups.items() if group["member_type"] != "column")]
+
+
+def _column_units(state):
+    """[(label, plan locations)] whose column groups form one chain: each location under the band policy, the
+    locations of each column tie under the system policy."""
+    if state.ties():
+        return [(tie, tuple(spec["locations"])) for tie, spec in mg.SYSTEM_DESIGN_TIES.items()
+                if spec["member_type"] == "column" and tie in state.ties()]
+    return [(location, (location,)) for location in mg.COLUMN_LOCATIONS]
 
 
 def _objective(dcr, steel, cfg):
@@ -127,7 +168,7 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg):
     """
     from Design.SMRF_Beam_Slab_Strength import validate_bar_rows
     design = candidate
-    trial = state.with_designs({gid: design})
+    trial = _trial_state(state, gid, design)
     with mg.installed(trial):
         try:
             arrangement = bar_layers.arrangement()
@@ -175,17 +216,36 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg):
 
 def select_beam_group(state, gid, actions, cfg):
     """The cage one beam group selects, given every other group as it stands. Returns (design, report)."""
-    current = state.designs[gid]
-    rows = checks.beam_demand_rows(state.groups[gid]["member_tags"], actions)
+    return select_beam_groups(state, (gid,), actions, cfg)
+
+
+def _merge_beam_results(results):
+    """One cage priced in several groups' places: it threads only if it threads everywhere, its layers and DCR are
+    the worst, its steel the sum."""
+    return {"admissible": True, "threads": all(r["threads"] for r in results), "layers": max(r["layers"] for r in results),
+            "dcr": max(r["dcr"] for r in results), "steel_in2": sum(r["steel_in2"] for r in results), "reason": None,
+            "by_group": [{k: r[k] for k in ("threads", "layers", "dcr")} for r in results]}
+
+
+def select_beam_groups(state, gids, actions, cfg):
+    """The cage the beam groups ``gids`` select together: one group under the band policy, the groups of a design
+    tie under the system policy. Priced on the union of their demands, admissible only in every group's own place
+    (its own layering, joint cores and column lanes). Returns (design typed as the first group, report)."""
+    gids = tuple(gids)
+    current = state.designs[gids[0]]
+    rows = [row for gid in gids for row in checks.beam_demand_rows(state.groups[gid]["member_tags"], actions)]
     demand = (max(r[2] for r in rows), max(r[3] for r in rows))
     priced = []
     with mg.installed(state):
-        through = _beam_through_depth(state, gid)
+        depths = [_beam_through_depth(state, gid) for gid in gids]
+    through = min((d for d in depths if d is not None), default=None)
     for candidate in beam_cage_candidates(current, cfg, through):
-        result = evaluate_beam_candidate(state, gid, candidate, demand, cfg)
-        if result["admissible"]:
-            priced.append((candidate, result))
-    report = {"group_id": gid, "demand_mu_positive_kip_in": demand[0], "demand_mu_negative_kip_in": demand[1],
+        results = [evaluate_beam_candidate(state, gid, replace(candidate, member_type=state.groups[gid]["member_type"]), demand, cfg)
+                   for gid in gids]
+        if all(r["admissible"] for r in results):
+            priced.append((candidate, _merge_beam_results(results)))
+    report = {"group_id": gids[0] if len(gids) == 1 else None, "groups": list(gids),
+              "demand_mu_positive_kip_in": demand[0], "demand_mu_negative_kip_in": demand[1],
               "candidates_admissible": len(priced), "through_bar_depth_in": through}
     if not priced:
         return current, {**report, "status": "no_admissible_cage", "exhausted": True,
@@ -195,8 +255,13 @@ def select_beam_group(state, gid, actions, cfg):
     feasible = [item for item in pool if item[1]["dcr"] <= cfg.dcr.dcr_hard_max]
     if not feasible:
         candidate, result = min(pool, key=lambda item: item[1]["dcr"])
+        # Lane-limited: a cage that reaches the demand exists but does not thread the column bars (room, not strength).
+        lane_limited = any(item[1]["dcr"] <= cfg.dcr.dcr_hard_max for item in priced if not item[1]["threads"])
         return candidate, {**report, "status": "strength_short", "exhausted": True, "dcr": result["dcr"],
-                           "detail": "no admissible cage reaches the demand; the strongest is installed so the shortfall is measured"}
+                           "lane_limited": lane_limited, "strongest_dcr_any_cage": min(item[1]["dcr"] for item in priced),
+                           "detail": ("the cages that reach the demand do not thread the column cage in enough lanes; the strongest "
+                                      "threading cage is installed so the shortfall is measured" if lane_limited else
+                                      "no admissible cage reaches the demand; the strongest is installed so the shortfall is measured")}
     if cfg.rebar.beam_prefer_fewest_layers:
         fewest = min(item[1]["layers"] for item in feasible)
         feasible = [item for item in feasible if item[1]["layers"] == fewest]
@@ -207,9 +272,14 @@ def select_beam_group(state, gid, actions, cfg):
 
 # ---- columns ----------------------------------------------------------------------------------------------
 def _column_chain(state, location):
-    """Group ids of one plan location from the base band upward."""
-    groups = [g for g in state.groups.values() if g["member_type"] == "column" and g["location_class"] == location]
-    return [g["group_id"] for g in sorted(groups, key=lambda g: min(g["stories_or_floors"]))]
+    """Per band from the base, the column group ids of one plan location (a tuple of one), or of several locations
+    selected together (the locations of a design tie under the system policy)."""
+    locations = (location,) if isinstance(location, str) else tuple(location)
+    groups = [g for g in state.groups.values() if g["member_type"] == "column" and g["location_class"] in locations]
+    bands = {}
+    for group in groups:
+        bands.setdefault(min(group["stories_or_floors"]), []).append(group["group_id"])
+    return [tuple(sorted(bands[start])) for start in sorted(bands)]
 
 
 def _axial_ranges(tags, actions):
@@ -282,8 +352,11 @@ def _cage_develops_its_bars(candidate, clear_height_in):
     return column_bar_bond_18_7_4_3(candidate.bar_size, candidate.fc_ksi, sp.FY_KSI, cb, clear_height_in)["passes"]
 
 
-def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
+def select_column_chain(state, location, actions, cfg, scwb_margin=1.0, requirements=None):
     """Cages of the column groups of one plan location, chosen together. Returns ({gid: design}, report).
+
+    ``requirements`` are the strong-column sums of _joint_requirements built once per selection pass on the
+    beams just selected (their rows validated against the cages of that moment); built here when not given.
 
     A pass over the bands from the base: each band's candidates carry the least total cost of a feasible
     chain below them. Node feasibility: strength on the band's own concurrent demands, and 18.7.3.2 at
@@ -292,8 +365,9 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
     band's above.
     """
     chain = _column_chain(state, location)
+    label = location if isinstance(location, str) else "+".join(location)
     if not chain:
-        return {}, {"location": location, "status": "absent"}
+        return {}, {"location": label, "status": "absent"}
     # The strong-column estimate screens the cages whenever the beams have end strengths to sum (a slab is
     # installed). Without an established slab layout the beam sums carry no slab mats, so the estimate is the
     # grouped form of the uniform proxy screen and the exact joint evaluation stays not_evaluated.
@@ -301,20 +375,22 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
     layout_established = established and (sp.SLAB_REINFORCEMENT or {}).get("layout") is not None
     alpha = getattr(cfg.dcr, "biaxial_contour_exponent", 1.5)
     with mg.installed(state):
-        requirements = _joint_requirements(state, established)
-        core_beams = {gid: _core_beams(state, gid) for gid in chain}
-    report = {"location": location, "chain": chain, "scwb_margin": scwb_margin, "scwb_in_selection": established,
+        if requirements is None:
+            requirements = _joint_requirements(state, established)
+        core_beams = {gids: [pair for gid in gids for pair in _core_beams(state, gid)] for gids in chain}
+    report = {"location": label, "chain": [list(gids) for gids in chain], "scwb_margin": scwb_margin,
+              "scwb_in_selection": established,
               "scwb_screen": ("beam plus developed slab mats" if layout_established else
                               "proxy: beams without slab mats (no slab layout established)" if established else "none"),
               "bands": {}}
     nodes = []                                                      # per band: [(candidate, cost, info)]
-    for gid in chain:
-        group, current = state.groups[gid], state.designs[gid]
-        tags = group["member_tags"]
+    for gids in chain:
+        key_label, current = "+".join(gids), state.designs[gids[0]]
+        tags = [tag for gid in gids for tag in state.groups[gid]["member_tags"]]
         rows = checks.column_demand_rows(tags, actions)
         ranges = _axial_ranges(tags, actions)
         members = {tag: state.member(tag) for tag in tags}
-        stories = set(group["stories_or_floors"])
+        stories = set().union(*(set(state.groups[gid]["stories_or_floors"]) for gid in gids))
         priced, rejected = [], {"strength": 0, "axial_domain": 0, "scwb": 0, "bar_bond": 0}
         clear_height = min(_column_clear_height_face(member) for member in members.values())
         for candidate in column_cage_candidates(current, cfg):
@@ -332,7 +408,7 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
                 rejected["strength"] += 1
                 continue
             needed = [math.ceil(max(b.top_bars, b.bot_bars) / fit) if fit and fit > 0 else 99
-                      for b, axis in core_beams[gid] for fit in (bar_layers.bars_per_layer(candidate, b, axis),)]
+                      for b, axis in core_beams[gids] for fit in (bar_layers.bars_per_layer(candidate, b, axis),)]
             layers = max(needed, default=1)
             # Strong column at the joints that involve only this band (both columns in it, or the roof).
             mn = {(tag, end, axis): _column_mn_estimate(candidate, axis, ranges[tag][end])
@@ -344,7 +420,7 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
                 if key not in requirements:
                     continue
                 above_story = level + 1
-                for axis in ("x", "y"):
+                for axis in _scwb_axes(state, member):
                     required = scwb_margin * requirements[key][axis]
                     if above_story > sp.NUM_FLOOR:
                         provided = mn[(tag, "j", axis)]
@@ -369,11 +445,11 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
         if cfg.rebar.col_prefer_fewest_beam_layers and preferred:
             fewest = min(item["layers"] for item in preferred)
             preferred = [item for item in preferred if item["layers"] == fewest]
-        report["bands"][gid] = {"candidates_admissible": len(priced), "lanes_available": bool(threading),
-                                "rejected": rejected, "members": len(tags)}
+        report["bands"][key_label] = {"candidates_admissible": len(priced), "lanes_available": bool(threading),
+                                      "rejected": rejected, "members": len(tags), "groups": list(gids)}
         # The beam-layer preferences narrow a band's cages; they are preferences, so the chain is solved on the
         # preferred cages first and on the wider pools only when no chain exists among them.
-        nodes.append({"gid": gid, "pool": preferred, "pools": [preferred, threading or priced, priced],
+        nodes.append({"gids": gids, "key": key_label, "pool": preferred, "pools": [preferred, threading or priced, priced],
                       "members": members, "ranges": ranges, "stories": stories})
 
     def boundary_ok(lower_node, lower, upper_node, upper):
@@ -386,7 +462,7 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
             if key not in requirements:
                 continue
             above = mg_column_tag(top_story + 1, member.grid_i, member.grid_j)
-            for axis in ("x", "y"):
+            for axis in _scwb_axes(state, member):
                 if lower["mn"][(tag, "j", axis)] + upper["mn"][(above, "i", axis)] < scwb_margin * requirements[key][axis]:
                     return False
         return True
@@ -453,18 +529,20 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
         # demands (its own objective, the chain rules set aside), so the checks measure the shortfall on a cage of
         # the size the band needs. The heaviest cage would raise the probable moments and with them the capacity
         # shears of this line, and the failure would be read as a shear problem. Nothing is clamped or passed.
-        blocked = next((nodes[k]["gid"] for k, column in enumerate(best) if not any(e is not None for e in column)), chain[0])
+        blocked_index = next((k for k, column in enumerate(best) if not any(e is not None for e in column)), 0)
+        blocked = nodes[blocked_index]["key"]
         selected = {}
         for node in nodes:
-            current = state.designs[node["gid"]]
+            current = state.designs[node["gids"][0]]
             if node["pool"]:
-                selected[node["gid"]] = min(node["pool"], key=lambda item: _objective(item["dcr"], item["steel"], cfg))["design"]
+                design = min(node["pool"], key=lambda item: _objective(item["dcr"], item["steel"], cfg))["design"]
             else:
                 everything = column_cage_candidates(current, cfg)
-                selected[node["gid"]] = max(everything, key=lambda c: c.longitudinal_area_in2) if everything else current
+                design = max(everything, key=lambda c: c.longitudinal_area_in2) if everything else current
+            selected.update({gid: design for gid in node["gids"]})
         report.update(status="no_feasible_chain", exhausted=True, blocked_at=blocked,
                       blocked_by=("no admissible cage of this band meets its own strength and strong-column demands"
-                                  if not nodes[chain.index(blocked)]["pool"] else
+                                  if not nodes[blocked_index]["pool"] else
                                   "no cage of this band continues a feasible chain from the band below (transition or the "
                                   "strong-column rule at the boundary joints)"),
                       detail=("no combination of admissible cages along this column line satisfies strength, the "
@@ -475,8 +553,8 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0):
     selected = {}
     for k in range(len(nodes) - 1, -1, -1):
         item = nodes[k]["pool"][index]
-        selected[nodes[k]["gid"]] = item["design"]
-        report["bands"][nodes[k]["gid"]].update(dcr=item["dcr"], layers=item["layers"], threads=item["threads"],
+        selected.update({gid: item["design"] for gid in nodes[k]["gids"]})
+        report["bands"][nodes[k]["key"]].update(dcr=item["dcr"], layers=item["layers"], threads=item["threads"],
                                                 rho=item["design"].longitudinal_area_in2 / item["design"].gross_area_in2)
         index = best[k][index][1]
     report.update(status="selected", exhausted=False)
@@ -495,16 +573,41 @@ def select_reinforcement(state, actions, cfg, scwb_margin=1.0, max_passes=4):
     until no cage changes, because the layers of a beam depend on the cages it threads and crosses. The
     frame actions do not depend on the bars, so no re-analysis is needed between passes.
     """
-    report = {"rules": RULES_ID, "objective": cfg.dcr.objective, "scwb_margin": scwb_margin, "passes": [], "settled": False}
+    tied = bool(state.ties())
+    report = {"rules": SYSTEM_RULES_ID if tied else RULES_ID, "objective": cfg.dcr.objective, "scwb_margin": scwb_margin,
+              "passes": [], "settled": False, "policy": state.policy_id,
+              "units": {"beams": [label for label, _ in _beam_units(state)], "columns": [label for label, _ in _column_units(state)]}}
     for index in range(max_passes):
         changes, beams, columns = {}, {}, {}
-        for gid in sorted(g for g, group in state.groups.items() if group["member_type"] != "column"):
-            design, beams[gid] = select_beam_group(state, gid, actions, cfg)
-            if design != state.designs[gid]:
-                changes[gid] = design
-                state = state.with_designs({gid: design})
-        for location in mg.COLUMN_LOCATIONS:
-            selected, columns[location] = select_column_chain(state, location, actions, cfg, scwb_margin)
+        # The beam units until none changes within the pass: a beam's layers at a joint depend on the beams it
+        # crosses, so a unit selected before another changed is priced again on the final crossing beams.
+        for _sweep in range(BEAM_UNIT_SWEEPS):
+            moved = False
+            for label, gids in _beam_units(state):
+                design, beams[label] = select_beam_groups(state, gids, actions, cfg)
+                wanted = {gid: replace(design, member_type=state.groups[gid]["member_type"]) for gid in gids}
+                updates = {gid: d for gid, d in wanted.items() if d != state.designs[gid]}
+                if updates:
+                    changes.update(updates)
+                    moved = True
+                    state = state.with_tied_designs({label: design}) if tied else state.with_designs(updates)
+            if not moved:
+                break
+        # The strong-column sums once per pass, on the beams just selected: a column unit that takes a heavier cage
+        # changes the lanes of the beams that thread it, and their rows are re-laid only by the next pass's beam
+        # selection, so the requirements are not rebuilt between column units.
+        try:
+            with mg.installed(state):
+                requirements = _joint_requirements(state, sp.SLAB_THICKNESS_IN is not None)
+        except BeamBarRowsError as exc:
+            # The beams as selected do not stack at a joint (a layer past mid-depth): no column is priced on them this
+            # pass; the next pass re-selects the beams, and a design that never settles is reported, not solved around.
+            report["passes"].append({"pass": index + 1, "changed_groups": sorted(changes), "beams": beams, "columns": {},
+                                     "beam_rows_problem": str(exc)})
+            continue
+        for label, locations in _column_units(state):
+            selected, columns[label] = select_column_chain(state, locations if tied else locations[0], actions, cfg, scwb_margin,
+                                                           requirements=requirements)
             updates = {gid: design for gid, design in selected.items() if design != state.designs[gid]}
             if updates:
                 changes.update(updates)
@@ -514,7 +617,7 @@ def select_reinforcement(state, actions, cfg, scwb_margin=1.0, max_passes=4):
             report["settled"] = True
             break
     final = report["passes"][-1]
-    report["exhausted_groups"] = sorted([gid for gid, item in final["beams"].items() if item.get("exhausted")]
+    report["exhausted_groups"] = sorted([gid for item in final["beams"].values() if item.get("exhausted") for gid in item["groups"]]
                                         + [gid for item in final["columns"].values() if item.get("exhausted")
-                                           for gid in item.get("chain", [])])
+                                           for band in item.get("chain", []) for gid in band])
     return state, report

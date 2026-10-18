@@ -144,6 +144,10 @@ class RebarConfig:
     beam_clear_cover_in: float = field(default_factory=lambda: sp.BEAM_CLEAR_COVER_IN)
     col_clear_cover_in: float = field(default_factory=lambda: sp.COL_CLEAR_COVER_IN)
     aggregate_max_size_in: float = field(default_factory=lambda: sp.AGGREGATE_MAX_SIZE_IN)
+    # The bar position grid of a new design (design-basis rule 2026-10-14): bar centres, face pitches and
+    # layer pitches on multiples of it, the first bars in the hoop corners. A literal, not the module's
+    # value, so a pre-rule record restored earlier in the process does not switch new designs off the grid.
+    bar_position_grid_in: Optional[float] = 0.5
 
     def centroid_cover_in(self, member_type, bar_size=None):
         """Current/candidate bar offset; explicit clear cover only in new mode."""
@@ -155,7 +159,8 @@ class RebarConfig:
             clear, hoop, selected = self.col_clear_cover_in, self.col_stirrup_bar_size, sp.COL_BAR_SIZE
         else:
             raise ValueError("member_type must be beam or column")
-        return clear + sp.rebar_diameter(hoop) + 0.5 * sp.rebar_diameter(selected if bar_size is None else bar_size)
+        return sp.first_bar_offset_in(clear, sp.rebar_diameter(hoop),
+                                      sp.rebar_diameter(selected if bar_size is None else bar_size))
 
     # Transverse reinforcement
     stirrup_bar_size: int = field(default_factory=lambda: sp.COL_STIRRUP_BAR_SIZE)

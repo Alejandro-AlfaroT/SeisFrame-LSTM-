@@ -73,11 +73,9 @@ def _col_steel_layers(h=None, design=None):
         if sp.SLAB_THICKNESS_IN is None:
             layers.insert(1, (2 * sp.COL_SIDE_BARS * Ab, h / 2.0))
         else:
-            # Match actual straight-layer fiber coordinates, not a lump at
-            # middepth. There is one bar on each side at every interior level.
-            side_layers = [(2 * Ab, cover + (h - 2 * cover) * k
-                            / (sp.COL_SIDE_BARS + 1))
-                           for k in range(1, sp.COL_SIDE_BARS + 1)]
+            # Match the fiber coordinates of the grid cage (Model/Sections), not a
+            # lump at middepth: one bar on each side at every interior grid position.
+            side_layers = [(2 * Ab, y) for y in sp.face_bar_positions_in(h, cover, sp.COL_SIDE_BARS + 2)[1:-1]]
             layers[1:1] = side_layers
     return layers
 
@@ -97,7 +95,7 @@ def _design_col_steel_layers(design, h=None, about="h"):
         layers = [(outer, cover)]
         for count in (max(2, design.top_bars), max(2, design.bot_bars)):
             if count > 2:
-                layers += [(Ab, cover + (b - 2.0 * cover) * k / (count - 1)) for k in range(1, count - 1)]
+                layers += [(Ab, x) for x in sp.face_bar_positions_in(b, cover, count)[1:-1]]
         layers.append((outer, b - cover))
         return sorted(layers, key=lambda layer: layer[1])
     if about != "h":
@@ -108,8 +106,7 @@ def _design_col_steel_layers(design, h=None, about="h"):
         if sp.SLAB_THICKNESS_IN is None:
             layers.insert(1, (2 * design.side_bars * Ab, h / 2.0))
         else:
-            layers[1:1] = [(2 * Ab, cover + (h - 2 * cover) * k / (design.side_bars + 1))
-                           for k in range(1, design.side_bars + 1)]
+            layers[1:1] = [(2 * Ab, y) for y in sp.face_bar_positions_in(h, cover, design.side_bars + 2)[1:-1]]
     return layers
 
 

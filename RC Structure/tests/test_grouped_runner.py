@@ -133,7 +133,8 @@ class RunnerFixture(unittest.TestCase):
 
     def test_a_search_without_a_feasible_design_keeps_its_candidates_and_says_how_it_stopped(self):
         target = Path(self.tmp.name) / "attempt_budget_1"
-        proc = run(target, feasibility=1, reduction=0, stages=("design",))
+        # A seed no single trial can make feasible (14 in columns against 12 x 22 beams, at the first grades), yet one that evaluates.
+        proc = run(target, "--seed-column", "14", "14", "6", "--seed-beam", "12", "22", "5", feasibility=1, reduction=0, stages=("design",))
         result = load(target / "result.json")
         self.assertEqual(result["status"], "no_feasible_design", proc.stderr[-1500:])
         self.assertEqual(proc.returncode, 0)
@@ -151,7 +152,7 @@ class RunnerFixture(unittest.TestCase):
         self.assertFalse(result["design_checks"]["accepted_by_checklist"])
         self.assertFalse(result["production_acceptance"]["accepted"])
         # a second attempt in the same directory would have to append to that log: it is refused
-        again = run(target, feasibility=1, reduction=0, stages=("design",))
+        again = run(target, "--seed-column", "14", "14", "6", "--seed-beam", "12", "22", "5", feasibility=1, reduction=0, stages=("design",))
         self.assertEqual(load(target / "result.json")["status"], "error")
         self.assertIn("already exists", load(target / "result.json")["error"])
         self.assertNotEqual(again.returncode, 0)

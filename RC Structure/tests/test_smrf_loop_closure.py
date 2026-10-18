@@ -206,10 +206,10 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(self.columns[next_column], (TOP, TOP, 10.))                   # the top grade (2026-10-03)
         self.assertEqual(next_beam, bi)
 
-    def test_the_ladder_tops_out_at_36_in(self):
-        """User decision 2026-10-11: 38, 40 and 42 in are no longer offered."""
-        self.assertEqual(TOP, 36.)
-        self.assertEqual(sorted({r[0] for r in self.columns})[-3:], [32., 34., 36.])
+    def test_the_ladder_tops_out_at_32_in(self):
+        """User decisions 2026-10-11 and 2026-10-16: 38 to 42 in were withdrawn first, then the cap came down to 32 in."""
+        self.assertEqual(TOP, 32.)
+        self.assertEqual(sorted({r[0] for r in self.columns})[-3:], [28., 30., 32.])
 
     def test_column_steps_follow_the_lever_order(self):
         """Grade, then reinforcement, then geometry (2026-10-11): the same size at each higher grade, then every

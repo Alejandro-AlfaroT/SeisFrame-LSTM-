@@ -51,9 +51,9 @@ def nominal_offset_in(design):
 
 
 def pitch_in(design_a, design_b):
-    """Centre-to-centre distance between two layers (of one beam or of two crossing beams)."""
+    """Centre-to-centre distance between two layers (of one beam or of two crossing beams), on the bar grid."""
     da, db = _db(design_a.bar_size), _db(design_b.bar_size)
-    return 0.5 * (da + db) + max(sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, da, db)
+    return sp.snap_up_to_grid(0.5 * (da + db) + max(sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, da, db))
 
 
 def bars_per_layer(column_design, beam_design, axis):

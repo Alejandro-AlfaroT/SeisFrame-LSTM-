@@ -21,13 +21,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 # The generation chain's own files: outside the design identity, but they decide what is run and exported.
-CHAIN_FILES = ("Ground_Motion_Main.py", "Data_Generation/Run_Research_Batch.py", "Loads/Ground_Motion.py",
+CHAIN_FILES = ("Ground_Motion_Main.py", "Loads/Ground_Motion.py",
                "Data_Generation/Generate_Parameterized_Dataset.py",
                "Data_Generation/Generate_Hybrid_Dataset.py", "Data_Generation/Hybrid_Exporter.py",
                "Data_Generation/Graph_Exporter.py", "Data_Generation/Calibrate_Intensity.py",
-               "Data_Generation/Research_Batch_Evidence.py", "tools/source_fingerprint.py",
-               "tools/assert_torsional_strength.py", "tools/review_torsional_strength.py",
-               "tools/_story_strength_reference.py", "pilots/v2ResearchPilot100/torsional_strength_assertion.json")
+               "Data_Generation/Run_Weighted_Seismic_Calibration.py", "tools/source_fingerprint.py")
 PACKAGES = ("openseespy", "openseespywin", "numpy", "scipy", "matplotlib")
 
 

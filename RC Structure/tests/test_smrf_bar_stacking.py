@@ -44,7 +44,7 @@ class StackingOffsets(unittest.TestCase):
             self.assertEqual(sp.beam_bar_stacking_convention(), "y_over_x")
             base = sp.longitudinal_cover_in("beam")
             offsets = sp.beam_bar_stacking_offsets_in()
-        self.assertAlmostEqual(base, 1.5 + 0.5 + 0.5)                 # 2.5 in
+        self.assertAlmostEqual(base, 3.0)                             # #8 bars: 1.5 + the #5 layout hoop + 0.5 -> 3.0 in
         self.assertEqual(offsets["y"], {"top": base, "bottom": base + 2.0})
         self.assertEqual(offsets["x"], {"top": base + 2.0, "bottom": base})
         with slab_state(SLAB_REINFORCEMENT={"layout": {**LAYOUT, "outer_axis": "y"}}):
@@ -64,10 +64,10 @@ class StackingOffsets(unittest.TestCase):
 
     def test_worst_offset_and_face_lookup(self):
         with slab_state():
-            self.assertAlmostEqual(sp.beam_worst_centroid_offset_in(), 4.5)
-            self.assertAlmostEqual(sp.beam_centroid_offset_in("x", "top"), 4.5)
-            self.assertAlmostEqual(sp.beam_centroid_offset_in("x", "bottom"), 2.5)
-            self.assertAlmostEqual(sp.beam_centroid_offset_in("y", "top"), 2.5)
+            self.assertAlmostEqual(sp.beam_worst_centroid_offset_in(), 5.0)
+            self.assertAlmostEqual(sp.beam_centroid_offset_in("x", "top"), 5.0)
+            self.assertAlmostEqual(sp.beam_centroid_offset_in("x", "bottom"), 3.0)
+            self.assertAlmostEqual(sp.beam_centroid_offset_in("y", "top"), 3.0)
             self.assertEqual(sp.beam_bar_layers()["x"]["top"]["per_layer"], [6])
 
     def test_second_layer_where_the_lanes_force_it(self):
@@ -78,20 +78,20 @@ class StackingOffsets(unittest.TestCase):
             self.assertEqual(sp.beam_bars_per_layer(), {"x": 3, "y": 3})
             layers = sp.beam_bar_layers()
             self.assertEqual(layers["y"]["top"]["per_layer"], [3, 3])
-            self.assertEqual(layers["y"]["top"]["offsets_in"], [2.5, 4.5])
-            self.assertEqual(layers["x"]["top"]["offsets_in"], [6.5, 8.5])
-            self.assertEqual(layers["x"]["bottom"]["offsets_in"], [2.5, 4.5])          # mirrored at the bottom
-            self.assertEqual(layers["y"]["bottom"]["offsets_in"], [6.5, 8.5])
+            self.assertEqual(layers["y"]["top"]["offsets_in"], [3.0, 5.0])
+            self.assertEqual(layers["x"]["top"]["offsets_in"], [7.0, 9.0])
+            self.assertEqual(layers["x"]["bottom"]["offsets_in"], [3.0, 5.0])          # mirrored at the bottom
+            self.assertEqual(layers["y"]["bottom"]["offsets_in"], [7.0, 9.0])
             offsets = sp.beam_bar_stacking_offsets_in()
-            self.assertEqual(offsets, {"y": {"top": 3.5, "bottom": 7.5}, "x": {"top": 7.5, "bottom": 3.5}})
-            self.assertAlmostEqual(sp.beam_worst_centroid_offset_in(), 7.5)
+            self.assertEqual(offsets, {"y": {"top": 4.0, "bottom": 8.0}, "x": {"top": 8.0, "bottom": 4.0}})
+            self.assertAlmostEqual(sp.beam_worst_centroid_offset_in(), 8.0)
             # a candidate with fewer bars fits one layer and keeps the nominal offsets
             self.assertEqual(sp.beam_bar_stacking_offsets_in(top_bars=3, bot_bars=3),
-                             {"y": {"top": 2.5, "bottom": 4.5}, "x": {"top": 4.5, "bottom": 2.5}})
+                             {"y": {"top": 3.0, "bottom": 5.0}, "x": {"top": 5.0, "bottom": 3.0}})
         with slab_state(B_BEAM=16.0, BEAM_BAR_MAX_LAYERS=1):
             # under a one-layer limit the bars stay at one elevation and the threading check fails instead
             self.assertEqual(sp.beam_bar_layers()["x"]["top"]["per_layer"], [6])
-            self.assertEqual(sp.beam_bar_stacking_offsets_in(), {"y": {"top": 2.5, "bottom": 4.5}, "x": {"top": 4.5, "bottom": 2.5}})
+            self.assertEqual(sp.beam_bar_stacking_offsets_in(), {"y": {"top": 3.0, "bottom": 5.0}, "x": {"top": 5.0, "bottom": 3.0}})
 
     def test_interleaved_layers_alternate_the_directions(self):
         """The interleaved order (user decision 2026-09-27): upper first layer, lower first layer, upper
@@ -105,12 +105,12 @@ class StackingOffsets(unittest.TestCase):
             sp.beam_bar_layer_slots(1, 1, "sideways")
         with slab_state(B_BEAM=16.0, BEAM_BAR_LAYER_ORDER="interleaved"):
             layers = sp.beam_bar_layers()
-            self.assertEqual(layers["y"]["top"]["offsets_in"], [2.5, 6.5])          # y over x: y first, x, y, x
-            self.assertEqual(layers["x"]["top"]["offsets_in"], [4.5, 8.5])
-            self.assertEqual(layers["x"]["bottom"]["offsets_in"], [2.5, 6.5])       # mirrored: x nearest the bottom
-            self.assertEqual(layers["y"]["bottom"]["offsets_in"], [4.5, 8.5])
-            self.assertEqual(sp.beam_bar_stacking_offsets_in(), {"y": {"top": 4.5, "bottom": 6.5}, "x": {"top": 6.5, "bottom": 4.5}})
-            self.assertAlmostEqual(sp.beam_worst_centroid_offset_in(), 6.5)         # blocked would be 7.5
+            self.assertEqual(layers["y"]["top"]["offsets_in"], [3.0, 7.0])          # y over x: y first, x, y, x
+            self.assertEqual(layers["x"]["top"]["offsets_in"], [5.0, 9.0])
+            self.assertEqual(layers["x"]["bottom"]["offsets_in"], [3.0, 7.0])       # mirrored: x nearest the bottom
+            self.assertEqual(layers["y"]["bottom"]["offsets_in"], [5.0, 9.0])
+            self.assertEqual(sp.beam_bar_stacking_offsets_in(), {"y": {"top": 5.0, "bottom": 7.0}, "x": {"top": 7.0, "bottom": 5.0}})
+            self.assertAlmostEqual(sp.beam_worst_centroid_offset_in(), 7.0)         # blocked would be 8.0
 
 
 class StrengthsWithStackedLayers(unittest.TestCase):
@@ -147,7 +147,7 @@ class StrengthsWithStackedLayers(unittest.TestCase):
 
 
 class ThreadingScreen(unittest.TestCase):
-    def state(self, beam_width, top_bars=6, max_layers=1, layer_order="blocked"):
+    def state(self, beam_width, top_bars=4, max_layers=1, layer_order="blocked"):
         return {"sections": {"b_col_in": 32.0, "h_col_in": 32.0, "fc_col_ksi": 8.0, "b_beam_in": beam_width, "h_beam_in": 24.0, "fc_beam_ksi": 8.0},
                 "materials": {"fy_ksi": 60.0, "es_ksi": 29000.0, "normalweight": True, "aggregate_size_in": 0.75},
                 "beam": {"bar_size": 8, "top_bars": top_bars, "bot_bars": top_bars, "centroid_offset_in": 2.5, "clear_cover_in": 1.5,
@@ -171,30 +171,33 @@ class ThreadingScreen(unittest.TestCase):
         two = design_bar_threading(self.state(16.0, max_layers=2))
         self.assertTrue(two["passes"])
         self.assertEqual(two["max_layers"], 2)
-        # three side bars per h face leave four lanes for the y direction, four top bars three for x
-        self.assertEqual(two["layers"], {"y": [4, 2], "x": [3, 3]})
+        # On the 0.5 in bar grid (2026-10-14) the five bars of an h face at 6.5 in leave two lanes a beam bar
+        # can take for the y direction, the four bars of a b face three for x: four bars split 2 + 2 and 3 + 1.
+        self.assertEqual(two["layers"], {"y": [2, 2], "x": [3, 1]})
         self.assertFalse(any(d["fits_in_one_layer"] for d in two["by_direction"].values()))
         self.assertTrue(all(d["fits_within_layer_limit"] for d in two["by_direction"].values()))
         stacking = two["stacking"]
         self.assertEqual(stacking["layer_offsets_from_face_in"], {"y": [2.5, 4.5], "x": [6.5, 8.5]})
-        self.assertAlmostEqual(stacking["upper_layer_centroid_from_face_in"], (4 * 2.5 + 2 * 4.5) / 6.0)
-        self.assertAlmostEqual(stacking["lower_layer_centroid_from_face_in"], 7.5)
+        self.assertAlmostEqual(stacking["upper_layer_centroid_from_face_in"], (2 * 2.5 + 2 * 4.5) / 4.0)
+        self.assertAlmostEqual(stacking["lower_layer_centroid_from_face_in"], (3 * 6.5 + 1 * 8.5) / 4.0)
         self.assertLess(stacking["lower_direction_lever_arm_ratio"], 0.8)
         three = design_bar_threading(self.state(16.0, top_bars=7, max_layers=2))
-        self.assertFalse(three["passes"], "seven bars at three per layer need a third layer")
+        self.assertFalse(three["passes"], "seven bars at two per layer need more than two layers")
         # interleaved: y first layer, x first layer, y second, x second
         inter = design_bar_threading(self.state(16.0, max_layers=2, layer_order="interleaved"))
         self.assertTrue(inter["passes"])
         self.assertEqual(inter["layer_order"], "interleaved")
         self.assertEqual(inter["stacking"]["layer_offsets_from_face_in"], {"y": [2.5, 6.5], "x": [4.5, 8.5]})
-        self.assertAlmostEqual(inter["stacking"]["lower_layer_centroid_from_face_in"], 6.5)
+        self.assertAlmostEqual(inter["stacking"]["lower_layer_centroid_from_face_in"], (3 * 4.5 + 1 * 8.5) / 4.0)
         self.assertGreater(inter["stacking"]["lower_direction_lever_arm_ratio"], stacking["lower_direction_lever_arm_ratio"])
 
     def test_planner_widens_the_beam_when_bars_do_not_thread(self):
         ladder = Section_Design.beam_ladder(span_in=180.0, story_height_in=168.0)
-        index = Section_Design.nearest_rung_index(ladder, 16.0, 24.0, 8.0)
-        self.assertEqual(ladder[index], (16.0, 24.0, 8.0))
-        self.assertIn((24.0, 24.0, 8.0), ladder, "the ladder now offers the wider variants")
+        # a 32 in depth offers 16, 20 and 24 in webs (no web wider than 0.75 of the depth, 2026-10-14)
+        index = Section_Design.nearest_rung_index(ladder, 16.0, 32.0, 8.0)
+        self.assertEqual(ladder[index], (16.0, 32.0, 8.0))
+        self.assertIn((20.0, 32.0, 8.0), ladder, "the ladder offers the wider variants")
+        self.assertNotIn((24.0, 24.0, 8.0), ladder, "no square beam")
         flags = {"drift_ok": True, "scwb_ok": True, "joint_scwb_failed": False, "capacity_accepted": False,
                  "beam_section_adequate": True, "beam_hoops_selected": True, "beam_bars_thread": False,
                  "column_section_adequate": True, "column_hoops_selected": True, "joints_all_pass": True,
@@ -207,7 +210,7 @@ class ThreadingScreen(unittest.TestCase):
         self.assertIn("beam_bar_threading", Design_Driver.BEAM_STEP_REASONS)
         self.assertEqual(next_col, col)
         self.assertGreater(next_beam, index)
-        self.assertEqual(ladder[next_beam][1], 24.0, "same depth")
+        self.assertEqual(ladder[next_beam][1], 32.0, "same depth")
         self.assertGreater(ladder[next_beam][0], 16.0, "wider")
 
 

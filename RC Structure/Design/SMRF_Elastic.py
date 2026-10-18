@@ -10,7 +10,7 @@ import Structure_Parameters as sp
 from Model import Member_Groups as mg
 from Model import Member_Properties as mp
 from Model.Build_Model import create_nodes, fix_base_nodes, node_tag, create_rigid_diaphragms, assign_nodal_masses
-from Model.IMK_Hinges import reset_hinge_registry
+from Model.IMK_Hinges import gravity_beam_released, reset_hinge_registry
 
 
 def physical_members():
@@ -70,7 +70,7 @@ def build_design_model():
         iy = sp.rect_iy(b, h) if column else sp.beam_flexural_inertia_in4(*beam_line_family(ni, kind))
         ops.element("elasticBeamColumn", tag, ni, nj, b * h, e,
                     sp.concrete_shear_modulus_ksi(e), modifier * sp.approx_rect_j(b, h),
-                    modifier * iy, modifier * sp.rect_iz(b, h), transform)
+                    modifier * iy, modifier * sp.rect_iz(b, h), transform, *beam_end_releases(tag, kind))
     create_rigid_diaphragms()
     assign_nodal_masses()
 
@@ -85,7 +85,18 @@ def _create_resolved_member(tag, ni, nj, kind):
     transform = (sp.COL_TRANSF_TAG if kind == "column" else
                  sp.BEAM_X_TRANSF_TAG if kind == "beam_x" else sp.BEAM_Y_TRANSF_TAG)
     ops.element("elasticBeamColumn", tag, ni, nj, section["area"], section["e"], section["g"],
-                modifier * section["j"], modifier * section["iy"], modifier * section["iz"], transform)
+                modifier * section["j"], modifier * section["iy"], modifier * section["iz"], transform,
+                *beam_end_releases(tag, kind))
+
+
+def beam_end_releases(tag, kind):
+    """The element arguments that pin both ends of a beam in bending about both axes, when the perimeter-SFRS
+    design model releases it (Model.IMK_Hinges.gravity_beam_released: an interior beam under
+    Structure_Parameters.LATERAL_DESIGN_MODEL = "perimeter_sfrs"); nothing otherwise. OpenSees release code 3
+    = both ends; the released end moments read exactly zero in the local force vector."""
+    if kind == "column" or not gravity_beam_released(tag, kind):
+        return ()
+    return ("-releasez", 3, "-releasey", 3)
 
 
 def floor_xy_displacements(k):

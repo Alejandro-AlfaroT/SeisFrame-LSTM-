@@ -39,6 +39,7 @@ HX_MAX_IN = 14.0
 HX_MAX_HIGH_AXIAL_IN = 8.0
 UNSUPPORTED_CLEAR_MAX_IN = 6.0
 COLUMN_DIRECTIONS = ("across_b_face", "across_h_face")
+_OMITTED = object()      # grid_in left out: the module's grid (Structure_Parameters.MODULE_GRID); None itself is "no grid"
 
 
 def legs_by_direction(legs):
@@ -51,15 +52,26 @@ def legs_by_direction(legs):
     return {d: int(legs) for d in COLUMN_DIRECTIONS}
 
 
-def face_bar_positions(width_in, clear_cover_in, hoop_db_in, bar_db_in, count):
-    """Centre positions of ``count`` bars evenly spaced along one face."""
+def face_bar_positions(width_in, clear_cover_in, hoop_db_in, bar_db_in, count, grid_in=_OMITTED):
+    """Centre positions of ``count`` bars along one face, on the bar position grid.
+
+    The corner bars sit in the hoop corners at the first grid step at or beyond
+    clear cover + the layout hoop + half the bar (Structure_Parameters.first_bar_offset_in);
+    the interior bars take grid pitches, equal where the equal pitch is a grid
+    multiple and otherwise symmetric pitches one grid step apart
+    (Structure_Parameters.face_bar_positions_in; design-basis rule 2026-10-14).
+    ``grid_in``: the record's grid (None: even spacing of a record from before the
+    rule); omitted, the module's grid.
+    """
+    import Structure_Parameters as sp
+    grid = sp.MODULE_GRID if grid_in is _OMITTED else grid_in
     if count < 2:
         raise ValueError("A face needs at least two (corner) bars.")
-    first = clear_cover_in + hoop_db_in + 0.5 * bar_db_in
+    first = sp.first_bar_offset_in(clear_cover_in, hoop_db_in, bar_db_in, grid_in=grid)
     last = width_in - first
     if last <= first:
         raise ValueError("Face too narrow for the cover and bars.")
-    return [first + (last - first) * k / (count - 1) for k in range(count)]
+    return sp.face_bar_positions_in(width_in, first, int(count), grid_in=grid)
 
 
 def support_pattern(positions, bar_db_in, hx_max_in=HX_MAX_IN, every_bar=False,
@@ -139,7 +151,7 @@ def _describe(positions, bar_db_in, supported):
 
 
 def column_cage(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, side_bars, high_axial=False,
-                legs=None):
+                legs=None, grid_in=_OMITTED):
     """Arrangement and constructible leg range for a rectangular column cage.
 
     Faces: two faces of width ``b_in`` with ``top_bars`` bars each (the
@@ -152,8 +164,8 @@ def column_cage(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, sid
     """
     hx_max = HX_MAX_HIGH_AXIAL_IN if high_axial else HX_MAX_IN
     faces = {
-        "b_face": face_bar_positions(b_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars),
-        "h_face": face_bar_positions(h_in, clear_cover_in, hoop_db_in, bar_db_in, side_bars + 2),
+        "b_face": face_bar_positions(b_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, grid_in=grid_in),
+        "h_face": face_bar_positions(h_in, clear_cover_in, hoop_db_in, bar_db_in, side_bars + 2, grid_in=grid_in),
     }
     minimal = {name: support_pattern(pos, bar_db_in, hx_max, every_bar=high_axial) for name, pos in faces.items()}
     # Legs across the b faces run along h and count 2 + crossties on the b face; and vice versa.
@@ -188,10 +200,10 @@ def column_cage(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, sid
     return result
 
 
-def beam_cage(b_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, bot_bars, legs=None):
+def beam_cage(b_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, bot_bars, legs=None, grid_in=_OMITTED):
     """Arrangement and constructible leg range for a beam hoop (18.6.4.4 / 25.7.2.3)."""
-    faces = {"top": face_bar_positions(b_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars),
-             "bottom": face_bar_positions(b_in, clear_cover_in, hoop_db_in, bar_db_in, bot_bars)}
+    faces = {"top": face_bar_positions(b_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, grid_in=grid_in),
+             "bottom": face_bar_positions(b_in, clear_cover_in, hoop_db_in, bar_db_in, bot_bars, grid_in=grid_in)}
     minimal = {name: support_pattern(pos, bar_db_in, HX_MAX_IN) for name, pos in faces.items()}
     # A crosstie engages a top bar and a bottom bar; legs across the beam width.
     legs_min = 2 + max(m["crossties"] for m in minimal.values())

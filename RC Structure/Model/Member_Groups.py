@@ -49,6 +49,66 @@ STORIES_PER_BAND = 2
 MEMBER_TYPES = ("column", "beam_x", "beam_y")
 COLUMN_LOCATIONS = ("corner", "x_boundary_edge", "y_boundary_edge", "interior")
 BEAM_LOCATIONS = ("edge", "interior")
+# The two structural systems of the perimeter-frame basis (user decision 2026-10-16): the seismic-force-
+# resisting system is the perimeter (the two x-frames on the y-boundary lines and the two y-frames on the
+# x-boundary lines, ACI 318-19 Chapter 18 special moment frames); every interior beam and column is a
+# member not designated as part of the SFRS (ACI 318-19 18.14), designed for gravity and for compatibility
+# with the design displacement. Membership follows from the integer grid position alone.
+SYSTEM_SFRS = "sfrs"
+SYSTEM_GRAVITY = "gravity"
+SYSTEMS = (SYSTEM_SFRS, SYSTEM_GRAVITY)
+# The second grouping policy (user decision 2026-10-16, "uniform designs per system"): one story band over the
+# whole height, the same eight location groups, and four design ties. Every group of a tie holds the same
+# design (the member type aside), so a frame has one perimeter column, one interior column, one perimeter
+# beam and one interior beam, each the same at every story.
+SYSTEM_POLICY_ID = "system_uniform_v1"
+SYSTEM_DESIGN_TIES = {
+    "sfrs_column": {"member_type": "column", "locations": ("corner", "x_boundary_edge", "y_boundary_edge"), "system": SYSTEM_SFRS},
+    "gravity_column": {"member_type": "column", "locations": ("interior",), "system": SYSTEM_GRAVITY},
+    "sfrs_beam": {"member_type": "beam", "locations": ("edge",), "system": SYSTEM_SFRS},
+    "gravity_beam": {"member_type": "beam", "locations": ("interior",), "system": SYSTEM_GRAVITY},
+}
+SYSTEM_POLICY = {
+    "id": SYSTEM_POLICY_ID,
+    "stories_per_band": "all",
+    "story_bands": "one band from the base to the roof: every member of a group is the same at every story",
+    "column_story": "segment from level k-1 to level k belongs to story k",
+    "beam_floor": "a beam at floor k belongs to the one band",
+    "column_locations": {"corner": "i on an X boundary and j on a Y boundary (a perimeter frame in x and in y)",
+                         "x_boundary_edge": "i = 0 or i = nx, with j strictly interior (a perimeter frame in y)",
+                         "y_boundary_edge": "j = 0 or j = ny, with i strictly interior (a perimeter frame in x)",
+                         "interior": "i and j strictly interior (the gravity system)"},
+    "beam_locations": {"edge": "beam_x on j = 0 or j = ny; beam_y on i = 0 or i = nx (the perimeter frames)",
+                       "interior": "every other line (the gravity system)"},
+    "systems": {SYSTEM_SFRS: "the four perimeter special moment frames (ACI 318-19 18.6-18.8)",
+                SYSTEM_GRAVITY: "every interior beam and column: members not designated as part of the SFRS (ACI 318-19 18.14)"},
+    "design_ties": {name: {"member_type": tie["member_type"], "locations": list(tie["locations"]), "system": tie["system"]}
+                    for name, tie in SYSTEM_DESIGN_TIES.items()},
+    "symmetry": "mirrored positions share a group; earthquake signs and load patterns are still enveloped over its members",
+    "basis": "research design basis (user decision 2026-10-16): a perimeter SMRF with an interior gravity system, one design per system",
+    "selection": "iterative design; a group prescribes no dimension and no reinforcement",
+}
+POLICIES = {}            # filled once both policies are defined (below the band policy)
+
+
+def policy_of(policy_id):
+    if policy_id not in POLICIES:
+        raise ValueError(f"Unknown grouping policy {policy_id!r}; known: {sorted(POLICIES)}.")
+    return POLICIES[policy_id]
+
+
+def stories_per_band_of(policy_id, num_floor):
+    """How many stories one band holds under a policy: pairs under the band policy, the whole height under the system policy."""
+    return num_floor if policy_id == SYSTEM_POLICY_ID else STORIES_PER_BAND
+
+
+def tie_of_location(member_type, location):
+    """The design tie of a group under the system policy, from its member type and location class."""
+    kind = "column" if member_type == "column" else "beam"
+    for name, tie in SYSTEM_DESIGN_TIES.items():
+        if tie["member_type"] == kind and location in tie["locations"]:
+            return name
+    raise ValueError(f"No design tie for {member_type!r} at {location!r}.")
 POLICY = {
     "id": POLICY_ID,
     "stories_per_band": STORIES_PER_BAND,
@@ -64,6 +124,8 @@ POLICY = {
     "basis": "research search policy (user decision 2026-10-02); not a code rule; membership from integer grid indices only",
     "selection": "iterative design; a group prescribes no dimension and no reinforcement",
 }
+
+POLICIES.update({POLICY_ID: POLICY, SYSTEM_POLICY_ID: SYSTEM_POLICY})
 
 # The Structure_Parameters names that hold ONE section or cage for every column or every beam.
 UNIFORM_SECTION_KEYS = (
@@ -135,8 +197,43 @@ def group_id(band, member_type, location):
     return f"{band_label(band)}__{member_type}__{location}"
 
 
-def member_inventory(nx, ny, nz):
-    """Every physical member in tag order with its integer grid position, end nodes and group.
+def column_sfrs_directions(i, j, nx, ny):
+    """The directions in which a column at grid (i, j) is part of a perimeter frame: a column on an x-boundary
+    line (i = 0 or nx) sits in a frame running along y and resists the y direction; one on a y-boundary line
+    resists x; a corner resists both; an interior column none."""
+    directions = set()
+    if i in (0, nx):
+        directions.add("y")
+    if j in (0, ny):
+        directions.add("x")
+    return frozenset(directions)
+
+
+def member_system(member_type, i, j, nx, ny):
+    """Which system a member belongs to under the perimeter-frame basis: SYSTEM_SFRS for every column on the
+    building perimeter (corner or boundary edge) and every perimeter beam, SYSTEM_GRAVITY for the rest."""
+    if member_type == "column":
+        return SYSTEM_SFRS if column_sfrs_directions(i, j, nx, ny) else SYSTEM_GRAVITY
+    return SYSTEM_SFRS if beam_location(member_type, i, j, nx, ny) == "edge" else SYSTEM_GRAVITY
+
+
+def system_inventory(nx, ny):
+    """Member counts per system for one story: how many columns and beams the perimeter and the interior hold."""
+    counts = {SYSTEM_SFRS: {"column": 0, "beam_x": 0, "beam_y": 0}, SYSTEM_GRAVITY: {"column": 0, "beam_x": 0, "beam_y": 0}}
+    for j in range(ny + 1):
+        for i in range(nx + 1):
+            counts[member_system("column", i, j, nx, ny)]["column"] += 1
+    for j in range(ny + 1):
+        for i in range(nx):
+            counts[member_system("beam_x", i, j, nx, ny)]["beam_x"] += 1
+    for j in range(ny):
+        for i in range(nx + 1):
+            counts[member_system("beam_y", i, j, nx, ny)]["beam_y"] += 1
+    return counts
+
+
+def member_inventory(nx, ny, nz, policy_id=POLICY_ID):
+    """Every physical member in tag order with its integer grid position, end nodes, group and system.
 
     ``story_or_floor`` is the story of a column (segment k-1 to k) or the floor of a beam. Node tags
     are Model.Build_Model.node_tag for these counts; element tags are the builders' own order.
@@ -144,8 +241,9 @@ def member_inventory(nx, ny, nz):
     for name, value in (("num_bay_x", nx), ("num_bay_y", ny), ("num_floor", nz)):
         if type(value) is not int or value < 1:
             raise ValueError(f"{name} must be a positive integer, got {value!r}.")
+    policy_of(policy_id)
     per_level = (nx + 1) * (ny + 1)
-    bands = story_bands(nz)
+    bands = story_bands(nz, stories_per_band_of(policy_id, nz))
     band_of = {k: band for band in bands for k in band}
 
     def node(k, i, j):
@@ -156,7 +254,8 @@ def member_inventory(nx, ny, nz):
     def add(k, i, j, member_type, node_i, node_j, location):
         rows.append({"member_tag": len(rows) + 1, "member_type": member_type, "story_or_floor": k, "grid_i": i, "grid_j": j,
                      "node_i": node_i, "node_j": node_j, "group_id": group_id(band_of[k], member_type, location),
-                     "location_class": location, "band": band_label(band_of[k])})
+                     "location_class": location, "band": band_label(band_of[k]),
+                     "system": member_system(member_type, i, j, nx, ny)})
 
     for k in range(1, nz + 1):
         for j in range(ny + 1):
@@ -177,22 +276,26 @@ def _canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def build_assignments(nx, ny, nz):
-    """The complete, deterministic membership map for these counts, with its identity."""
-    members = member_inventory(nx, ny, nz)
+def build_assignments(nx, ny, nz, policy_id=POLICY_ID):
+    """The complete, deterministic membership map for these counts under a policy, with its identity."""
+    policy = policy_of(policy_id)
+    members = member_inventory(nx, ny, nz, policy_id)
     groups = {}
     for row in members:
         entry = groups.setdefault(row["group_id"], {"group_id": row["group_id"], "member_type": row["member_type"],
                                                     "band": row["band"], "stories_or_floors": set(),
-                                                    "location_class": row["location_class"], "member_tags": []})
+                                                    "location_class": row["location_class"], "system": row["system"],
+                                                    "member_tags": []})
         entry["stories_or_floors"].add(row["story_or_floor"])
         entry["member_tags"].append(row["member_tag"])
+        if policy_id == SYSTEM_POLICY_ID:
+            entry["design_tie"] = tie_of_location(row["member_type"], row["location_class"])
     group_rows = []
     for gid in sorted(groups):
         entry = groups[gid]
         group_rows.append({**entry, "stories_or_floors": sorted(entry["stories_or_floors"]), "member_count": len(entry["member_tags"])})
-    payload = {"schema": SCHEMA, "policy": POLICY, "counts": {"num_bay_x": nx, "num_bay_y": ny, "num_floor": nz},
-               "story_bands": story_bands(nz), "groups": group_rows, "members": members}
+    payload = {"schema": SCHEMA, "policy": policy, "counts": {"num_bay_x": nx, "num_bay_y": ny, "num_floor": nz},
+               "story_bands": story_bands(nz, stories_per_band_of(policy_id, nz)), "groups": group_rows, "members": members}
     return {**payload, "sha256": hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()}
 
 
@@ -208,9 +311,10 @@ def assignment_problems(assignments, nx, ny, nz):
         return ["assignments is not an object"]
     if assignments.get("schema") != SCHEMA:
         problems.append(f"schema is {assignments.get('schema')!r}, expected {SCHEMA!r}")
-    if (assignments.get("policy") or {}).get("id") != POLICY_ID:
-        problems.append(f"grouping policy is {(assignments.get('policy') or {}).get('id')!r}, expected {POLICY_ID!r}")
-    expected = build_assignments(nx, ny, nz)
+    declared = (assignments.get("policy") or {}).get("id")
+    if declared not in POLICIES:
+        return problems + [f"grouping policy is {declared!r}, expected one of {sorted(POLICIES)}"]
+    expected = build_assignments(nx, ny, nz, declared)
     if assignments.get("counts") != expected["counts"]:
         problems.append(f"counts are {assignments.get('counts')}, the model has {expected['counts']}")
     rows = assignments.get("members")
@@ -236,7 +340,7 @@ def assignment_problems(assignments, nx, ny, nz):
         problems.append(f"{len(extra)} assignments name members the model does not have, e.g. {extra[:12]}")
     wrong = []
     for tag in sorted(set(wanted) & set(by_tag)):
-        for key in ("member_type", "story_or_floor", "grid_i", "grid_j", "node_i", "node_j", "group_id", "location_class"):
+        for key in ("member_type", "story_or_floor", "grid_i", "grid_j", "node_i", "node_j", "group_id", "location_class", "system"):
             if by_tag[tag].get(key) != wanted[tag][key]:
                 wrong.append(f"member {tag}: {key} is {by_tag[tag].get(key)!r}, its position gives {wanted[tag][key]!r}")
                 break
@@ -395,6 +499,48 @@ class GroupedDesign:
             raise GroupedStateError("Group designs are not valid: " + "; ".join(bad[:6]))
         self.designs = dict(designs)
         self._members = {row["member_tag"]: row for row in assignments["members"]}
+        # Under the system policy the groups of one design tie hold one design (the member type aside).
+        for tie, groups in self.ties().items():
+            keys = {replace(self.designs[gid], member_type="x").section_key() for gid in groups}
+            if len(keys) > 1:
+                raise GroupedStateError(f"The groups of design tie {tie!r} hold different designs: {sorted(groups)}; "
+                                        "the system policy keeps one design per tie.")
+
+    @property
+    def policy_id(self):
+        return self.assignments["policy"]["id"]
+
+    def ties(self):
+        """{tie name: [group ids]} under the system policy; empty under the band policy."""
+        result = {}
+        for gid, group in sorted(self.groups.items()):
+            tie = group.get("design_tie")
+            if tie is not None:
+                result.setdefault(tie, []).append(gid)
+        return result
+
+    def tie_of(self, group_id):
+        return self.groups[group_id].get("design_tie")
+
+    def system_of(self, group_id):
+        return self.groups[group_id].get("system")
+
+    def tie_designs(self):
+        """{tie name: the design of its first group} under the system policy (one design per tie by construction)."""
+        return {tie: self.designs[groups[0]] for tie, groups in self.ties().items()}
+
+    def with_tied_designs(self, updates):
+        """A new grouped design with whole ties changed: {tie name: design}; each group of the tie takes the design
+        with its own member type. The receiver is untouched."""
+        ties = self.ties()
+        unknown = sorted(set(updates) - set(ties))
+        if unknown:
+            raise GroupedStateError(f"Unknown design ties {unknown[:6]}")
+        changes = {}
+        for tie, design in updates.items():
+            for gid in ties[tie]:
+                changes[gid] = replace(design, member_type=self.groups[gid]["member_type"])
+        return self.with_designs(changes)
 
     @property
     def counts(self):
@@ -426,13 +572,13 @@ class GroupedDesign:
         return all(len(v) == 1 for v in keys.values())
 
     def identity(self):
-        payload = {"assignments_sha256": self.assignments["sha256"], "policy": POLICY_ID,
+        payload = {"assignments_sha256": self.assignments["sha256"], "policy": self.policy_id,
                    "designs": {gid: _design_dict(self.designs[gid]) for gid in sorted(self.designs)}}
         return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
     def to_record(self):
         """The grouped block of a design record: policy, explicit assignments, group designs, per-member geometry."""
-        return {"schema": SCHEMA, "policy": POLICY, "assignments": self.assignments,
+        return {"schema": SCHEMA, "policy": self.assignments["policy"], "assignments": self.assignments,
                 "designs": {gid: _design_dict(self.designs[gid]) for gid in sorted(self.designs)},
                 "members": [{"member_tag": m.member_tag, "member_type": m.member_type, "story_or_floor": m.story_or_floor,
                              "grid_i": m.grid_i, "grid_j": m.grid_j, "node_i": m.node_i, "node_j": m.node_j,
@@ -461,7 +607,7 @@ class GroupedDesign:
         return state
 
     @classmethod
-    def uniform(cls, nx=None, ny=None, nz=None, column=None, beam=None):
+    def uniform(cls, nx=None, ny=None, nz=None, column=None, beam=None, policy_id=POLICY_ID):
         """Every group with the same column and beam design: the uniform record expanded into groups.
 
         An equivalence fixture and the seed of a grouped search; it prescribes nothing for that search.
@@ -472,7 +618,7 @@ class GroupedDesign:
         nz = sp.NUM_FLOOR if nz is None else nz
         column = column or uniform_member_design("column")
         beam = beam or uniform_member_design("beam_x")
-        assignments = build_assignments(nx, ny, nz)
+        assignments = build_assignments(nx, ny, nz, policy_id)
         designs = {g["group_id"]: (column if g["member_type"] == "column" else replace(beam, member_type=g["member_type"]))
                    for g in assignments["groups"]}
         return cls(assignments, designs)

@@ -130,23 +130,5 @@ class CoupledAnalysisTests(unittest.TestCase):
             self.analyze(sections={**SECTIONS, "h_beam_in": 5.})
         self.assertEqual(ops.getNodeTags(), [])
 
-    def test_review_runner_preserves_source_and_refuses_existing_output(self):
-        from tools.review_coupled_gravity import run_review
-        with tempfile.TemporaryDirectory() as temp:
-            source, destination = Path(temp)/"design.json", Path(temp)/"review"
-            payload = json.dumps({"slab": SLAB, "geometry": GEOMETRY, "sections": SECTIONS,
-                                  "floor_loads": {"floor_live_load_ksf": .05}})
-            source.write_text(payload, encoding="utf-8")
-            with contextlib.redirect_stdout(io.StringIO()):
-                summary = run_review(source, destination, meshes=[2])
-            self.assertEqual(source.read_text(encoding="utf-8"), payload)
-            self.assertEqual(len(summary["results"]), 2)
-            self.assertTrue(all(r["status"] == "diagnostic_complete" for r in summary["results"]))
-            self.assertFalse(summary["generation_launched"])
-            self.assertTrue((destination/"REVIEW.md").is_file())
-            with self.assertRaises(FileExistsError):
-                run_review(source, destination, meshes=[2])
-
-
 if __name__ == "__main__":
     unittest.main()

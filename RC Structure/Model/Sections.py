@@ -88,12 +88,16 @@ def make_rc_rect_section(
     side_bars=0,
     gj=1.0e8,
     longitudinal_cover=None,
+    bar_positions=True,
 ):
     """Build a rectangular fiber section with independent core and bar offsets.
 
     ``cover`` is the face-to-core boundary, at the outside of hoops for new
     designs. ``longitudinal_cover`` locates longitudinal-bar centroids. Omitting
     it preserves the original shared-offset fiber layout for legacy callers.
+    With a slab selected the bars are placed one fiber each on the bar position
+    grid (design-basis rule 2026-10-14); ``bar_positions=False`` keeps the even
+    straight-layer placement.
     """
     if cover <= 0:
         raise ValueError("cover must be positive.")
@@ -188,34 +192,26 @@ def make_rc_rect_section(
         zc2,
     )
 
-    ops.layer("straight", steel_mat, top_bars, bar_area, ys1, zs2, ys2, zs2)
-    ops.layer("straight", steel_mat, bot_bars, bar_area, ys1, zs1, ys2, zs1)
-
+    # Bars where the cage puts them: the first bars in the hoop corners and the
+    # interior bars on the bar position grid (Structure_Parameters.face_bar_positions_in),
+    # one fiber per bar. Legacy sections (no slab) keep their even single-offset layout.
+    if sp.SLAB_THICKNESS_IN is None or bar_positions is False:
+        ops.layer("straight", steel_mat, top_bars, bar_area, ys1, zs2, ys2, zs2)
+        ops.layer("straight", steel_mat, bot_bars, bar_area, ys1, zs1, ys2, zs1)
+        if side_bars > 0:
+            z_side_bot = zs1 + (zs2 - zs1) / (side_bars + 1)
+            z_side_top = zs2 - (zs2 - zs1) / (side_bars + 1)
+            ops.layer("straight", steel_mat, side_bars, bar_area, ys1, z_side_bot, ys1, z_side_top)
+            ops.layer("straight", steel_mat, side_bars, bar_area, ys2, z_side_bot, ys2, z_side_top)
+        return
+    for y in sp.face_bar_positions_in(b, longitudinal_cover, int(top_bars)):
+        ops.fiber(y1 + y, zs2, bar_area, steel_mat)
+    for y in sp.face_bar_positions_in(b, longitudinal_cover, int(bot_bars)):
+        ops.fiber(y1 + y, zs1, bar_area, steel_mat)
     if side_bars > 0:
-        z_side_bot = zs1 + (zs2 - zs1) / (side_bars + 1)
-        z_side_top = zs2 - (zs2 - zs1) / (side_bars + 1)
-
-        ops.layer(
-            "straight",
-            steel_mat,
-            side_bars,
-            bar_area,
-            ys1,
-            z_side_bot,
-            ys1,
-            z_side_top,
-        )
-
-        ops.layer(
-            "straight",
-            steel_mat,
-            side_bars,
-            bar_area,
-            ys2,
-            z_side_bot,
-            ys2,
-            z_side_top,
-        )
+        for z in sp.face_bar_positions_in(h, longitudinal_cover, int(side_bars) + 2)[1:-1]:
+            ops.fiber(ys1, z1 + z, bar_area, steel_mat)
+            ops.fiber(ys2, z1 + z, bar_area, steel_mat)
 
 
 def define_column_section():

@@ -24,6 +24,11 @@ from Model import Member_Groups as mg                                           
 TOP_INTERIOR, BASE_INTERIOR = "s03_04__column__interior", "s01_02__column__interior"
 
 
+def at_top_grades(state):
+    """The state with both common grades at the top of their ladders: the size is then the only lever left."""
+    return gs.regraded(gs.regraded(state, "column", gs.GRADE_LADDERS["column"][-1]), "beam", gs.GRADE_LADDERS["beam"][-1])
+
+
 def quantities(state, steel):
     concrete = sum(d.b_in * d.h_in * len(state.groups[gid]["member_tags"]) for gid, d in state.designs.items())
     forms = state.distinct_form_sizes()
@@ -97,8 +102,10 @@ class LaddersAndRules(Fixture):
         beam = replace(gf.BEAM, member_type="beam_y")
         deeper, wider = gs._beam_step(beam, "deeper"), gs._beam_step(beam, "wider")
         self.assertGreater(deeper[1], 28.0)
-        self.assertEqual((wider[1], wider[0] > 18.0), (28.0, True))
-        for rung in (deeper, wider):
+        self.assertIsNone(wider)                                                              # 0.75 h caps the width at 21 in
+        wide = gs._beam_step(replace(beam, b_in=16.0, h_in=32.0), "wider")
+        self.assertEqual((wide[1], wide[0] > 16.0), (32.0, True))
+        for rung in (deeper, wide):
             self.assertIn(rung, gs.beam_rungs("beam_y"))
 
     def test_a_column_may_not_be_smaller_than_the_one_above_nor_step_in_three_inches_per_face(self):
@@ -184,34 +191,57 @@ class GrowthProposals(Fixture):
                     "joint_17": {"core_group": BASE_INTERIOR, "column_above_group": BASE_INTERIOR, "joints": ["joint_17", "joint_20"]},
                     "joint_29": {"core_group": BASE_INTERIOR, "column_above_group": TOP_INTERIOR, "joints": ["joint_29"]}}}}}
 
+    def test_strength_is_the_first_lever(self):
+        # From the fixture grades (column 5 ksi, beam 4 ksi, below their ladders) every strength failure steps the grade.
+        failed = self.evaluation(capacity_design_failed_checks=[{"id": "joint.shear_screen", "location": "joint_shear/joint_17/x"}])
+        self.assertEqual(gs.propose_growth(failed, self.seed), {"column_grade": (6.0, mock.ANY)})
+        drift = self.evaluation(drift_failed_checks=["demands.story_drift@story:3/Qy/y"])
+        self.assertEqual(gs.propose_growth(drift, self.seed), {"beam_grade": (5.0, mock.ANY)})
+        stepped = gs.apply_moves(self.seed, gs.propose_growth(failed, self.seed))
+        self.assertEqual({d.fc_ksi for d in stepped.designs.values() if d.is_column}, {6.0})
+        self.assertEqual(gs.next_grade(at_top_grades(self.seed), "column"), None)
+        # room for bars is not a strength matter: the size moves at once
+        threading = self.evaluation(capacity_design_failed_checks=[{"id": "beam.bars_thread_column", "location": "joint_17/x"}])
+        self.assertEqual(gs.propose_growth(threading, self.seed), {BASE_INTERIOR: ((28.0, 28.0), mock.ANY)})
+
     def test_joint_shear_grows_the_column_that_forms_the_joint_core(self):
         moves = gs.propose_growth(self.evaluation(capacity_design_failed_checks=[
-            {"id": "joint.shear_screen", "location": "joint_shear/joint_17/x"}]), self.seed)
+            {"id": "joint.shear_screen", "location": "joint_shear/joint_17/x"}]), at_top_grades(self.seed))
         self.assertEqual({gid: size for gid, (size, _why) in moves.items()}, {BASE_INTERIOR: (28.0, 28.0)})
 
     def test_a_strong_column_failure_grows_both_columns_of_the_joint(self):
-        moves = gs.propose_growth(self.evaluation(joint_checks_failed=[{"id": "scwb", "location": "joint_29/x/positive"}]), self.seed)
+        moves = gs.propose_growth(self.evaluation(joint_checks_failed=[{"id": "scwb", "location": "joint_29/x/positive"}]),
+                                  at_top_grades(self.seed))
         self.assertEqual(set(moves), {BASE_INTERIOR, TOP_INTERIOR})
 
     def test_drift_grows_the_beams_of_the_story_band_in_that_direction(self):
-        moves = gs.propose_growth(self.evaluation(drift_failed_checks=["demands.story_drift@story:3/Qy/y"]), self.seed)
+        moves = gs.propose_growth(self.evaluation(drift_failed_checks=["demands.story_drift@story:3/Qy/y"]), at_top_grades(self.seed))
         self.assertEqual(set(moves), {"s03_04__beam_y__edge", "s03_04__beam_y__interior"})
         self.assertTrue(all(size[1] > 28.0 for size, _why in moves.values()))                    # deeper, not wider
 
     def test_beam_capacity_shear_prefers_a_wider_beam_and_exhausted_groups_grow(self):
         moves = gs.propose_growth(self.evaluation(
             capacity_design_failed_checks=[{"id": "beam.capacity_shear_section", "location": "s01_02__beam_x__edge"}],
-            exhausted_groups=[TOP_INTERIOR]), self.seed)
-        self.assertEqual(moves["s01_02__beam_x__edge"][0][1], 28.0)
-        self.assertGreater(moves["s01_02__beam_x__edge"][0][0], 18.0)
+            exhausted_groups=[TOP_INTERIOR]), at_top_grades(self.seed))
+        # no wider rung at 28 in deep (0.75 h), so the wider preference falls through to the next depth
+        self.assertEqual(moves["s01_02__beam_x__edge"][0], gs._beam_step(gf.BEAM, "wider") or gs._beam_step(gf.BEAM, "deeper"))
+        self.assertEqual(moves["s01_02__beam_x__edge"][0][1], 30.0)
         self.assertEqual(moves[TOP_INTERIOR][0], (28.0, 28.0))
 
     def test_an_axial_domain_rejection_grows_the_group_that_owns_the_section(self):
         infeasible = {"status": "infeasible", "failed_stage": "capacity_design", "failure_evidence": {"group_id": TOP_INTERIOR}}
-        self.assertEqual(set(gs.propose_growth(infeasible, self.seed)), {TOP_INTERIOR})
+        self.assertEqual(set(gs.propose_growth(infeasible, at_top_grades(self.seed))), {TOP_INTERIOR})
+        self.assertEqual(set(gs.propose_growth(infeasible, self.seed)), {"column_grade"})
         no_thickness = {"status": "infeasible", "failed_stage": "slab_thickness", "failure_evidence": {}}
         self.assertEqual(set(gs.propose_growth(no_thickness, self.seed)),
                          {gid for gid, g in self.seed.groups.items() if g["member_type"] != "column"})
+
+    def test_bar_rows_that_do_not_fit_step_the_beams_named(self):
+        infeasible = {"status": "infeasible", "failed_stage": "bar_rows",
+                      "failure_evidence": {"group_ids": ["s01_02__beam_x__interior", "no_such_group"]}}
+        moves = gs.propose_growth(infeasible, self.seed)
+        self.assertEqual(set(moves), {"s01_02__beam_x__interior"})                               # the size at once: a grade makes no room
+        self.assertGreater(moves["s01_02__beam_x__interior"][0][1], 28.0)
 
     def test_a_failure_that_names_no_group_proposes_nothing(self):
         self.assertEqual(gs.propose_growth({"status": "infeasible", "failed_stage": "slab_reinforcement", "failure_evidence": {}},
@@ -286,12 +316,21 @@ class SearchRuns(Fixture):
             return {"exhausted_groups": [BASE_INTERIOR] if failing else [], "capacity_design_failed_checks": [],
                     "joint_checks_failed": [], "drift_failed_checks": []}
         stub = Stub(lambda state: state.designs[BASE_INTERIOR].b_in >= 30.0, constraints=constraints)
-        result = stub.run(self.seed, gs.SearchPolicy(max_reduction_trials=0))
-        self.assertEqual(result["counts"]["feasibility_candidates"], 3)                          # 26, 28, 30
+        result = stub.run(at_top_grades(self.seed), gs.SearchPolicy(max_reduction_trials=0))
+        self.assertEqual(result["counts"]["feasibility_candidates"], 3)                          # 26, 28, 30 at the top grade
         self.assertEqual(result["final"]["state"].designs[BASE_INTERIOR].b_in, 30.0)
         self.assertEqual(result["final"]["state"].designs[TOP_INTERIOR].b_in, 26.0)              # only the named group grew
         growth = [e for e in result["log"] if e["proposal"]["kind"] == "growth"]
-        self.assertEqual([m["group_id"] for e in growth for m in e["proposal"]["moves"]], [BASE_INTERIOR, BASE_INTERIOR])
+        self.assertEqual([m["target"] for e in growth for m in e["proposal"]["moves"]], [BASE_INTERIOR, BASE_INTERIOR])
+        self.assertTrue(all(m["kind"] == "size" for e in growth for m in e["proposal"]["moves"]))
+        # From the fixture grades the strength is tried first: every column grade of the ladder, then the two sizes.
+        stub = Stub(lambda state: state.designs[BASE_INTERIOR].b_in >= 30.0, constraints=constraints)
+        result = stub.run(self.seed, gs.SearchPolicy(max_reduction_trials=0))
+        growth = [e for e in result["log"] if e["proposal"]["kind"] == "growth"]
+        kinds = [m["kind"] for e in growth for m in e["proposal"]["moves"]]
+        self.assertEqual(kinds, ["grade"] * len(gs.GRADE_LADDERS["column"]) + ["size", "size"])
+        self.assertEqual(result["final"]["state"].designs[BASE_INTERIOR].fc_ksi, gs.GRADE_LADDERS["column"][-1])
+        self.assertEqual(result["counts"]["feasibility_candidates"], 1 + len(gs.GRADE_LADDERS["column"]) + 2)
 
     def test_feasibility_budget_exhaustion_is_not_reported_as_infeasibility(self):
         constraints = lambda state: {"exhausted_groups": [BASE_INTERIOR], "capacity_design_failed_checks": [],   # noqa: E731

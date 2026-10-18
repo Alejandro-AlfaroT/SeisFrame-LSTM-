@@ -9,7 +9,7 @@ RC = Path(__file__).resolve().parents[1]
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location('v3_' + name, RC / 'pilots/v2WeightedCalibrationV3' / (name + '.py'))
+    spec = importlib.util.spec_from_file_location('v3_' + name, RC / 'tools/multi_device_calibration' / (name + '.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

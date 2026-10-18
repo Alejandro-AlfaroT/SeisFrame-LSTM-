@@ -175,9 +175,23 @@ class DetailingTests(unittest.TestCase):
         self.assertEqual(find(checks, "beam.clear_span", "y")["status"], "pass")
 
     def test_minimum_beam_width_is_min_not_max(self):
-        validate_rung((7, 20, 5), "beam")
+        # ACI 318-19 18.6.2.1(b) asks for the lesser of 0.3h and 10 in, so a 7 in web on a 20 in beam satisfies
+        # the Code check; the design basis of 2026-10-14 (web at least half the depth, beam deeper than wide)
+        # is a separate check and a separate rung rule.
+        data = example()
+        data["beam"].update(b_in=7, h_in=20)
+        checks = evaluate_detailing(data)
+        self.assertEqual(find(checks, "beam.minimum_width")["status"], "pass")
+        self.assertEqual(find(checks, "beam.width_to_depth_design_basis")["status"], "fail")
+        self.assertEqual(find(checks, "beam.depth_to_width_design_basis")["status"], "pass")
+        with self.assertRaises(ValueError):
+            validate_rung((7, 20, 5), "beam")
         with self.assertRaises(ValueError):
             validate_rung((5, 20, 5), "beam")
+        with self.assertRaises(ValueError):
+            validate_rung((18, 20, 5), "beam")                 # 0.9: not deep enough for the design basis
+        validate_rung((10, 20, 5), "beam")
+        validate_rung((14, 20, 5), "beam")
 
     def test_empty_ladder_does_not_fabricate_a_legal_rung(self):
         with self.assertRaises(ValueError):
@@ -192,7 +206,8 @@ class DetailingTests(unittest.TestCase):
     def test_effective_depth_uses_clear_cover_plus_hoop_and_half_bar(self):
         checks = evaluate_detailing(example())
         result = find(checks, "beam.clear_span", "x")
-        self.assertEqual(result["capacity"], 4 * (24 - 1.5 - 0.5 - 0.5))
+        # a 1.0 in bar with a 0.5 in hoop: 1.5 + the #5 layout hoop + 0.5 = 2.625 in, taken up to the 3.0 in grid step
+        self.assertEqual(result["capacity"], 4 * (24 - 3.0))
 
     def test_bar_fit_uses_actual_diameter_and_aggregate(self):
         data = example()

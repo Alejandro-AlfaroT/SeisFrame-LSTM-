@@ -43,6 +43,36 @@ def _dim(ax, p0, p1, text, offset, rotation=0, ha="center", va="top"):
     ax.text(mid[0], mid[1], text, ha=ha, va=va, rotation=rotation, fontsize=8.5)
 
 
+def _cover_as_built(record, prefix):
+    """The clear cover outside the hoops as built (the first bars in the hoop corners): the record's value, else
+    derived from its bar offset (older records: the specified cover)."""
+    r = record["reinforcement"]
+    provided = r.get(f"{prefix}_clear_cover_provided_in")
+    if provided is not None:
+        return float(provided)
+    return float(r[f"{prefix}_longitudinal_centroid_offset_in"]) - float(r[f"{prefix}_stirrup_diameter_in"]) - float(r[f"{prefix}_bar_diameter_in"]) / 2.0
+
+
+def _grid_positions(record, width, first, count):
+    """Bar centres along a face on the record's bar grid (Structure_Parameters.face_bar_positions_in; even
+    spacing for a record from before the rule or where the grid cannot place them)."""
+    import Structure_Parameters as sp
+    grid = (record.get("reinforcement") or {}).get("bar_position_grid_in")
+    try:
+        return sp.face_bar_positions_in(width, first, int(count), grid_in=grid)
+    except ValueError:
+        return [first + k * (width - 2 * first) / (count - 1) for k in range(count)] if count > 1 else [width / 2.0]
+
+
+def _beam_hoop_covers(record, axis="x"):
+    """(top, bottom, side) clear covers of the hoop of one direction's beams: per-face where the record carries
+    them (the hoop follows the first layer of that direction), else the single cover as built."""
+    r = record["reinforcement"]
+    side = _cover_as_built(record, "beam")
+    covers = (r.get("beam_hoop_cover_in") or {}).get(axis) or {}
+    return float(covers.get("top", side)), float(covers.get("bottom", side)), side
+
+
 def _column_bars(record):
     """Bar centroids of the column section as (x along b, y along h), from the capacity-design cage when saved."""
     s, r = record["sections"], record["reinforcement"]
@@ -53,8 +83,8 @@ def _column_bars(record):
     ys = list(faces.get("h_face") or [])
     if not xs or not ys:
         n_face, n_side = r["col_top_bars"], r["col_side_bars"]
-        xs = [c + k * (bc - 2 * c) / (n_face - 1) for k in range(n_face)] if n_face > 1 else [bc / 2.0]
-        ys = [c] + [c + k * (hc - 2 * c) / (n_side + 1) for k in range(1, n_side + 1)] + [hc - c]
+        xs = _grid_positions(record, bc, c, n_face)
+        ys = _grid_positions(record, hc, c, n_side + 2)
     bars = [(x, ys[0]) for x in xs] + [(x, ys[-1]) for x in xs] + [(xs[0], y) for y in ys[1:-1]] + [(xs[-1], y) for y in ys[1:-1]]
     support = cage.get("minimal_support") or {}
     ties_x = [p for p, ok in zip(xs[1:-1], (support.get("b_face") or {}).get("supported", [True] * len(xs))[1:-1]) if ok]
@@ -130,7 +160,8 @@ def _figure_reinforcement(record, out, label, notes):
     # ---- column section
     ax = axes[0]
     bc, hc = s["b_col_in"], s["h_col_in"]
-    cover, db = r["col_clear_cover_in"], r["col_bar_diameter_in"]
+    cover, db = _cover_as_built(record, "col"), r["col_bar_diameter_in"]
+    specified = r["col_clear_cover_in"]
     bars, xs, ys, ties_x, ties_y, from_cage = _column_bars(record)
     ax.add_patch(Rectangle((0, 0), bc, hc, facecolor="0.92", edgecolor="black", lw=1.5))
     _hoop(ax, cover, cover, bc - 2 * cover, hc - 2 * cover, FancyBboxPatch)
@@ -154,31 +185,34 @@ def _figure_reinforcement(record, out, label, notes):
                  f"{(record.get('materials') or {}).get('reinforcement_specification', 'Grade 60')}\n"
                  f"#{r['col_stirrup_bar_size']} hoops at {r['col_stirrup_spacing_in']:g} in, legs {legs.get('across_b_face', r['col_stirrup_legs'])} across the b faces "
                  f"and {legs.get('across_h_face', r['col_stirrup_legs'])} across the h faces\n"
-                 f"clear cover {cover:g} in outside the hoops; bar centroid {r['col_longitudinal_centroid_offset_in']:g} in from the face"
-                 + ("; bar positions from the saved cage" if from_cage else "; bars evenly spaced (no cage saved)")
+                 f"cover to the hoops {cover:g} in as built ({specified:g} in specified); bars in the hoop corners, "
+                 f"centroid {r['col_longitudinal_centroid_offset_in']:g} in from the face"
+                 + ("; bar positions from the saved cage" if from_cage else "; bars on the 0.5 in grid (no cage saved)")
                  + "\ndashed = crossties on the supported interior bars" + bond_text)
 
     # ---- beam section with slab (the x direction's layers; the y direction mirrors them at the joint)
     ax = axes[1]
     bw, hb = s["b_beam_in"], s["h_beam_in"]
     ts = (record.get("slab") or {}).get("thickness_in") or 0.0
-    bcov, sd, bdb = r["beam_clear_cover_in"], r["beam_stirrup_diameter_in"], r["beam_bar_diameter_in"]
+    sd, bdb = r["beam_stirrup_diameter_in"], r["beam_bar_diameter_in"]
+    top_cov, bot_cov, bcov = _beam_hoop_covers(record, "x")
+    specified = r["beam_clear_cover_in"]
     flange = max(16.0, 0.8 * bw)
     if ts:
         ax.add_patch(Rectangle((-flange, hb - ts), bw + 2 * flange, ts, facecolor="0.95", edgecolor="black", lw=1.2))
     ax.add_patch(Rectangle((0, 0), bw, hb, facecolor="0.92", edgecolor="black", lw=1.5))
-    _hoop(ax, bcov, bcov, bw - 2 * bcov, hb - 2 * bcov, FancyBboxPatch)
+    # the hoop of the drawn direction follows its first layers: top cover and bottom cover may differ
+    _hoop(ax, bcov, bot_cov, bw - 2 * bcov, hb - top_cov - bot_cov, FancyBboxPatch)
     beam_cage = (cd.get("beams") or {}).get("cage") or {}
     top_support = (beam_cage.get("minimal_support") or {}).get("top") or {}
     for pos, ok in zip(top_support.get("positions_in") or [], top_support.get("supported") or []):
         if ok and bcov + sd + bdb < pos < bw - bcov - sd - bdb:
-            ax.plot([pos, pos], [bcov, hb - bcov], color="black", lw=1.3, ls="--")
-    inner = bw - 2 * (bcov + sd)
+            ax.plot([pos, pos], [bot_cov, hb - top_cov], color="black", lw=1.3, ls="--")
+    first = bcov + sd + bdb / 2
     layers = _beam_layers(record, "x")
     for face, offset, n in layers:
         y = hb - offset if face == "top" else offset
-        positions = [bcov + sd + bdb / 2 + k * (inner - bdb) / (n - 1) for k in range(n)] if n > 1 else [bw / 2.0]
-        for x in positions:
+        for x in _grid_positions(record, bw, first, n):
             _bar(ax, x, y, bdb, Circle)
     layout = (record.get("slab_reinforcement") or {}).get("layout") or {}
     mats = layout.get("layers") or {}
@@ -199,7 +233,9 @@ def _figure_reinforcement(record, out, label, notes):
     layer_text = ", ".join(f"{face} {n} at {offset:g} in" for face, offset, n in layers)
     d_eff = (det.get("beam") or {}).get("effective_depth_in")
     _caption(ax, f"{r['beam_top_bars']} #{r['beam_bar_size']} top and {r['beam_bot_bars']} bottom, f'c {s['fc_beam_ksi']:g} ksi; layers: {layer_text}\n"
-                 f"#{r['beam_stirrup_bar_size']} stirrups, {r['beam_stirrup_legs']} legs, at {r['beam_stirrup_spacing_in']:g} in; clear cover {bcov:g} in"
+                 f"#{r['beam_stirrup_bar_size']} stirrups, {r['beam_stirrup_legs']} legs, at {r['beam_stirrup_spacing_in']:g} in; "
+                 f"cover to the hoop as built: top {top_cov:g}, bottom {bot_cov:g}, sides {bcov:g} in ({specified:g} in specified); "
+                 f"bars in the hoop corners on the 0.5 in grid"
                  + (f"; d = {d_eff:g} in" if isinstance(d_eff, (int, float)) else "")
                  + (f"\nslab {ts:g} in, #{sl.get('bar_size')} at {sl.get('spacing_in'):g} in each way, top and bottom mats, cover {sl.get('clear_cover_outer_mat_in', 0.75):g} in"
                     if ts and sl.get("spacing_in") else "\nslab mats not drawn (no layout saved)")
@@ -207,6 +243,7 @@ def _figure_reinforcement(record, out, label, notes):
 
     # ---- elevation at a joint: hoop zones
     ax = axes[2]
+    cover = _cover_as_built(record, "col")
     beam_det, col_det = det.get("beam") or {}, det.get("column") or {}
     zone_b = beam_det.get("end_zone_length_in") or 2.0 * hb
     zone_c = col_det.get("end_zone_length_in") or max(hc, 18.0)
@@ -276,8 +313,9 @@ def _figure_joint(record, out, label, notes):
     anch = ((cd.get("anchorage") or {}).get("directions") or {}).get("x") or {}
     splices = cd.get("splices") or {}
     bc, hc, bw, hb = s["b_col_in"], s["h_col_in"], s["b_beam_in"], s["h_beam_in"]
-    cover, hoop_d, db = r["col_clear_cover_in"], r["col_stirrup_diameter_in"], r["col_bar_diameter_in"]
+    cover, hoop_d, db = _cover_as_built(record, "col"), r["col_stirrup_diameter_in"], r["col_bar_diameter_in"]
     bdb = r["beam_bar_diameter_in"]
+    beam_side_cover = _cover_as_built(record, "beam")
     fig = plt.figure(figsize=(17, 12))
     gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.95], width_ratios=[1.0, 1.25])
     axp, axe, axt = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, :])
@@ -301,10 +339,8 @@ def _figure_joint(record, out, label, notes):
     threading = ((cd.get("bar_threading") or {}).get("by_direction") or {}).get("x") or {}
     positions = threading.get("threaded_positions_in") or []
     if not positions:
-        inner = bw - 2 * (r["beam_clear_cover_in"] + r["beam_stirrup_diameter_in"])
-        n = r["beam_top_bars"]
-        positions = [(bc - bw) / 2 + r["beam_clear_cover_in"] + r["beam_stirrup_diameter_in"] + bdb / 2 + k * (inner - bdb) / max(n - 1, 1)
-                     for k in range(n)]
+        first = beam_side_cover + r["beam_stirrup_diameter_in"] + bdb / 2
+        positions = [(bc - bw) / 2 + p for p in _grid_positions(record, bw, first, r["beam_top_bars"])]
     for y in positions:
         ax.plot([-ext, hc + ext], [y, y], color="black", lw=0.9, alpha=0.75)
     x_ext = (bc - bw) / 2

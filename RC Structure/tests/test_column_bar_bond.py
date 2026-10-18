@@ -37,7 +37,8 @@ class Equation(unittest.TestCase):
     def test_reproduces_the_independent_screen_of_the_reference_record(self):
         """Reference record of 2 October 2026: No. 10 bars, No. 5 hoops, 1.5 in cover, f'c 5 ksi, Grade 60:
         cb 2.760 in, (cb + Ktr)/db 2.17323, ld 37.18997 in, 1.25 ld 46.48747 in against lu/2 = 66 in."""
-        cb = aci.column_bar_cb_in(40.0, 40.0, 1.5, 5, 10, 4, 2)
+        # the reference record predates the 2026-10-14 bar grid: its cage is evaluated on its own (even) layout
+        cb = aci.column_bar_cb_in(40.0, 40.0, 1.5, 5, 10, 4, 2, grid_in=None)
         self.assertAlmostEqual(cb["cb_in"], 2.760, places=9)
         self.assertEqual(cb["governed_by"], "edge distance")
         bond = aci.column_bar_bond_18_7_4_3(10, 5.0, 60.0, cb["cb_in"], 132.0)
@@ -53,9 +54,15 @@ class Equation(unittest.TestCase):
         self.assertAlmostEqual(1.25 * cd.straight_development_length(10, 5.0, 60.0), 67.35192, places=4)
 
     def test_half_the_bar_spacing_governs_a_crowded_face(self):
-        cb = aci.column_bar_cb_in(20.0, 20.0, 1.5, 4, 8, 6, 4)             # pitch (20 - 2 x 2.5) / 5 = 3.0 in
+        # on the 0.5 in bar grid (2026-10-14) #8 bars sit 3.0 in from the face; six across 20 in take
+        # pitches 2.5, 3.0, 3.0, 3.0, 2.5 in, so half the least pitch governs cb
+        cb = aci.column_bar_cb_in(20.0, 20.0, 1.5, 4, 8, 6, 4)
         self.assertEqual(cb["governed_by"], "half the bar spacing")
-        self.assertAlmostEqual(cb["cb_in"], 1.5, places=12)
+        self.assertEqual(cb["edge_distance_in"], 3.0)
+        self.assertAlmostEqual(cb["min_center_spacing_in"], 2.5, places=12)
+        self.assertAlmostEqual(cb["cb_in"], 1.25, places=12)
+        even = aci.column_bar_cb_in(20.0, 20.0, 1.5, 4, 8, 6, 4, grid_in=None)   # even spacing: (20 - 5) / 5 = 3.0 in
+        self.assertAlmostEqual(even["cb_in"], 1.5, places=12)
 
     def test_caps_minimum_and_factors(self):
         capped = aci.column_bar_bond_18_7_4_3(8, 5.0, 60.0, 4.0, 120.0)             # 4.0 / 1.0 = 4 > 2.5
@@ -108,7 +115,9 @@ class CapacityCheckAndPlanner(unittest.TestCase):
         state = {"geometry": {"story_h_in": story_h, "num_floor": 6},
                  "sections": {"b_col_in": 42.0, "h_col_in": 42.0, "fc_col_ksi": 5.0, "b_beam_in": 24.0, "h_beam_in": beam_h, "fc_beam_ksi": 4.0},
                  "materials": {"fy_ksi": 60.0, "es_ksi": 29000.0, "normalweight": True},
-                 "column": {"bar_size": 10, "top_bars": 4, "bot_bars": 4, "side_bars": 2, "clear_cover_in": 1.5, "stirrup_bar_size": 5}}
+                 # the reference record of 2 October 2026 predates the bar grid: its own (even) layout
+                 "column": {"bar_size": 10, "top_bars": 4, "bot_bars": 4, "side_bars": 2, "clear_cover_in": 1.5, "stirrup_bar_size": 5,
+                            "bar_position_grid_in": None}}
         if clear_heights is not None:
             state["clear_heights_in"] = clear_heights
         return state

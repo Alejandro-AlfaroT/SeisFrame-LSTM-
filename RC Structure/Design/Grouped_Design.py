@@ -43,7 +43,9 @@ from Design import Design_Driver as driver
 from Design import Group_Capacity as capacity_design
 from Design import Group_Checks as checks
 from Design import Group_Selection as selection
+from Design import Perimeter_Systems as systems
 from Design import SMRF_Floor_Sections as floor_sections
+from Design.SMRF_Beam_Slab_Strength import BeamBarRowsError, validate_bar_rows
 from Design.SMRF_Common import SectionAxialDomainError, make_check, not_evaluated, summarize_checks
 from Model import Member_Bar_Layers as bar_layers
 from Model import Member_Groups as mg
@@ -241,29 +243,36 @@ def story_strength_distribution(cfg):
     M1 stays open and nothing here asserts it.
     """
     from Design.SMRF_Demands import one_sided_strength_fraction
+    # Under the system policy only the perimeter frames are the seismic force-resisting system: the interior lines
+    # are gravity frames and carry no story strength here (ASCE 7-22 Table 12.3-1 reads the SFRS; decision D7).
+    perimeter_only = systems.two_system()
     stories, worst = [], 0.0
     for floor in range(1, sp.NUM_FLOOR + 1):
         entry = {"story": floor, "by_direction": {}}
         for direction, kind, lines, spans, spacing in (("x", "beam_x", sp.NUM_BAY_Y + 1, sp.NUM_BAY_X, sp.BAY_Y),
                                                        ("y", "beam_y", sp.NUM_BAY_X + 1, sp.NUM_BAY_Y, sp.BAY_X)):
-            positions, strengths, groups = [], [], []
+            positions, strengths, groups, line_systems = [], [], [], []
             for line in range(lines):
                 total, group = 0.0, None
+                counted = (not perimeter_only) or line in (0, lines - 1)
                 for span in range(spans):
                     beam = mg.beam_at(kind, floor, span, line) if kind == "beam_x" else mg.beam_at(kind, floor, line, span)
                     values = mp.beam_strengths(beam)
                     total += (values["hogging"] + values["sagging"]) / sp.STORY_H
                     group = beam.group_id
                 positions.append(line * spacing)
-                strengths.append(total)
+                strengths.append(total if counted else 0.0)
                 groups.append(group)
+                line_systems.append(mg.SYSTEM_SFRS if counted else mg.SYSTEM_GRAVITY)
             fraction, detail = one_sided_strength_fraction(positions, strengths, 0.5 * positions[-1])
             entry["by_direction"][direction] = {"line_positions_in": positions, "line_story_strength_kip": strengths,
-                                                "line_groups": groups, "story_strength_kip": sum(strengths),
+                                                "line_groups": groups, "line_systems": line_systems, "story_strength_kip": sum(strengths),
                                                 "one_side_fraction": fraction, **detail}
             worst = max(worst, fraction)
         stories.append(entry)
     return {"one_side_fraction": worst, "stories": stories,
+            "lines_counted": ("perimeter frames only (the interior lines are gravity frames, ACI 318-19 18.14)" if perimeter_only
+                              else "every frame line"),
             "applicability": driver._strength_model_applicability(cfg),
             "uniform_over_height": {"claim": False,
                                     "basis": "grouped design: sections and cages vary by story band and plan location, so "
@@ -664,10 +673,16 @@ def joint_check_inputs(capacity, state):
                 "scope": "joint depth only; terminating-bar development is joint.terminating_bar_hook"}
                for type_id, kind in capacity["joint_types"].items() for axis, item in kind["anchorage"].items()
                if item["through_bars_present"]]
-    return {"joints": capacity["scwb"]["joints"], **capacity["joint_evidence"], "through_bar_anchorage": through}
+    # The joint directions where 18.7.3.2 is not required (Group_Capacity.scwb_evidence: the column is not part of the
+    # SFRS in that direction) keep their evidence and their flag; SMRF_Joints.evaluate_joints skips them.
+    not_required = [f"{joint['id']}/{axis}" for joint in capacity["scwb"]["joints"]
+                    for axis, states in joint["directions"].items() if not states.get("required", True)]
+    return {"joints": capacity["scwb"]["joints"], "scwb_not_required": not_required, **capacity["joint_evidence"],
+            "through_bar_anchorage": through}
 
 
-def reinforcement_pass(state, actions, expected_ids, cfg, transfers, max_passes=6, scwb_margins=(1.0, 1.03, 1.06)):
+def reinforcement_pass(state, actions, expected_ids, cfg, transfers, max_passes=6, scwb_margins=(1.0, 1.03, 1.06),
+                       compatibility=None):
     """Cages and hoops of every group until neither changes any more. Returns the evidence of the final design.
 
     Each pass selects the longitudinal cages on the solved actions, runs the group capacity design on
@@ -687,7 +702,8 @@ def reinforcement_pass(state, actions, expected_ids, cfg, transfers, max_passes=
         for index in range(max_passes):
             state, report = selection.select_reinforcement(state, actions, cfg, scwb_margin=margin)
             mg.install(state)
-            capacity = capacity_design.build_group_capacity_design(actions, expected_ids, cfg, transfers, state)
+            capacity = capacity_design.build_group_capacity_design(actions, expected_ids, cfg, transfers, state,
+                                                                   compatibility=compatibility)
             updates = capacity_design.hoop_updates(capacity, state)
             log.append({"scwb_margin": margin, "pass": index + 1, "selection_settled": bool(report["settled"]),
                         "hoops_settled": not updates, "exhausted_groups": report["exhausted_groups"],
@@ -700,7 +716,8 @@ def reinforcement_pass(state, actions, expected_ids, cfg, transfers, max_passes=
                 mg.install(state)
         if not settled and updates:
             # The last capacity design was made before these hoops went in: rebuild it on the installed design.
-            capacity = capacity_design.build_group_capacity_design(actions, expected_ids, cfg, transfers, state)
+            capacity = capacity_design.build_group_capacity_design(actions, expected_ids, cfg, transfers, state,
+                                                                   compatibility=compatibility)
             evidence_rebuilt = True
         joint_checks = evaluate_joints(joint_check_inputs(capacity, state))
         scwb = [c for c in joint_checks if c["id"] == "scwb"]
@@ -721,6 +738,29 @@ def reinforcement_pass(state, actions, expected_ids, cfg, transfers, max_passes=
 
 
 # ---- one candidate --------------------------------------------------------------------------------------------
+def invalid_beam_row_groups(state):
+    """Beam groups whose installed bar rows do not fit their depth beside the beams they cross
+    (Design.SMRF_Beam_Slab_Strength.validate_bar_rows on the arrangement of Model.Member_Bar_Layers)."""
+    if state is None:
+        return []
+    bad = []
+    with mg.installed(state):
+        try:
+            rows = bar_layers.arrangement()
+        except mg.GroupedStateError:
+            return sorted(gid for gid, group in state.groups.items() if group["member_type"] != "column")
+        for gid, group in state.groups.items():
+            if group["member_type"] == "column":
+                continue
+            design = state.designs[gid]
+            try:
+                validate_bar_rows(rows[gid]["top"], design.top_bars, "top bars", design.h_in)
+                validate_bar_rows(rows[gid]["bottom"], design.bot_bars, "bottom bars", design.h_in)
+            except ValueError:
+                bad.append(gid)
+    return sorted(bad)
+
+
 def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions=True):
     """Evaluate one grouped design completely and return its evaluation record.
 
@@ -751,10 +791,13 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
                                                           sp.FLOOR_LIVE_LOAD_KSF * area)
         from Design.SMRF_Demands import REDUNDANCY_FACTOR_STRENGTH, live_load_patterns, strength_load_combinations
         try:
-            period = driver._model_period()
+            # Period, torsion assessment, strength combinations and drift on the design model of the installed
+            # policy: the continuous frame under the band policy, the released (perimeter-SFRS) frame under the
+            # system policy, where the seismic combinations superpose by member system (Design.Perimeter_Systems).
+            period = systems.model_period(state)
             solves["frame"] += 1
             strength = story_strength_distribution(cfg)
-            torsion = driver._torsion_assessment(period, cfg, strength) if cfg.demands.accidental_torsion_ratio else None
+            torsion = systems.torsion_assessment(period, cfg, strength, state) if cfg.demands.accidental_torsion_ratio else None
             solves["frame"] += 4 if torsion is not None else 0
             patterns = (live_load_patterns(sp.NUM_BAY_X, sp.NUM_BAY_Y)
                         if cfg.demands.live_load_patterning and sp.FLOOR_TRANSFER is not None else ())
@@ -762,12 +805,20 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
                                                       live_patterns=patterns)
             expected_ids = [c["id"] for c in combinations]
             actions, elf_used = [], None
+            solver = systems.CombinationSolver(period, torsion, state)
             for combination in combinations:
-                elf = driver._analyze_combination(combination, period, torsion)
-                solves["frame"] += 1
+                solved = solver.analyze(combination)
+                elf = solved["elf"]
                 elf_used = elf if elf is not None else elf_used
                 actions.append({**combination, "analysis_succeeded": True, "axial_reference": "joint_faces",
-                                "members": checks.capture_member_actions(combination["dead"])})
+                                "analysis_models": solved["models"], "members": solved["members"]})
+            solves["frame"] += solver.solves
+            # Deformation compatibility of the gravity members (ACI 318-19 18.14.2.1, ASCE 7-22 12.12.5): the design
+            # displacement of the released frame imposed on the continuous frame with the 5.3 gravity combinations
+            # that carry the vertical ground motion. It depends on the sections only, so it is solved once here and
+            # the cages are selected on it; None under the band policy (every member is in the SFRS).
+            compatibility = systems.compatibility_run(period, torsion, cfg, state)
+            solves["frame"] += compatibility["solves"] if compatibility else 0
         except RuntimeError as exc:
             if "gravity analysis failed" not in str(exc).lower():
                 raise
@@ -775,7 +826,7 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
         record["stages"]["demands"] = {"model_period_sec": period, "combinations": len(actions),
                                        "base_shear_kip": (elf_used or {}).get("base_shear_kip")}
         try:
-            settled = reinforcement_pass(state, actions, expected_ids, cfg, transfers)
+            settled = reinforcement_pass(state, actions, expected_ids, cfg, transfers, compatibility=compatibility)
             # The slab completion context reads the installed perimeter hoops and column cores: re-price the
             # layout on the selected cages and, if it changed, the cages on the layout (bounded). The slab and
             # the cages are consistent only when a re-pricing on the final cages leaves the layout unchanged.
@@ -793,7 +844,7 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
                 if not changed:
                     layout_settled = True
                     break
-                settled = reinforcement_pass(settled["state"], actions, expected_ids, cfg, transfers)
+                settled = reinforcement_pass(settled["state"], actions, expected_ids, cfg, transfers, compatibility=compatibility)
         except SectionAxialDomainError as exc:
             raise CandidateInfeasible("capacity_design", f"a factored axial load is outside a section's strength domain: {exc}",
                                       {"exception": "SectionAxialDomainError", "group_id": getattr(exc, "group_id", None)}) from exc
@@ -803,8 +854,10 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
         layout_kept = not record["stages"]["slab"]["layout_selected"] or bool((slab["reinforcement"] or {}).get("layout"))
         strengths = checks.strength_checks(actions, cfg, state)
         capacity = settled["capacity"]
-        drift_screen = driver._drift_screen(period, torsion, cfg)
+        drift_screen = systems.drift_screen(period, torsion, cfg, state)
         solves["frame"] += 2
+        induced = systems.gravity_induced_from_capacity(capacity)      # the gravity groups' branches on the final cages
+        record["stages"]["compatibility"] = systems.compatibility_stage(compatibility, induced)
         strength = story_strength_distribution(cfg)                # on the selected cages
         ledger = mp.weight_ledger()
         vertical = vertical_regularity(drift_screen, elf_used, strength, ledger)
@@ -833,10 +886,18 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
                                      "capacity": c.get("capacity")} for c in joint_failed][:60],
             "joint_scwb": {k: scwb[k] for k in ("evaluated", "all_pass", "counts", "min_ratio_provided")},
             "transitions_supported": all(t["supported"] for t in capacity["transitions"].values()),
+            "gravity_frame_branches": {gid: row["branch"] for gid, row in induced.items()},
+            "gravity_frame_failed_checks": [c["id"] + (f"@{c['location']}" if c.get("location") else "")
+                                            for c in ((capacity.get("gravity_frame") or {}).get("checks") or []) if c["status"] == "fail"],
             "drift_accepted": drift_screen["accepted"],
             "drift_failed_checks": [c["id"] + (f"@{c['location']}" if c.get("location") else "")
                                     for c in drift_screen["checks"] if c["status"] == "fail"],
             "exhausted_groups": exhausted,
+            # Beams whose cages that reach the demand do not thread their columns: room between the column bars, not
+            # strength, so the search moves the columns the beam threads.
+            "lane_limited_beam_groups": sorted({gid for item in settled["selection"]["passes"][-1]["beams"].values()
+                                                if item.get("lane_limited")
+                                                for gid in (item.get("groups") or [item.get("group_id")]) if gid}),
             # For a column line without a feasible cage chain: the band at which the chain breaks.
             "exhausted_column_lines": {location: {"blocked_at": item.get("blocked_at"), "blocked_by": item.get("blocked_by")}
                                        for location, item in settled["selection"]["passes"][-1]["columns"].items()
@@ -864,8 +925,15 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
                                   "elf": elf_used, "actions": actions, "expected_ids": expected_ids, "strengths": strengths,
                                   "capacity": capacity, "joint_checks": settled["joint_checks"], "selection": settled["selection"],
                                   "drift_screen": drift_screen, "demand_basis": demand_basis, "ledger": ledger,
-                                  "vertical": vertical}
+                                  "vertical": vertical, "compatibility": compatibility, "gravity_induced": induced}
         record["state"] = state
+    except BeamBarRowsError as exc:
+        # A beam group's bar rows reach past mid-depth beside the beams it crosses (the layers of crossing beams
+        # interleave at their joint): a candidate outcome, not an error; the search steps the beams named.
+        record.update(status="infeasible", feasible=False, failed_stage="bar_rows",
+                      reason=f"beam bar rows do not fit beside the crossing beams: {exc}",
+                      failure_evidence={"exception": "BeamBarRowsError", "group_ids": invalid_beam_row_groups(mg.active() or state)})
+        record["state"] = mg.active()
     except CandidateInfeasible as exc:
         record.update(status="infeasible", feasible=False, failed_stage=exc.stage, reason=exc.reason,
                       failure_evidence=_json_safe(exc.evidence))

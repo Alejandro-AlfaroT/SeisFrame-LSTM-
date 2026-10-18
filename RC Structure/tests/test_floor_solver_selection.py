@@ -11,7 +11,6 @@ from Design import SMRF_Floor_Analysis as floor_analysis
 from Design.SMRF_Floor_Mesh import floor_mesh
 from Design.SMRF_Slab_Actions import build_slab_action_evidence
 from Design.SMRF_Coupled_Analysis import analyze_coupled_gravity
-from Design.SMRF_Floor_Compatibility import CompatibleFloor
 
 SLAB=dict(thickness_in=6.,concrete_fc_ksi=4.,concrete_unit_weight_kcf=.15,
           superimposed_dead_load_ksf=.05)
@@ -116,25 +115,6 @@ class FloorSolverSelectionTests(unittest.TestCase):
             self.assertEqual(result['mesh_metadata']['solver'],'UmfPack')
             system.assert_called_once_with('UmfPack')
             self.assertTrue(result['equilibrium']['numerical_balance_passed'])
-
-    def test_compatible_response_metadata_records_reference_and_default_solvers(self):
-        for mesh_spec in (None,SMALL_SPEC):
-            model=CompatibleFloor(SLAB,SMALL_GEOMETRY,SECTIONS,mesh_per_bay=2,mesh_spec=mesh_spec)
-            for reference,solver in ((False,'SuperLU'),(True,'UmfPack')):
-                with self.subTest(explicit=mesh_spec is not None,reference=reference), mock.patch.object(ops,'system',wraps=ops.system) as system:
-                    result=model.response(DEAD,_reference_solver=reference)
-                self.assertEqual(result['mesh_metadata']['solver'],solver)
-                self.assertEqual(result['response_system'],solver)
-                system.assert_called_once_with(solver)
-
-    def test_compatible_stiffness_metadata_records_superlu(self):
-        model=CompatibleFloor(SLAB,SMALL_GEOMETRY,SECTIONS,mesh_per_bay=2)
-        zero=dict(DEAD,dead_factor=0.)
-        with mock.patch.object(ops,'system',wraps=ops.system) as system:
-            result=model.response(zero,_extract_stiffness=True)
-        self.assertEqual(result['mesh_metadata']['solver'],'SuperLU')
-        system.assert_called_once_with('SuperLU')
-
 
 if __name__=='__main__':
     unittest.main()

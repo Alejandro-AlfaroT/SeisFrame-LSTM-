@@ -1,20 +1,10 @@
-
 # Ignore compiled files
 __pycache__/
 *.pyc
-
-# Ignore models and output
-MP_TESTING/predicted_output.pt
-#ignore the predicted node output
-MP_TESTING/predicted_node_outputs.csv
+.pytest_cache/
 
 # Ignore installers
 Miniconda3-*.sh
-
-# Ignore all 3DFrame.* files in MP_TESTING
-MP_TESTING/3DFrame.*
-
-
 
 # Local Python environments
 .venv/
@@ -29,13 +19,12 @@ RC Structure/Ground_Motions/scaled/*
 !RC Structure/Ground_Motions/raw/.gitkeep
 !RC Structure/Ground_Motions/processed/.gitkeep
 !RC Structure/Ground_Motions/scaled/.gitkeep
-
-# Model checkpoints and generated training artifacts
-checkpoints_sap2000/
-Results/
 .rc_structure_monitor/
 
 # Hybrid surrogate training artifacts
 RC Hybrid Surrogate Model/outputs/
 RC Hybrid Surrogate Model/checkpoints/
 RC Hybrid Surrogate Model/derived_features/
+
+# IDE settings
+.idea/

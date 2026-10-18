@@ -111,13 +111,136 @@ def _reinforcement_member(member_type):
     raise ValueError("member_type must be 'beam' or 'column'.")
 
 
-def core_cover_in(member_type):
-    """Face-to-core boundary at outside of hoops, not longitudinal centroids.
+# ---- Bar position grid (design-basis rule 2026-10-14) ----------------------------------------
+# Every longitudinal bar centre, every bar pitch along a face and every layer pitch is a multiple of
+# BAR_POSITION_GRID_IN. The first bar of a face sits at the first grid step at or beyond the code
+# minimum (specified clear cover + hoop + half the bar); the hoops are fabricated to the bars, so the
+# first bars sit in the hoop corners and the clear cover actually provided is what is left outside
+# the hoop, never less than the specified minimum. Interior bars take the equal pitch when it lands
+# on the grid and otherwise a symmetric pattern of grid pitches that differ by one step. The hoop of
+# a beam follows the first layer of that direction at each face, so a direction whose bars run one
+# layer deeper at a face (orthogonal stacking, below) has a deeper hoop cover at that face.
+# None switches the grid off (even spacing, unsnapped offsets): the layout of records designed before
+# the rule, restored by Design_Driver.apply_design from the record; a fresh design starts on the
+# config's grid (Design.Config.RebarConfig.bar_position_grid_in).
+BAR_POSITION_GRID_IN = 0.5
+# The hoop the bar layout is set for: the largest hoop bar of the capacity-design ladders (#5, both members;
+# Design/SMRF_Capacity_Design.STIRRUP_LADDER and COLUMN_HOOP_BARS). On the grid the first-bar offset is taken
+# from this hoop whatever hoop the capacity design selects, so the selection never moves the bars (a #4 hoop
+# would otherwise move #7 and #8 bars a whole grid step and the hoop selection would have no fixed point);
+# the hoop as built is fabricated to the bars, the cover as built is what remains outside it.
+BAR_LAYOUT_HOOP_DB_IN = 0.625
+# The default of every grid_in parameter: "the module's grid" (BAR_POSITION_GRID_IN as it stands). A record is
+# evaluated on its own grid (reinforcement.bar_position_grid_in, None for records from before the rule).
+_MODULE_GRID = object()
+MODULE_GRID = _MODULE_GRID
 
-    This geometry distinction does not validate a confined-concrete material
-    law; calibration to the actual confinement layout remains a separate check.
-    The old fiber partition is unchanged when no slab design is selected.
+
+def _grid(grid_in):
+    grid = BAR_POSITION_GRID_IN if grid_in is _MODULE_GRID else grid_in
+    if grid is None:
+        return None
+    if isinstance(grid, bool) or not math.isfinite(grid) or grid <= 0:
+        raise ValueError("The bar position grid must be positive and finite, or None for even spacing.")
+    return grid
+
+
+def snap_up_to_grid(value_in, grid_in=_MODULE_GRID):
+    """The first multiple of the bar position grid at or beyond ``value_in`` (``value_in`` itself without a grid)."""
+    grid = _grid(grid_in)
+    value = float(value_in)
+    if not math.isfinite(value):
+        raise ValueError("A bar position must be finite.")
+    if grid is None:
+        return value
+    return math.ceil(value / grid - 1e-9) * grid
+
+
+def first_bar_offset_in(clear_cover_in, hoop_db_in, bar_db_in, grid_in=_MODULE_GRID):
+    """Face to the centre of the first bar, from the SPECIFIED clear cover.
+
+    On the grid: the grid step at or beyond the specified cover + the layout hoop (the larger of the
+    member's hoop and BAR_LAYOUT_HOOP_DB_IN) + half the bar, so the hoop selected later never moves the
+    bars. Without a grid (None, pre-rule records): cover + hoop + half the bar exactly.
     """
+    if _grid(grid_in) is None:
+        return clear_cover_in + hoop_db_in + 0.5 * bar_db_in
+    return snap_up_to_grid(clear_cover_in + max(hoop_db_in, BAR_LAYOUT_HOOP_DB_IN) + 0.5 * bar_db_in, grid_in)
+
+
+def face_bar_pitches_in(width_in, first_in, count, grid_in=_MODULE_GRID):
+    """Centre-to-centre pitches of ``count`` bars along a face of ``width_in`` whose first and last bars
+    sit ``first_in`` from the edges: equal pitches when the equal pitch is a grid multiple, otherwise
+    pitches that differ by one grid step, symmetric about the centre with the larger ones nearest it
+    (equal pitches without a grid)."""
+    grid = _grid(grid_in)
+    if type(count) is not int or count < 2:
+        raise ValueError("A face needs at least two bars for a pitch.")
+    span = float(width_in) - 2.0 * float(first_in)
+    if span <= 0.0:
+        raise ValueError("Face too narrow for the cover and bars.")
+    if grid is None:
+        return [span / (count - 1)] * (count - 1)
+    steps = round(span / grid)
+    if abs(steps * grid - span) > 1e-9:
+        raise ValueError(f"The face span {span:g} in is not a multiple of the {grid:g} in bar grid.")
+    gaps = count - 1
+    base, extra = divmod(steps, gaps)
+    if base < 1:
+        # More bars than grid steps: no grid arrangement exists. The even pitch (below one grid step)
+        # is returned so a clear-spacing screen fails on it; such a cage is never installed.
+        return [span / gaps] * gaps
+    pitches = [base] * gaps
+    centre = gaps // 2
+    if gaps % 2 == 1:
+        pairs = [(centre - k, centre + k) for k in range(1, centre + 1)]
+        if extra % 2 == 1:
+            pitches[centre] += 1
+            extra -= 1
+    else:
+        pairs = [(centre - k, centre + k - 1) for k in range(1, centre + 1)]
+        if extra % 2 == 1:
+            raise ValueError("An even number of gaps cannot share an odd number of grid steps symmetrically.")
+    for a, b in pairs:
+        if extra <= 0:
+            break
+        pitches[a] += 1
+        pitches[b] += 1
+        extra -= 2
+    if extra != 0:
+        raise ValueError("Grid pitch distribution did not close.")
+    return [p * grid for p in pitches]
+
+
+def face_bar_positions_in(width_in, first_in, count, grid_in=_MODULE_GRID):
+    """Centres of ``count`` bars along a face: the first and last at ``first_in`` from each edge, the
+    interior bars on the grid (face_bar_pitches_in). One bar sits at mid-width."""
+    if type(count) is not int or count < 1:
+        raise ValueError("A face needs at least one bar.")
+    if count == 1:
+        return [float(width_in) / 2.0]
+    positions = [float(first_in)]
+    for pitch in face_bar_pitches_in(width_in, first_in, count, grid_in):
+        positions.append(positions[-1] + pitch)
+    return positions
+
+
+def face_bar_min_pitch_in(width_in, first_in, count, grid_in=_MODULE_GRID):
+    """The least centre-to-centre pitch on a face (infinite for a single bar)."""
+    if count < 2:
+        return float("inf")
+    return min(face_bar_pitches_in(width_in, first_in, count, grid_in))
+
+
+def face_bar_max_pitch_in(width_in, first_in, count, grid_in=_MODULE_GRID):
+    """The greatest centre-to-centre pitch on a face (the hx of a face whose every bar is supported)."""
+    if count < 2:
+        return 0.0
+    return max(face_bar_pitches_in(width_in, first_in, count, grid_in))
+
+
+def specified_clear_cover_in(member_type):
+    """The clear cover outside the hoops the design specifies (the minimum it declares), legacy COVER without a slab."""
     member = _reinforcement_member(member_type)
     if SLAB_THICKNESS_IN is None:
         return COVER
@@ -127,22 +250,54 @@ def core_cover_in(member_type):
     return cover
 
 
-def longitudinal_cover_in(member_type, bar_size=None, stirrup_bar_size=None):
-    """Concrete-face to longitudinal-bar centroid, in inches.
-
-    Optional bar sizes price a candidate without changing the current section.
-    New-mode bars touch the inside of the hoop: c_clear + d_hoop + d_bar/2.
-    """
-    member = _reinforcement_member(member_type)
-    if SLAB_THICKNESS_IN is None:
-        return COVER
+def _member_bar_sizes(member, bar_size, stirrup_bar_size):
     is_col = member == "column"
     if bar_size is None:
         bar_size = COL_BAR_SIZE if is_col else BEAM_BAR_SIZE
     if stirrup_bar_size is None:
         stirrup_bar_size = COL_STIRRUP_BAR_SIZE if is_col else BEAM_STIRRUP_BAR_SIZE
-    return (core_cover_in(member) + rebar_diameter(stirrup_bar_size)
-            + 0.5 * rebar_diameter(bar_size))
+    return bar_size, stirrup_bar_size
+
+
+def clear_cover_provided_in(member_type, bar_size=None, stirrup_bar_size=None):
+    """The clear cover outside the hoops as built: the first bar on the grid in the hoop corner, less the
+    hoop and half the bar. At least the specified cover; the legacy COVER without a slab."""
+    member = _reinforcement_member(member_type)
+    if SLAB_THICKNESS_IN is None:
+        return COVER
+    bar_size, stirrup_bar_size = _member_bar_sizes(member, bar_size, stirrup_bar_size)
+    return (longitudinal_cover_in(member, bar_size, stirrup_bar_size)
+            - rebar_diameter(stirrup_bar_size) - 0.5 * rebar_diameter(bar_size))
+
+
+def core_cover_in(member_type, bar_size=None, stirrup_bar_size=None):
+    """Face-to-core boundary at the outside of the hoops as built, not longitudinal centroids.
+
+    The hoops follow the first bars on the grid (clear_cover_provided_in), so the core boundary is
+    the cover actually provided; for a beam it is the nearest-face value (the per-face hoop covers
+    of the stacked directions are beam_hoop_cover_in). This geometry distinction does not validate
+    a confined-concrete material law; calibration to the actual confinement layout remains a
+    separate check. The old fiber partition is unchanged when no slab design is selected.
+    """
+    member = _reinforcement_member(member_type)
+    if SLAB_THICKNESS_IN is None:
+        return COVER
+    return clear_cover_provided_in(member, bar_size, stirrup_bar_size)
+
+
+def longitudinal_cover_in(member_type, bar_size=None, stirrup_bar_size=None):
+    """Concrete-face to longitudinal-bar centroid, in inches.
+
+    Optional bar sizes price a candidate without changing the current section.
+    New-mode bars sit in the hoop corners on the bar position grid: the first
+    grid step at or beyond c_clear + d_hoop + d_bar/2 (first_bar_offset_in).
+    """
+    member = _reinforcement_member(member_type)
+    if SLAB_THICKNESS_IN is None:
+        return COVER
+    bar_size, stirrup_bar_size = _member_bar_sizes(member, bar_size, stirrup_bar_size)
+    return first_bar_offset_in(specified_clear_cover_in(member), rebar_diameter(stirrup_bar_size),
+                               rebar_diameter(bar_size))
 
 
 # ---- Orthogonal beam bar stacking at the joints (design-basis rule, 2026-09-27) --------------
@@ -185,9 +340,10 @@ def beam_bar_stacking_convention():
 
 
 def beam_bar_layer_pitch_in(bar_size=None):
-    """Centre-to-centre distance between two layers of beam bars: db + the 25.2.2 clear (>= db, 1 in)."""
+    """Centre-to-centre distance between two layers of beam bars: db + the 25.2.2 clear (>= db, 1 in),
+    taken up to the bar position grid."""
     db = rebar_diameter(BEAM_BAR_SIZE if bar_size is None else bar_size)
-    return db + max(BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, db)
+    return snap_up_to_grid(db + max(BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, db))
 
 
 def beam_bars_per_layer(bar_size=None, bars_per_face=None, stirrup_bar_size=None):
@@ -313,6 +469,19 @@ def beam_centroid_offset_in(axis, face, bar_size=None):
     return beam_bar_stacking_offsets_in(bar_size)[axis][face]
 
 
+def beam_hoop_cover_in(bar_size=None, stirrup_bar_size=None, top_bars=None, bot_bars=None, max_layers=None):
+    """{axis: {"top": cover, "bottom": cover}}: the clear cover outside the hoop of each direction's beams at
+    each face, in inches. The hoop is fabricated to the first layer of that direction at that face
+    (design-basis rule 2026-10-14), so the lower direction of the orthogonal stacking carries a deeper
+    hoop cover at the face where its bars run one layer down, and the first bars of every layer sit in
+    the hoop corners. The lateral (side) cover is clear_cover_provided_in("beam")."""
+    layers = beam_bar_layers(bar_size, top_bars, bot_bars, stirrup_bar_size, max_layers)
+    bar_size, stirrup_bar_size = _member_bar_sizes("beam", bar_size, stirrup_bar_size)
+    inset = rebar_diameter(stirrup_bar_size) + 0.5 * rebar_diameter(bar_size)
+    return {axis: {face: layers[axis][face]["offsets_in"][0] - inset for face in ("top", "bottom")}
+            for axis in ("x", "y")}
+
+
 def beam_worst_centroid_offset_in(bar_size=None, top_bars=None, bot_bars=None, max_layers=None):
     """The largest offset over directions and faces: the conservative single value for sizing."""
     offsets = beam_bar_stacking_offsets_in(bar_size, None, top_bars, bot_bars, max_layers)
@@ -428,6 +597,19 @@ BEAM_Y_TRANSF_TAG = 3
 # Options:
 #   "fiber" = distributed forceBeamColumn fiber sections
 #   "imk"   = elastic interior members with IMKPeakOriented rotational hinges
+# Lateral design model of the perimeter-frame basis (user decision 2026-10-16). "all_frames": every member
+# with its hinges (the response-history model and the legacy design model, every grid line a frame).
+# "perimeter_sfrs": both ends of every interior (gravity) beam are released in bending, so the lateral load
+# of the design analyses flows to the perimeter special moment frames and the interior columns act as
+# leaning columns between the diaphragms (ASCE 7-22 12.12.5 deformation compatibility; ACI 318-19 18.14).
+# The design route sets it around its lateral solves and the compatibility run; the nonlinear analyses keep
+# "all_frames" (the structure resists with every member it has; the design credits the perimeter only).
+LATERAL_DESIGN_MODEL = "all_frames"
+LATERAL_DESIGN_MODELS = ("all_frames", "perimeter_sfrs")
+# A released beam end keeps a rotational spring of this fraction of the member hinge stiffness (numerical
+# conditioning only; it carries no design moment).
+GRAVITY_BEAM_RELEASE_STIFFNESS_RATIO = 1.0e-6
+
 ELEMENT_FORMULATION = "imk"
 
 # Both member types use concentrated hinges. Concrete02 fiber models have
@@ -734,6 +916,7 @@ ASCE_SDS = 1.00     # design spectral response acceleration, short period
 ASCE_SD1 = 0.60     # design spectral response acceleration, 1 second
 ASCE_S1 = 0.60      # mapped MCE spectral acceleration at 1 second
 ASCE_R = 8.0        # response modification factor, special RC moment frame
+ASCE_CD = 5.5       # deflection amplification factor, special RC moment frame (ASCE 7-22 Table 12.2-1)
 # Risk category, seismic importance factor and allowable story drift: ONE source (user decision
 # 2026-10-01: Risk Category III for the V2 research archetype; existing Risk II designs are
 # redesigned, never relabelled). ASCE 7-22 Table 1.5-2 gives Ie; Table 12.12-1, "all other

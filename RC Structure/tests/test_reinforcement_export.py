@@ -33,12 +33,15 @@ class ReinforcementExportTests(unittest.TestCase):
     def test_new_sidecar_matches_actual_cover_and_core_geometry(self):
         sidecar = collect_global_parameters()["reinforcement_geometry"]
         self.assertEqual(sidecar["schema_version"], "smrf_reinforcement_geometry_v1")
-        self.assertEqual(sidecar["column"]["longitudinal_centroid_offset_in"], 1.75 + .5 + .5)
-        self.assertEqual(sidecar["beam"]["longitudinal_centroid_offset_in"], 1.5 + .375 + .375)
-        self.assertEqual(sidecar["column"]["fiber_core_width_in"], 24 - 2 * 1.75)
-        self.assertEqual(sidecar["column"]["fiber_core_depth_in"], 30 - 2 * 1.75)
-        self.assertEqual(sidecar["column"]["hoop_centerline_width_in"], 24 - 2 * 1.75 - .5)
-        self.assertEqual(sidecar["beam"]["fiber_core_area_in2"], (16 - 3) * (24 - 3))
+        # bars on the 0.5 in grid, laid out for the #5 hoop of the ladders (2026-10-14): the #8 column bar at
+        # 1.75 + 0.625 + 0.5 = 2.875 -> 3.0 in, the #6 beam bar at 1.5 + 0.625 + 0.375 = 2.5 in; the hoops follow
+        # the bars, so the core is the cover as built (3.0 - 0.5 - 0.5 = 2.0 in; 2.5 - 0.375 - 0.375 = 1.75 in)
+        self.assertEqual(sidecar["column"]["longitudinal_centroid_offset_in"], 3.0)
+        self.assertEqual(sidecar["beam"]["longitudinal_centroid_offset_in"], 2.5)
+        self.assertEqual(sidecar["column"]["fiber_core_width_in"], 24 - 2 * 2.0)
+        self.assertEqual(sidecar["column"]["fiber_core_depth_in"], 30 - 2 * 2.0)
+        self.assertEqual(sidecar["column"]["hoop_centerline_width_in"], 24 - 2 * 2.0 - .5)
+        self.assertEqual(sidecar["beam"]["fiber_core_area_in2"], (16 - 3.5) * (24 - 3.5))
         self.assertEqual(sidecar["aggregate_max_size_in"], .75)
         self.assertEqual(sidecar["materials"]["reinforcement_specification"], "ASTM A706 Grade 60")
         self.assertEqual(sidecar["materials"]["exposure"], "sheltered_interior")

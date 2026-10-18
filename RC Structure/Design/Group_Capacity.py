@@ -43,6 +43,25 @@ GRAVITY_FAMILIES = (("seismic_high_gravity", lambda sds: 1.2 + 0.2 * sds, 1.0),
                     ("seismic_low_gravity", lambda sds: 0.9 - 0.2 * sds, 0.0))
 
 
+# Joint shear rules by joint direction (2026-10-16). A joint direction belongs to the SFRS when the column is part
+# of a perimeter frame in that direction (every direction of every joint under the band policy); the other
+# directions (interior joints; the gravity-beam direction of an edge column) are members not designated as part
+# of the SFRS and their joints follow Chapter 15 (ACI 318-19 18.14.3.2 / 18.14.3.3, Chapter 15).
+JOINT_RULE_SFRS = "18.8"
+JOINT_RULE_GRAVITY = "chapter_15"
+JOINT_RULE_CLAUSE = {JOINT_RULE_SFRS: "ACI 318-19 18.8.4",
+                     JOINT_RULE_GRAVITY: "ACI 318-19 15.4.2 (15.4.2.1(b) nominal beam strengths; Table 15.4.2.3)"}
+
+
+def joint_rule(entry, axis, state=None):
+    """Which joint shear rule a joint direction follows: 18.8 for the SFRS, Chapter 15 outside it."""
+    state = state or mg.active()
+    if state is None or state.policy_id != mg.SYSTEM_POLICY_ID:
+        return JOINT_RULE_SFRS
+    directions = mg.column_sfrs_directions(entry["grid_i"], entry["grid_j"], sp.NUM_BAY_X, sp.NUM_BAY_Y)
+    return JOINT_RULE_SFRS if axis in directions else JOINT_RULE_GRAVITY
+
+
 def _layout():
     return (sp.SLAB_REINFORCEMENT or {}).get("layout") if sp.SLAB_THICKNESS_IN is not None else None
 
@@ -269,22 +288,31 @@ def joint_transition(entry, column_hoops=None):
                              lower_hoop_spacing_in=(column_hoops or {}).get(core.group_id))
 
 
-def joint_shear(entry, axis, strengths, transition, beam_hoops):
-    """Vj against phi Vn for one joint and direction, from its real incident members (18.8.4)."""
+def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_SFRS):
+    """Vj against phi Vn for one joint and direction, from its real incident members.
+
+    ``rule`` JOINT_RULE_SFRS: 18.8.4, beam steel at 1.25 fy and the column shear from the probable moments.
+    JOINT_RULE_GRAVITY (a joint direction outside the seismic force-resisting system under the perimeter-frame
+    basis): Chapter 15, 15.4.2.1(b), beam steel at fy and the column shear from the nominal moments; the
+    strength row is the Table 18.8.4.3 classification of the same joint, at or below the Table 15.4.2.3 value
+    in every row, so the Chapter 15 check is conservative.
+    """
     core, beams = entry["core"].design, entry["beams"][axis]
     other = "y" if axis == "x" else "x"
     transverse = entry["beams"][other]
     depth, width = (core.h_in, core.b_in) if axis == "x" else (core.b_in, core.h_in)
     fy = sp.FY_KSI
     level = "roof" if entry["is_roof"] else "floor"
+    steel_factor = cd.PROBABLE_FY_FACTOR if rule == JOINT_RULE_SFRS else 1.0
+    moment_key = "mpr" if rule == JOINT_RULE_SFRS else "mn"
 
     def tension(beam, sign):
         s = strengths[beam.member_tag]
-        return 1.25 * fy * (s["tension_steel_hogging_in2"] if sign == "hogging" else s["tension_steel_sagging_in2"])
+        return steel_factor * fy * (s["tension_steel_hogging_in2"] if sign == "hogging" else s["tension_steel_sagging_in2"])
 
     def mpr(beam, sign):
         s = strengths[beam.member_tag]
-        return s["mpr_negative_kip_in"] if sign == "hogging" else s["mpr_positive_kip_in"]
+        return s[f"{moment_key}_negative_kip_in"] if sign == "hogging" else s[f"{moment_key}_positive_kip_in"]
 
     multiplier = 2.0 if level == "roof" else 1.0
     if len(beams) == 2:
@@ -332,7 +360,10 @@ def joint_shear(entry, axis, strengths, transition, beam_hoops):
             "beams_in_direction": len(beams), "beams_perpendicular": len(transverse),
             "beam_face_forces_kip": forces, "column_shear_kip": vcol, "hogging_beam_tag": hogging_beam,
             "probable_face_forces_complete": True, "column_shear_consistent_with_mpr": True,
-            "nominal_vn_kip": vn, "capacity_basis": "ACI318-19_Table18.8.4.3",
+            "nominal_vn_kip": vn, "capacity_basis": ("ACI318-19_Table18.8.4.3" if rule == JOINT_RULE_SFRS else
+                                                     "ACI318-19_Table15.4.2.3 (Table 18.8.4.3 row, conservative)"),
+            "rule": rule, "clause": JOINT_RULE_CLAUSE[rule], "steel_stress_factor": steel_factor,
+            "beam_moment_basis": "probable (1.25 fy)" if rule == JOINT_RULE_SFRS else "nominal (fy)",
             "capacity_topology_and_confinement_checked": False,
             "gamma": gamma, "gamma_basis": classification["gamma_basis"], "classification": classification,
             "column_continuity": "terminating" if level == "roof" else ("continuous" if classification["column"]["state"] == "continuous" else "other"),
@@ -353,7 +384,8 @@ def joint_anchorage(entry, axis, column_hoop_bar):
     hoop_db = sp.rebar_diameter(column_hoop_bar if column_hoop_bar is not None else core.stirrup_bar_size)
     ldh = max(sp.FY_KSI * 1000.0 * db / (65.0 * math.sqrt(core.fc_ksi * 1000.0)), 8.0 * db, 6.0)
     through = len(beams) == 2
-    available = depth - sp.COL_CLEAR_COVER_IN - hoop_db
+    # embedment to the inside of the far hoop as built (the column bars in the hoop corners on the grid)
+    available = depth - (mp.longitudinal_cover_in(core) - 0.5 * sp.rebar_diameter(core.bar_size))
     required_through = max(20.0 * db, max(b.design.h_in for b in beams) / 2.0)
     return {"type_id": entry["type_id"], "axis": axis, "through_bars_present": through,
             "ldh_required_in": ldh, "embedment_available_in": available, "passes": through or ldh <= available,
@@ -435,7 +467,7 @@ def column_nominal_moment(design, axis, axial_kip):
     return min(results, key=lambda item: item[0])
 
 
-def scwb_evidence(inventory, actions, expected_ids, layout_established=None):
+def scwb_evidence(inventory, actions, expected_ids, layout_established=None, state=None):
     """Strong-column / weak-beam evidence at every joint, each column on its own section and axial loads.
 
     The structure SMRF_Joints.evaluate_joints reads: per joint, direction and sway sign, the capacities
@@ -518,6 +550,13 @@ def scwb_evidence(inventory, actions, expected_ids, layout_established=None):
                                        slab_mn_kip_in=max(0.0, family[f"slab_increment_{flexure}_kip_in"]))
                     beam_caps.append(cap)
                 states[sign] = {"nominal_strengths": True, "column_capacities": column_caps, "beam_capacities": beam_caps}
+            # 18.7.3.2 is a special-moment-frame rule: required where the column is part of a perimeter frame in
+            # this direction (every direction under the band policy); recorded, not required, elsewhere (18.14).
+            states["required"] = joint_rule(entry, axis, state) == JOINT_RULE_SFRS
+            states["requirement_basis"] = ("ACI 318-19 18.7.3.2: column of a special moment frame in this direction"
+                                           if states["required"] else
+                                           "not required: the column is not part of the seismic force-resisting system in this "
+                                           "direction (ACI 318-19 18.14; perimeter-frame basis)")
             record["directions"][axis] = states
         joints.append(record)
     return {"joints": joints, "expected_combination_ids": list(expected_ids), "action_inventory_complete": not missing,
@@ -527,12 +566,14 @@ def scwb_evidence(inventory, actions, expected_ids, layout_established=None):
 
 
 # ---- the whole capacity design ------------------------------------------------------------------------------
-def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, state=None):
+def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, state=None, compatibility=None):
     """Capacity-design evidence and checks of the installed grouped design.
 
     ``actions`` are the solved combinations (Group_Checks.capture_member_actions per combination);
-    ``transfers`` {floor: validated transfer} or None. Returns beams and columns by group, joints by
-    type, transitions, strong-column evidence, the hoops each group needs, and the checks.
+    ``transfers`` {floor: validated transfer} or None; ``compatibility`` the compatibility run of
+    Design.Perimeter_Systems under the system policy (the induced actions of the gravity members), None
+    otherwise. Returns beams and columns by group, joints by type, transitions, strong-column evidence, the
+    hoops each group needs, the gravity-frame evidence (system policy) and the checks.
     """
     state = state or mg.active()
     if state is None:
@@ -554,7 +595,8 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
         if transition is not None and entry["above"].group_id != entry["core"].group_id:
             transitions[f"{entry['core'].group_id}>{entry['above'].group_id}"] = {**transition, "type_id": type_id,
                                                                                  "joints": list(kind["joints"])}
-        shear = {axis: joint_shear(entry, axis, strengths, transition, beam_hoops) for axis in ("x", "y") if entry["beams"][axis]}
+        shear = {axis: joint_shear(entry, axis, strengths, transition, beam_hoops, joint_rule(entry, axis, state))
+                 for axis in ("x", "y") if entry["beams"][axis]}
         hoop_bar = (columns[entry["core"].group_id]["hoops"] or {}).get("bar_size")
         joint_types[type_id] = {
             "type_id": type_id, "joints": list(kind["joints"]), "level": entry["level"],
@@ -570,7 +612,7 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
     for kind in joint_types.values():
         for item in kind["shear"].values():
             item["capacity_topology_and_confinement_checked"] = bool(kind["joint_hoops"] is not None and item["evidence_complete"])
-    scwb = scwb_evidence(inventory, actions, expected_ids)
+    scwb = scwb_evidence(inventory, actions, expected_ids, state=state)
 
     checks = []
     for gid, data in beams.items():
@@ -601,7 +643,8 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
                                           "joints": transition["joints"]}))
     for type_id, kind in joint_types.items():
         for axis, item in kind["shear"].items():
-            checks.append(make_check("joint.shear_screen", "ACI 318-19 18.8.4", item["vj_kip"], item["phi_vn_kip"], "<=", "kip", item["id"]))
+            checks.append(make_check("joint.shear_screen", item["clause"], item["vj_kip"], item["phi_vn_kip"], "<=", "kip", item["id"],
+                                     details={"rule": item["rule"], "beam_moment_basis": item["beam_moment_basis"]}))
             if item["evidence_complete"]:
                 checks.append(make_check("joint.classification_evidence", "ACI 318-19 Table 18.8.4.3; 15.2.6-15.2.8", 1, 1, "==",
                                          location=item["id"], details={"gamma_basis": item["gamma_basis"],
@@ -633,10 +676,19 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
     splices = group_splices(state)
     checks.append(make_check("detailing.splices_designed", "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.2.7 / 25.5", 1, 1, "==",
                              details={"groups": splices}))
+    gravity = None
+    if state.policy_id == mg.SYSTEM_POLICY_ID:
+        # Members not designated as part of the SFRS (ACI 318-19 18.14): branch per gravity group from the induced
+        # actions of the compatibility run, and the detailing that branch asks of the hoops selected above.
+        from Design.Perimeter_Systems import gravity_frame_evidence
+        gravity = gravity_frame_evidence(compatibility, cfg, state, beams, columns, actions)
+        checks.extend(gravity["checks"])
     hoops = {gid: data["hoops"] for gid, data in {**beams, **columns}.items()}
     return {"method_version": METHOD_VERSION, "column_shear_method": cd.COLUMN_SHEAR_METHOD_COLUMN_OWN,
             "beams": beams, "columns": columns, "beam_strengths": strengths, "joint_types": joint_types,
             "transitions": transitions, "scwb": scwb, "splices": splices, "transverse": hoops,
+            "gravity_frame": gravity,
+            "joint_rules": {type_id: {axis: item["rule"] for axis, item in kind["shear"].items()} for type_id, kind in joint_types.items()},
             "joint_evidence": {"beam_capacity_shear": [m for data in beams.values() for m in data["governing_members"]],
                                "joint_shear": [item for kind in joint_types.values() for item in kind["shear"].values()]},
             "checks": checks, "accepted": all(c["status"] == "pass" for c in checks)}
@@ -711,4 +763,26 @@ def hoop_updates(capacity, state=None):
                              stirrup_spacing_in=hoops["spacing_in"])
         if wanted != design:
             updates[gid] = wanted
-    return updates
+    return _tied_hoop_updates(updates, state)
+
+
+def _tied_hoop_updates(updates, state):
+    """Under the system policy the groups of a design tie share one cage: the tie takes the governing hoops among
+    its groups' selections (the largest Av / s, then the tightest spacing; adequate for every member of the tie
+    in shear and confinement, the section and bars being the same) and changes only when that differs from what
+    is installed, so a lighter group's own selection does not reopen a settled tie."""
+    from dataclasses import replace
+    ties = state.ties()
+    if not ties:
+        return updates
+    tied = {gid for gids in ties.values() for gid in gids}
+    result = {gid: design for gid, design in updates.items() if gid not in tied}
+    for tie, gids in ties.items():
+        wanted = [updates.get(gid, state.designs[gid]) for gid in gids]
+        governing = max(wanted, key=lambda d: (d.stirrup_legs * sp.rebar_area(d.stirrup_bar_size) / d.stirrup_spacing_in,
+                                              -d.stirrup_spacing_in, sp.rebar_area(d.stirrup_bar_size)))
+        for gid in gids:
+            design = replace(governing, member_type=state.groups[gid]["member_type"])
+            if design != state.designs[gid]:
+                result[gid] = design
+    return result

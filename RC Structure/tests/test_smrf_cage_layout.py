@@ -16,7 +16,7 @@ class SupportPatternTests(unittest.TestCase):
         self.assertEqual(pattern["supported"], [True, False, True, False, True, True])
         self.assertTrue(pattern["alternate_bars_supported"])
         self.assertLessEqual(pattern["max_unsupported_clear_in"], 6.0)
-        self.assertAlmostEqual(pattern["hx_in"], 2 * (pos[1] - pos[0]))
+        self.assertAlmostEqual(pattern["hx_in"], max(pos[2] - pos[0], pos[4] - pos[2]))
         # Four bars 7 in apart: an unsupported bar would be 6.3 in clear -> every bar tied.
         pos = face_bar_positions(26.0, 1.5, 0.5, 0.75, 4)
         self.assertEqual(support_pattern(pos, 0.75)["supported"], [True] * 4)

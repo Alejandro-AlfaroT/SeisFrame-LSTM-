@@ -103,7 +103,8 @@ class PlannerLever(unittest.TestCase):
         self.columns = Section_Design.column_ladder()
         self.beams = Section_Design.beam_ladder(span_in=180.0, story_height_in=168.0)
         self.ci = next(i for i, r in enumerate(self.columns) if r == (32.0, 32.0, 8.0))
-        self.bi = next(i for i, r in enumerate(self.beams) if r == (16.0, 24.0, 8.0))
+        # a 32 in depth offers 16, 20 and 24 in webs (beams deeper than wide, 2026-10-14: no web past 0.75 h)
+        self.bi = next(i for i, r in enumerate(self.beams) if r == (16.0, 32.0, 8.0))
         self.flags = {"drift_ok": True, "scwb_ok": True, "joint_scwb_failed": False, "capacity_accepted": False,
                       "beam_section_adequate": True, "beam_hoops_selected": True, "beam_bars_thread": False,
                       "column_section_adequate": True, "column_hoops_selected": True, "joints_all_pass": True,
@@ -124,7 +125,7 @@ class PlannerLever(unittest.TestCase):
         self.assertNotIn("column_cage_threading", reasons)
         self.assertEqual(next_column, self.ci)
         self.assertGreater(self.beams[next_beam][0], 16.0)
-        self.assertEqual(self.beams[next_beam][1], 24.0)
+        self.assertEqual(self.beams[next_beam][1], 32.0)
 
 
 class FewestLayersBeamPick(unittest.TestCase):

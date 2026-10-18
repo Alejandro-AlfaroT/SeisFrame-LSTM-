@@ -487,10 +487,43 @@ def _create_hinge_node(source_node, hinge_node):
     ops.node(hinge_node, *ops.nodeCoord(source_node))
 
 
+def gravity_beam_released(ele_tag, member_type):
+    """Whether this beam's ends are released in the current model: the perimeter-SFRS design model and an
+    interior (gravity) beam (Model.Member_Groups.member_system). Columns are never released."""
+    if member_type not in ("beam_x", "beam_y") or getattr(sp, "LATERAL_DESIGN_MODEL", "all_frames") != "perimeter_sfrs":
+        return False
+    kind, _story, i, j = mg.member_position(ele_tag)
+    if kind != member_type:
+        raise mg.GroupedStateError(f"Element {ele_tag} is built as a {member_type} but its tag is a {kind}.")
+    return mg.member_system(member_type, i, j, sp.NUM_BAY_X, sp.NUM_BAY_Y) == mg.SYSTEM_GRAVITY
+
+
+def _create_released_end_hinge(ele_tag, end_id, retained_node, hinge_node, member_type, props, length):
+    """A pinned beam end for the perimeter-SFRS design model: the two bending rotations of the end carry an elastic
+    spring of GRAVITY_BEAM_RELEASE_STIFFNESS_RATIO times the member hinge stiffness (a numerical pin); the other
+    degrees of freedom stay tied as for a hinge. No design moment is read from such an end."""
+    orient, tied_dofs = _orientation(member_type)
+    ops.equalDOF(retained_node, hinge_node, *tied_dofs)
+    ratio = float(getattr(sp, "GRAVITY_BEAM_RELEASE_STIFFNESS_RATIO", 1.0e-6))
+    materials = {}
+    for direction, axis in ((5, "y"), (6, "z")):
+        tag = imk_material_tag(ele_tag, end_id, direction)
+        ke = imk_hinge_stiffness(member_type, f"rot_{axis}", length, props=props)
+        ops.uniaxialMaterial("Elastic", tag, ratio * ke)
+        materials[axis] = {"material_type": "Elastic", "material_tag": tag, "released": True,
+                           "elastic_stiffness_kip_in_per_rad": ratio * ke, "release_stiffness_ratio": ratio,
+                           "basis": "perimeter-SFRS design model: interior beam end released in bending (LATERAL_DESIGN_MODEL)"}
+    ops.element("zeroLength", hinge_element_tag(ele_tag, end_id), retained_node, hinge_node,
+                "-mat", imk_material_tag(ele_tag, end_id, 5), imk_material_tag(ele_tag, end_id, 6), "-dir", 5, 6, "-orient", *orient)
+    return materials
+
+
 def _create_end_hinge(
     ele_tag, end_id, retained_node, hinge_node, member_type, props, length, backbone=None,
-    *, energy_profiles=None, reverse_physical=False, verification_only=False, anchored=False
+    *, energy_profiles=None, reverse_physical=False, verification_only=False, anchored=False, released=False
 ):
+    if released:
+        return _create_released_end_hinge(ele_tag, end_id, retained_node, hinge_node, member_type, props, length)
     orient, tied_dofs = _orientation(member_type)
     ops.equalDOF(retained_node, hinge_node, *tied_dofs)
 
@@ -650,14 +683,15 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
 
     _create_hinge_node(n_i, i_hinge_node)
     _create_hinge_node(n_j, j_hinge_node)
+    released = gravity_beam_released(ele_tag, member_type)
     materials_i = _create_end_hinge(ele_tag, 1, n_i, i_hinge_node, member_type, props, length, backbones["i"],
         energy_profiles=None if energy_profiles is None else energy_profiles["i"],
         reverse_physical=reverse_connectivity, verification_only=_verification_calibrations is not None,
-        anchored=anchored)
+        anchored=anchored, released=released)
     materials_j = _create_end_hinge(ele_tag, 2, n_j, j_hinge_node, member_type, props, length, backbones["j"],
         energy_profiles=None if energy_profiles is None else energy_profiles["j"],
         reverse_physical=not reverse_connectivity, verification_only=_verification_calibrations is not None,
-        anchored=anchored)
+        anchored=anchored, released=released)
 
     ke_y = imk_hinge_stiffness(member_type, "rot_y", length, props=props)
     ke_z = imk_hinge_stiffness(member_type, "rot_z", length, props=props)
@@ -670,6 +704,8 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
         "energy_mapping_mode": getattr(sp, "IMK_ENERGY_MAPPING_MODE", "legacy_unmapped"),
         "verification_only": _verification_calibrations is not None,
         "installed_materials": {"i": materials_i, "j": materials_j},
+        "ends_released": released,
+        "lateral_design_model": getattr(sp, "LATERAL_DESIGN_MODEL", "all_frames"),
         # The element spans the two hinge nodes, so ops.eleNodes reports those
         # rather than the structural joints. Anything assembling forces at
         # joints needs the physical joints recorded here; the end nodes the

@@ -183,22 +183,6 @@ class RecipeEvidenceTests(unittest.TestCase):
 
 
 class ProbeWorkflowTests(unittest.TestCase):
-    def test_both_probe_factories_share_the_recipe_and_keep_their_assertion_scopes(self):
-        from Design.Verify_Designs import probe_config as verify_probe
-        from Design.Evidence_Summary import probe_config as evidence_probe
-        a, b = verify_probe("2026-09-24"), evidence_probe("2026-09-24")
-        self.assertEqual(a.floor_analysis.slab_refinement, PROBE_SLAB_REFINEMENT)
-        self.assertEqual(b.floor_analysis.slab_refinement, PROBE_SLAB_REFINEMENT)
-        self.assertTrue(a.slab_actions.all_asserted() and b.slab_actions.all_asserted())
-        self.assertTrue(a.verification.floor_hand_check_verified)
-        self.assertEqual(b.verification.asserted_by, "")
-        self.assertEqual(PROBE_SLAB_REFINEMENT["recipe"], "graded_face_v1")
-        self.assertEqual(PROBE_SLAB_REFINEMENT["local_extension"],
-                         {"method": "failed_witness_face_band_v1", "max_extra_levels": 2})
-        self.assertEqual(PROBE_SLAB_REFINEMENT["moment_tolerance"], .05)
-        self.assertEqual(PROBE_SLAB_REFINEMENT["shear_tolerance"], .05)
-        self.assertEqual(PROBE_SLAB_REFINEMENT["max_shells"], 130000)
-
     def test_methodology_identity_is_geometry_independent_with_a_recipe(self):
         from Design.Verify_Designs import probe_config, methodology_sha256
         import Structure_Parameters as sp

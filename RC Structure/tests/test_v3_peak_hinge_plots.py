@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 RC = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('peak_plots', RC/'pilots/v2WeightedCalibrationV3/plot_peak_hinges.py')
+spec = importlib.util.spec_from_file_location('peak_plots', RC/'tools/multi_device_calibration/plot_peak_hinges.py')
 plots = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plots)
 import test_weighted_seismic_collection as fixtures

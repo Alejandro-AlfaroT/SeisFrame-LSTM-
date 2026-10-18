@@ -110,11 +110,9 @@ class RiskBasis(unittest.TestCase):
                                                                           declaration_basis="b", site_class="D")), verbose=False)
 
     def test_policy_and_both_probe_factories_inherit_the_category(self):
-        from Design import Evidence_Summary as evidence
         self.assertEqual(DemandPolicy().risk_category, "III")
         self.assertEqual(DesignConfig.from_structure_parameters().demands.risk_category, "III")
         self.assertEqual(verify.probe_config(PROBE_DATE).demands.risk_category, "III")
-        self.assertEqual(evidence.probe_config(PROBE_DATE).demands.risk_category, "III")
         with restored_parameters():
             sp.apply_risk_category("II")
             self.assertEqual((sp.ASCE_RISK_CATEGORY, sp.ASCE_IE), ("II", 1.0))                # set together, never one alone

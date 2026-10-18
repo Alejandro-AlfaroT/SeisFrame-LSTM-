@@ -56,16 +56,46 @@ SEED = 20260731
 # so every value is an exact binary fraction and its inch value (6 x ticks) is exact. The basis name
 # travels with every plan built from these ranges so a plan of an earlier population is never mistaken
 # for this one.
-POPULATION_BASIS = "v2_bays_18_30ft_stories_12_18ft_half_foot_steps_counts_unchanged_sdc_c_d_20261005"
+POPULATION_BASIS = "v2_bays3_6_18_30ft_stories_12_18ft_half_foot_steps_aspect_le_2p25_sdc_c_d_20261014"
 GEOMETRY_INCREMENT_FT = 0.5
 RANGES = {
-    "num_bay_x": tuple(range(2, 7)),
-    "num_bay_y": tuple(range(2, 7)),
+    # Bays 3-6 each way (user decision 2026-10-14: two-bay frames were judged unrealistic and produced the
+    # slender towers; the former population allowed 2-6).
+    "num_bay_x": tuple(range(3, 7)),
+    "num_bay_y": tuple(range(3, 7)),
     "num_floor": tuple(range(4, 10)),
     "story_height_ft": tuple(tick / 2 for tick in range(24, 37)),  # 12–18 ft inclusive, 0.5 ft steps: 13 levels.
     "bay_x_width_ft": tuple(tick / 2 for tick in range(36, 61)),   # 18–30 ft inclusive, 0.5 ft steps: 25 levels.
     "bay_y_width_ft": tuple(tick / 2 for tick in range(36, 61)),
 }
+# Slenderness cap of the population (user decision 2026-10-14): the height above the base over the least
+# plan dimension is at most this; a Cartesian combination above it is not a member of the population.
+MAX_HEIGHT_TO_WIDTH_RATIO = 2.25
+
+
+def height_to_width_ratio(num_bay_x, num_bay_y, num_floor, story_height_ft, bay_x_width_ft, bay_y_width_ft):
+    """Building height over the least plan dimension (both from the same half-foot grid)."""
+    height = num_floor * float(story_height_ft)
+    width = min(num_bay_x * float(bay_x_width_ft), num_bay_y * float(bay_y_width_ft))
+    if width <= 0.0:
+        raise ValueError("A plan dimension must be positive.")
+    return height / width
+
+
+def geometry_admissible(values):
+    """Whether one geometry (a mapping or a tuple in the key order of RANGES) is a member of the population:
+    every level listed and the height-to-width ratio within MAX_HEIGHT_TO_WIDTH_RATIO."""
+    if not isinstance(values, dict):
+        values = dict(zip(RANGES, values))
+    for key, levels in RANGES.items():
+        if key not in values:
+            raise ValueError(f"geometry lacks {key}")
+        if key.startswith("num_"):
+            if type(values[key]) is not int or values[key] not in levels:
+                return False
+        elif float(values[key]) not in [float(v) for v in levels]:
+            return False
+    return height_to_width_ratio(**{key: values[key] for key in RANGES}) <= MAX_HEIGHT_TO_WIDTH_RATIO + 1e-12
 
 
 def feet_label(value_ft):
@@ -91,7 +121,9 @@ SAMPLING_METHOD = "seeded_shuffled_cartesian_prefix_v1"
 
 
 def _shuffled_cartesian_pool(seed):
-    geometries = list(product(*RANGES.values()))
+    # The admissible Cartesian pool (the height-to-width cap applied before the shuffle, so the same seed
+    # gives the same order whatever the cap removed).
+    geometries = [g for g in product(*RANGES.values()) if geometry_admissible(g)]
     random.Random(seed).shuffle(geometries)
     return geometries
 
@@ -114,9 +146,10 @@ def sampling_provenance(seed, method=SAMPLING_METHOD, include_source=True):
     seed, bounds or levels still refuses the resume. The written plan always carries the hash."""
     if method not in CANDIDATE_PLANNERS:
         raise ValueError(f"Unknown sampling method {method!r}; registered: {sorted(CANDIDATE_PLANNERS)}.")
-    pool = 1
+    cartesian = 1
     for values in RANGES.values():
-        pool *= len(values)
+        cartesian *= len(values)
+    pool = sum(1 for g in product(*RANGES.values()) if geometry_admissible(g))
     return {
         "method": method, "seed": seed, "population_basis": POPULATION_BASIS,
         "parameter_order": list(RANGES),
@@ -125,8 +158,11 @@ def sampling_provenance(seed, method=SAMPLING_METHOD, include_source=True):
         "level_counts": {key: len(values) for key, values in RANGES.items()},
         "discrete_mapping": ("each parameter takes one of its listed levels; lengths are integer half-foot ticks "
                              f"({GEOMETRY_INCREMENT_FT} ft), counts are integers; no continuous draw is rounded"),
+        "max_height_to_width_ratio": MAX_HEIGHT_TO_WIDTH_RATIO,
+        "cartesian_size": cartesian,
         "pool_size": pool,
-        "selection": "contiguous slice (geometry offset, count) of the seeded shuffle of the full Cartesian pool",
+        "selection": ("contiguous slice (geometry offset, count) of the seeded shuffle of the admissible Cartesian pool "
+                      "(height over least plan width within max_height_to_width_ratio)"),
         "duplicates_possible": False,
         "hazard_assignment": "round-robin over the seeded shuffle of the site labels (seed + 2); not a sampled coordinate",
         **({"source_sha256": sha256_file(Path(__file__).resolve())} if include_source else {}),

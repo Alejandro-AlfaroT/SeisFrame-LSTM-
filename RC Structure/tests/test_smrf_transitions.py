@@ -13,8 +13,23 @@ from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import Structure_Parameters as sp                                              # noqa: E402
 from Design import SMRF_Transitions as tr                                      # noqa: E402
 from Model.Member_Groups import MemberDesign                                   # noqa: E402
+
+_GRID = None
+
+
+def setUpModule():
+    # The hand-worked coordinates below are those of even spacing (a cage from before the 2026-10-14 bar
+    # grid); the transition logic is independent of the grid. GridCoordinates checks the grid cage.
+    global _GRID
+    _GRID = sp.BAR_POSITION_GRID_IN
+    sp.BAR_POSITION_GRID_IN = None
+
+
+def tearDownModule():
+    sp.BAR_POSITION_GRID_IN = _GRID
 
 LOWER = MemberDesign("column", 30.0, 30.0, 5.0, 10, 4, 4, 2, 4, 4, 4.0, (4, 4))  # No. 10, 4/4/2, No. 4 hoops 4 legs at 4 in
 KWARGS = dict(fy_ksi=60.0, clear_cover_in=1.5, upper_clear_height_in=140.0, joint_depth_in=28.0)
@@ -63,6 +78,25 @@ class DevelopmentAndLap(unittest.TestCase):
         self.assertAlmostEqual(tr.lap_length_in(10, 8, 5.0, 60.0), max(large, 1.3 * small), places=9)
         self.assertEqual(tr.lap_length_in(8, 10, 5.0, 60.0), tr.lap_length_in(10, 8, 5.0, 60.0))
         self.assertAlmostEqual(tr.lap_length_in(10, 8, 5.0, 60.0, favourable=False), 1.5 * tr.lap_length_in(10, 8, 5.0, 60.0), places=9)
+
+
+class GridCoordinates(unittest.TestCase):
+    def test_bars_of_a_grid_cage_sit_on_the_grid_in_the_hoop_corners(self):
+        saved = sp.BAR_POSITION_GRID_IN
+        sp.BAR_POSITION_GRID_IN = 0.5
+        try:
+            bars = tr.bar_coordinates(LOWER, 1.5)
+            c = tr.centroid_cover_in(LOWER, 1.5)
+            self.assertEqual(c, 3.0)                                                   # 2.635 taken up to the grid
+            for bar in bars:
+                for value in (bar["x_in"] + 15.0, bar["y_in"] + 15.0):
+                    self.assertAlmostEqual(value / 0.5, round(value / 0.5), places=9, msg=f"{bar} off the grid")
+            self.assertEqual({b["x_in"] for b in bars if b["face"] == "left"}, {-(15.0 - c)})
+            case = tr.development_case(LOWER, 1.5)
+            self.assertAlmostEqual(case["clear_cover_to_bar_in"], c - 0.5 * 1.27)      # the bar in the hoop corner
+            self.assertTrue(case["favourable"])
+        finally:
+            sp.BAR_POSITION_GRID_IN = saved
 
 
 class BarCoordinates(unittest.TestCase):

@@ -42,12 +42,22 @@ from pathlib import Path
 import Structure_Parameters as sp
 from Design import Grouped_Design as gd
 from Design import Group_Selection as selection
-from Design.Section_Design import COLUMN_SIZES_IN, beam_ladder
+from Design.Section_Design import (BEAM_CONCRETE_STRENGTHS_KSI, COLUMN_CONCRETE_STRENGTHS_KSI, COLUMN_SIZES_IN,
+                                   beam_ladder)
 from Model import Member_Groups as mg
 from Model import Member_Properties as mp
 
-SEARCH_VERSION = "grouped_search_v1"
+SEARCH_VERSION = "grouped_search_v2"
 IMPROVEMENT_POLICY_ID = "dominance_concrete_and_total_reinforcement_v1"
+# The lever order of the iterative design (user decision 2026-10-16): concrete strength first, then the reinforcement
+# (which every evaluation exhausts through the cage selection), and the section size last. A growth move therefore
+# steps the common column or beam grade one rung before any size; only a failure that is room for bars (threading,
+# slab mats, bar rows, a cage layout) goes to the size directly, since a grade makes no room.
+LEVER_ORDER_ID = "strength_then_reinforcement_then_size_v1"
+GRADE_LADDERS = {"column": tuple(COLUMN_CONCRETE_STRENGTHS_KSI), "beam": tuple(BEAM_CONCRETE_STRENGTHS_KSI)}
+GRADE_KEYS = {"column": "column_grade", "beam": "beam_grade"}
+ROOM_FAILURES = ("beam.bars_thread_column", "beam.bar_stacking_clear_of_slab_mats", "beam.cage_layout", "column.cage_layout",
+                 "joint.through_bar_depth")
 MAX_COLUMN_SIZE_STEP_IN = 4.0          # adjacent bands: face step < 3 in on each face (ACI 318-19 10.7.4.2)
 MAX_BEAM_REDUCTION_OPTIONS = 3         # lighter beam rungs looked at per group and sweep (the first that fits is tried)
 
@@ -60,6 +70,7 @@ class SearchPolicy:
     improvement_policy: str = IMPROVEMENT_POLICY_ID
     quantity_tolerance: float = 1e-9
     reduction_order: str = "top_band_first__columns_then_beams__one_step_per_group_per_sweep"
+    lever_order: str = LEVER_ORDER_ID
 
     def problems(self):
         issues = []
@@ -69,6 +80,8 @@ class SearchPolicy:
                 issues.append(f"{name} must be a nonnegative integer")
         if self.improvement_policy != IMPROVEMENT_POLICY_ID:
             issues.append(f"unknown improvement policy {self.improvement_policy!r}")
+        if self.lever_order != LEVER_ORDER_ID:
+            issues.append(f"unknown lever order {self.lever_order!r}")
         return issues
 
 
@@ -107,29 +120,131 @@ def _beam_step(design, move):
 
 
 def resized(state, gid, size):
-    design = state.designs[gid]
-    return state.with_designs({gid: replace(design, b_in=float(size[0]), h_in=float(size[1]))})
+    """``gid``'s group at ``size``; under the system policy the whole design tie takes it."""
+    design = replace(state.designs[gid], b_in=float(size[0]), h_in=float(size[1]))
+    tie = state.tie_of(gid)
+    return state.with_tied_designs({tie: design}) if tie else state.with_designs({gid: design})
+
+
+def _tied_groups(state, gid):
+    tie = state.tie_of(gid)
+    return tuple(state.ties()[tie]) if tie else (gid,)
 
 
 def _chains(state):
-    return {location: selection._column_chain(state, location) for location in mg.COLUMN_LOCATIONS}
+    """{unit label: [band tuples of group ids]} of the column lines selected together (Group_Selection._column_units)."""
+    return {label: selection._column_chain(state, locations) for label, locations in selection._column_units(state)}
+
+
+# ---- concrete grades (strength first) ---------------------------------------------------------------------------
+def common_grade(state, kind):
+    """The one column or beam grade of a grouped design (Grouped_Design._require_common_grades)."""
+    grades = {d.fc_ksi for d in state.designs.values() if d.is_column == (kind == "column")}
+    if len(grades) != 1:
+        raise mg.GroupedStateError(f"{kind} groups use different concrete grades {sorted(grades)}.")
+    return grades.pop()
+
+
+def next_grade(state, kind):
+    """The next rung of the common grade ladder above the current grade, or None at the top (a grade below the
+    ladder, a legacy seed, steps to its first rung)."""
+    current = common_grade(state, kind)
+    return next((fc for fc in GRADE_LADDERS[kind] if fc > current + 1e-9), None)
+
+
+def regraded(state, kind, fc):
+    """Every column (or beam) group at grade ``fc``: the one grade per member type of the engine."""
+    return state.with_designs({gid: replace(d, fc_ksi=float(fc)) for gid, d in state.designs.items()
+                               if d.is_column == (kind == "column")})
+
+
+def apply_moves(state, moves):
+    """Apply growth moves {target: (to, reason)}: a grade key to every group of that kind, a design tie to its groups,
+    a group id to that group (its tie under the system policy)."""
+    for key, (to, _why) in moves.items():
+        if key in GRADE_KEYS.values():
+            state = regraded(state, key.split("_")[0], to)
+        elif key in state.ties():
+            state = state.with_tied_designs({key: replace(state.tie_designs()[key], b_in=float(to[0]), h_in=float(to[1]))})
+        else:
+            state = resized(state, key, to)
+    return state
+
+
+def _move_rows(moves):
+    return [{"target": key, "kind": "grade" if key in GRADE_KEYS.values() else "size",
+             "to": (float(to) if key in GRADE_KEYS.values() else list(to)), "reason": why}
+            for key, (to, why) in sorted(moves.items())]
+
+
+def _moves_summary(moves):
+    grades = [f"{key.split('_')[0]} grade -> {to:g} ksi" for key, (to, _why) in sorted(moves.items()) if key in GRADE_KEYS.values()]
+    sizes = sum(1 for key in moves if key not in GRADE_KEYS.values())
+    parts = grades + ([f"grow {sizes} group(s)/tie(s)"] if sizes else [])
+    return "; ".join(parts) if parts else "no move"
+
+
+# ---- the two systems (decision D6: the gravity sections never exceed the perimeter-frame sections) ----------------
+def _dominating_rung(member_type, b, h):
+    """The lightest beam rung at least ``b`` wide and ``h`` deep ((b, h) itself when it is a rung), or None."""
+    rungs = beam_rungs(member_type)
+    if (b, h) in rungs:
+        return (b, h)
+    fits = [r for r in rungs if r[0] >= b - 1e-9 and r[1] >= h - 1e-9]
+    return fits[0] if fits else None
+
+
+def system_coupling_problem(state, gid, size):
+    """Why an SFRS tie may not take ``size`` beside the gravity tie, or None; nothing under the band policy."""
+    tie = state.tie_of(gid)
+    if tie not in ("sfrs_column", "sfrs_beam"):
+        return None
+    other = state.tie_designs().get("gravity_column" if tie == "sfrs_column" else "gravity_beam")
+    if other is None:
+        return None
+    if size[0] < other.b_in - 1e-9 or size[1] < other.h_in - 1e-9:
+        return (f"would be smaller ({size[0]:g} x {size[1]:g} in) than the gravity system's {other.b_in:g} x {other.h_in:g} in: "
+                "the gravity sections never exceed the perimeter-frame sections (decision D6, 2026-10-16)")
+    return None
+
+
+def enforce_system_coupling(state):
+    """Grow an SFRS tie up to the gravity tie where a gravity move overtook it. Returns (state, [(tie, from, to, reason)])."""
+    changes = []
+    designs = state.tie_designs()
+    if not designs:
+        return state, changes
+    sfrs, gravity = designs.get("sfrs_column"), designs.get("gravity_column")
+    if sfrs is not None and gravity is not None and gravity.b_in > sfrs.b_in + 1e-9:
+        target = (gravity.b_in, gravity.h_in)
+        changes.append(("sfrs_column", [sfrs.b_in, sfrs.h_in], list(target),
+                        "the perimeter columns are never smaller than the interior columns (decision D6)"))
+        state = state.with_tied_designs({"sfrs_column": replace(sfrs, b_in=target[0], h_in=target[1])})
+    sfrs, gravity = designs.get("sfrs_beam"), designs.get("gravity_beam")
+    if sfrs is not None and gravity is not None and (gravity.b_in > sfrs.b_in + 1e-9 or gravity.h_in > sfrs.h_in + 1e-9):
+        target = _dominating_rung(sfrs.member_type, max(sfrs.b_in, gravity.b_in), max(sfrs.h_in, gravity.h_in))
+        if target is not None and (target[0], target[1]) != (sfrs.b_in, sfrs.h_in):
+            changes.append(("sfrs_beam", [sfrs.b_in, sfrs.h_in], list(target),
+                            "the perimeter beams are never smaller than the interior beams (decision D6)"))
+            state = state.with_tied_designs({"sfrs_beam": replace(sfrs, b_in=target[0], h_in=target[1])})
+    return state, changes
 
 
 def column_taper_problem(state, gid, size):
     """Why a column group may not take ``size`` beside the bands below and above it, or None."""
     for chain in _chains(state).values():
-        if gid not in chain:
+        index = next((k for k, band in enumerate(chain) if gid in band), None)
+        if index is None:
             continue
-        index = chain.index(gid)
         if index > 0:
-            lower = state.designs[chain[index - 1]].b_in
+            lower = state.designs[chain[index - 1][0]].b_in
             if size[0] > lower:
                 return f"would be larger ({size[0]:g} in) than the column below it ({lower:g} in)"
             if lower - size[0] > MAX_COLUMN_SIZE_STEP_IN:
                 return (f"would step in {0.5 * (lower - size[0]):g} in per face from the column below ({lower:g} in): "
                         "3 in or more needs dowels (ACI 318-19 10.7.4.2), not a declared transition")
         if index < len(chain) - 1:
-            upper = state.designs[chain[index + 1]].b_in
+            upper = state.designs[chain[index + 1][0]].b_in
             if size[0] < upper:
                 return f"would be smaller ({size[0]:g} in) than the column above it ({upper:g} in)"
             if size[0] - upper > MAX_COLUMN_SIZE_STEP_IN:
@@ -145,14 +260,14 @@ def enforce_column_taper(state):
         for _ in range(4 * len(chain)):
             moved = False
             for index in range(len(chain) - 1):
-                lower, upper = state.designs[chain[index]], state.designs[chain[index + 1]]
+                lower, upper = state.designs[chain[index][0]], state.designs[chain[index + 1][0]]
                 if upper.b_in > lower.b_in:
-                    target, gid, reason = (upper.b_in, upper.h_in), chain[index], "a column may not be smaller than the one above it"
+                    target, gid, reason = (upper.b_in, upper.h_in), chain[index][0], "a column may not be smaller than the one above it"
                 elif lower.b_in - upper.b_in > MAX_COLUMN_SIZE_STEP_IN:
                     grown = _column_step(upper, +1)
                     if grown is None:
                         continue
-                    target, gid, reason = grown, chain[index + 1], "the face step from the column below must stay under 3 in"
+                    target, gid, reason = grown, chain[index + 1][0], "the face step from the column below must stay under 3 in"
                 else:
                     continue
                 changes.append((gid, [state.designs[gid].b_in, state.designs[gid].h_in], list(target), reason))
@@ -170,13 +285,14 @@ def beam_size_problem(state, gid, size):
     if b < min(0.3 * h, 10.0):
         return f"width {b:g} in is below min(0.3 h, 10 in) (ACI 318-19 18.6.2.1(b))"
     with mg.installed(trial):
-        design = trial.designs[gid]
-        d = h - mp.longitudinal_cover_in(design)
-        for tag in trial.groups[gid]["member_tags"]:
-            member = trial.member(tag)
-            clear = mp.beam_clear_span_in(member)
-            if clear < 4.0 * d:
-                return f"clear span {clear:g} in of member {tag} is below 4 d = {4.0 * d:g} in (ACI 318-19 18.6.2.1(a))"
+        for group in _tied_groups(trial, gid):                   # every group of the tie takes the size
+            design = trial.designs[group]
+            d = h - mp.longitudinal_cover_in(design)
+            for tag in trial.groups[group]["member_tags"]:
+                member = trial.member(tag)
+                clear = mp.beam_clear_span_in(member)
+                if clear < 4.0 * d:
+                    return f"clear span {clear:g} in of member {tag} is below 4 d = {4.0 * d:g} in (ACI 318-19 18.6.2.1(a))"
     if sp.SLAB_THICKNESS_IN is not None and h <= sp.SLAB_THICKNESS_IN:
         return "no deeper than the slab"
     return None
@@ -187,63 +303,120 @@ def _band_of(state, story):
     return next(g["band"] for g in state.groups.values() if story in g["stories_or_floors"])
 
 
+def _core_groups_of_beam(gid, types):
+    """The column groups forming the cores of the joints a beam group threads (from the capacity design's joint types)."""
+    return sorted({kind["core_group"] for kind in types.values()
+                   for item in (kind.get("threading") or {}).values() if item.get("beam_group") == gid})
+
+
 def propose_growth(evaluation, state):
-    """The groups a not-feasible candidate asks to grow: {gid: (new size, reason)}. Empty when none is known."""
+    """The moves a not-feasible candidate asks for: {target: (to, reason)}; empty when none is known.
+
+    ``target`` is "column_grade" / "beam_grade" with the next grade (strength first), or a group id (its design
+    tie under the system policy) with a ladder size (size last; see LEVER_ORDER_ID). Room-for-bars failures go to
+    the size directly. Under the system policy drift moves the perimeter frames only, a lane-limited beam moves
+    the columns it threads, and the gravity ties grow for their own checks; the D6 coupling is applied afterwards
+    by enforce_system_coupling.
+    """
     moves = {}
+    columns = sorted(g for g, group in state.groups.items() if group["member_type"] == "column")
+    beams = sorted(g for g, group in state.groups.items() if group["member_type"] != "column")
+    # Under the band policy every frame is part of the SFRS; under the system policy only the perimeter groups are.
+    sfrs = {g for g in state.groups if not state.ties() or state.system_of(g) == mg.SYSTEM_SFRS}
 
-    def grow_column(gid, reason):
+    def grade_move(kind, reason):
+        fc = next_grade(state, kind)
+        if fc is None:
+            return False
+        moves.setdefault(GRADE_KEYS[kind], (fc, reason))
+        return True
+
+    def size_key(gid):
+        return state.tie_of(gid) or gid
+
+    def grow_column(gid, reason, grade_first=True):
+        if grade_first and grade_move("column", reason):
+            return
         size = _column_step(state.designs[gid], +1)
-        if size is not None and gid not in moves:
-            moves[gid] = (size, reason)
+        if size is not None:
+            moves.setdefault(size_key(gid), (size, reason))
+        elif not grade_first:
+            grade_move("column", reason)                        # no larger size on the ladder: the grade is what is left
 
-    def grow_beam(gid, reason, prefer="deeper"):
+    def grow_beam(gid, reason, prefer="deeper", grade_first=True):
+        if grade_first and grade_move("beam", reason):
+            return
         design = state.designs[gid]
         order = ("wider", "deeper", "larger") if prefer == "wider" else ("deeper", "wider", "larger")
         size = next((s for s in (_beam_step(design, move) for move in order) if s is not None), None)
-        if size is not None and gid not in moves:
-            moves[gid] = (size, reason)
+        if size is not None:
+            moves.setdefault(size_key(gid), (size, reason))
+        elif not grade_first:
+            grade_move("beam", reason)
 
-    columns = sorted(g for g, group in state.groups.items() if group["member_type"] == "column")
-    beams = sorted(g for g, group in state.groups.items() if group["member_type"] != "column")
     if evaluation["status"] == "infeasible":
         stage, evidence = evaluation.get("failed_stage"), evaluation.get("failure_evidence") or {}
         if stage == "slab_thickness":
             for gid in beams:
-                grow_beam(gid, "no slab thickness passes on these beams: a deeper beam raises the beam-to-slab stiffness")
+                grow_beam(gid, "no slab thickness passes on these beams: a deeper beam raises the beam-to-slab stiffness",
+                          grade_first=False)
         elif stage == "gravity_analysis":
             for gid in columns:
-                grow_column(gid, "the gravity analysis did not converge on these columns")
+                grow_column(gid, "the gravity analysis did not converge on these columns", grade_first=False)
         elif stage == "capacity_design" and evidence.get("group_id"):
             grow_column(evidence["group_id"], "a factored axial load is outside this section's strength domain")
+        elif stage == "bar_rows":
+            for gid in evidence.get("group_ids") or []:
+                if gid in state.groups:
+                    grow_beam(gid, "the beam's bar rows reach past mid-depth beside the beams it crosses", grade_first=False)
         return moves
     constraints = evaluation["constraints"]
     capacity = (evaluation.get("evidence") or {}).get("capacity") or {}
     types = capacity.get("joint_types") or {}
     blocked = {item["blocked_at"]: item.get("blocked_by") for item in (constraints.get("exhausted_column_lines") or {}).values()
                if item.get("blocked_at")}
+    lane_limited = set(constraints.get("lane_limited_beam_groups") or [])
     for gid in constraints.get("exhausted_groups", []):
         if state.groups[gid]["member_type"] != "column":
-            grow_beam(gid, "no admissible cage reaches this group's flexural demand")
+            if gid in lane_limited:
+                # The cages that reach the demand do not thread the column bars: room, so the columns the beam threads.
+                cores = _core_groups_of_beam(gid, types) or [g for g in columns if g in sfrs] or columns
+                for core in cores:
+                    grow_column(core, "the beam's bars do not thread this column's cage in enough lanes", grade_first=False)
+            else:
+                grow_beam(gid, "no admissible cage reaches this group's flexural demand")
         elif not blocked:
             grow_column(gid, "no admissible cage chain along this column line (strength, strong column or transition)")
-        elif gid in blocked:
+        elif gid in blocked or size_key(gid) in blocked:
             # Only the band at which the chain breaks grows; the bands below follow through the taper rule if they must.
-            grow_column(gid, f"the cage chain of this column line breaks at this band: {blocked[gid]}")
+            grow_column(gid, f"the cage chain of this column line breaks at this band: {blocked.get(gid) or blocked.get(size_key(gid))}")
     for item in constraints.get("capacity_design_failed_checks", []):
         check, location = item["id"], item.get("location") or ""
+        room = check in ROOM_FAILURES
         if check.startswith("beam.capacity_shear") or check in ("beam.hoops_selected", "beam.cage_layout"):
-            grow_beam(location, f"{check} is not met", prefer="wider")
+            grow_beam(location, f"{check} is not met", prefer="wider", grade_first=not room)
         elif check.startswith("column.") and location in state.groups:
-            grow_column(location, f"{check} is not met")
+            grow_column(location, f"{check} is not met", grade_first=not room)
         elif check == "column.transition":
             upper = location.split(">", 1)[-1]
             if upper in state.groups:
-                grow_column(upper, "the transition from the column below is not a supported one")
+                grow_column(upper, "the transition from the column below is not a supported one", grade_first=False)
+        elif check == "beam.bar_stacking_clear_of_slab_mats":
+            # The stacked bars of the beams at this joint type meet the slab mats: room, so the beams there widen.
+            kind = types.get(location)
+            for item in (kind or {}).get("threading", {}).values():
+                if item.get("beam_group") in state.groups:
+                    grow_beam(item["beam_group"], f"{check} is not met at joint type {location}", prefer="wider", grade_first=False)
         elif check in ("joint.shear_screen", "joint.through_bar_depth", "joint.terminating_bar_hook", "beam.bars_thread_column"):
             type_id = location.split("/")[1] if check == "joint.shear_screen" else location.split("/")[0]
             kind = types.get(type_id)
             if kind is not None:
-                grow_column(kind["core_group"], f"{check} is not met at the joints this column forms the core of")
+                grow_column(kind["core_group"], f"{check} is not met at the joints this column forms the core of",
+                            grade_first=check in ("joint.shear_screen", "joint.terminating_bar_hook"))
+        elif check.startswith("gravity.") and location in state.groups:
+            # A gravity group's 18.14 check (its capacity shear is the one that can fail on a selected cage).
+            grow = grow_column if state.groups[location]["member_type"] == "column" else grow_beam
+            grow(location, f"{check} is not met")
     for item in constraints.get("joint_checks_failed", []):
         if item["id"] != "scwb":
             continue
@@ -261,18 +434,22 @@ def propose_growth(evaluation, state):
         except (IndexError, ValueError):
             continue
         band = _band_of(state, story)
-        targets = [g for g in beams if g.startswith(f"{band}__beam_{axis}__")]
+        targets = [g for g in beams if g.startswith(f"{band}__beam_{axis}__") and g in sfrs]
         before = len(moves)
         for gid in targets:
             grow_beam(gid, f"story {story} exceeds the drift limit in {axis}")
         if len(moves) == before:
-            for gid in (g for g in columns if g.startswith(f"{band}__")):
+            for gid in (g for g in columns if g.startswith(f"{band}__") and g in sfrs):
                 grow_column(gid, f"story {story} exceeds the drift limit in {axis} and its beams have no deeper rung")
     return moves
 
 
 def reduction_order(state):
-    """Group ids in the order the reduction phase offers them a smaller section."""
+    """Group ids in the order the reduction phase offers them a smaller section (one representative per design tie
+    under the system policy: the perimeter columns, the interior columns, the perimeter beams, the interior beams)."""
+    ties = state.ties()
+    if ties:
+        return [ties[name][0] for name in ("sfrs_column", "gravity_column", "sfrs_beam", "gravity_beam") if name in ties]
     bands = sorted({g["band"] for g in state.groups.values()}, reverse=True)
     order = []
     for band in bands:
@@ -370,8 +547,10 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
 
     # ---- feasibility ----
     state, changes = enforce_column_taper(seed)
+    state, coupling = enforce_system_coupling(state)
     proposal = {"kind": "seed", "summary": "seed design", "reason": "the search starts here",
-                "taper_adjustments": [{"group_id": g, "from": a, "to": b, "reason": r} for g, a, b, r in changes]}
+                "taper_adjustments": [{"group_id": g, "from": a, "to": b, "reason": r} for g, a, b, r in changes],
+                "system_coupling": [{"tie": t, "from": a, "to": b, "reason": r} for t, a, b, r in coupling]}
     current, stop, trials = None, None, 0
     while True:
         evaluation = evaluate(state, "feasibility", proposal)
@@ -392,14 +571,14 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
             stop = {"reason": "feasibility_budget_exhausted",
                     "detail": f"{trials} candidates evaluated without a feasible one; budget exhaustion is not infeasibility"}
             break
-        base = evaluation.get("state") or state
-        for gid, (size, _why) in moves.items():
-            base = resized(base, gid, size)
+        base = apply_moves(evaluation.get("state") or state, moves)
         state, changes = enforce_column_taper(base)
-        proposal = {"kind": "growth", "summary": f"grow {len(moves)} group(s)",
-                    "reason": "the previous candidate's failed constraints",
-                    "moves": [{"group_id": gid, "to": list(size), "reason": why} for gid, (size, why) in sorted(moves.items())],
-                    "taper_adjustments": [{"group_id": g, "from": a, "to": b, "reason": r} for g, a, b, r in changes]}
+        state, coupling = enforce_system_coupling(state)
+        proposal = {"kind": "growth", "summary": _moves_summary(moves),
+                    "reason": "the previous candidate's failed constraints (strength first, then the section)",
+                    "moves": _move_rows(moves),
+                    "taper_adjustments": [{"group_id": g, "from": a, "to": b, "reason": r} for g, a, b, r in changes],
+                    "system_coupling": [{"tie": t, "from": a, "to": b, "reason": r} for t, a, b, r in coupling]}
     feasibility_trials = trials
 
     # ---- reduction ----
@@ -420,8 +599,8 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
                 options = ([_column_step(design, -1)] if design.is_column else _beam_step(design, "smaller")[:MAX_BEAM_REDUCTION_OPTIONS])
                 size = proposal = None
                 for option in (o for o in options if o is not None):
-                    problem = (column_taper_problem(base, gid, option) if design.is_column
-                               else beam_size_problem(base, gid, option))
+                    problem = ((column_taper_problem(base, gid, option) if design.is_column
+                                else beam_size_problem(base, gid, option)) or system_coupling_problem(base, gid, option))
                     proposal = {"kind": "reduction", "group_id": gid, "from": [design.b_in, design.h_in], "to": list(option),
                                 "summary": f"{gid} {design.b_in:g}x{design.h_in:g} -> {option[0]:g}x{option[1]:g}",
                                 "reason": ("next smaller ladder section for this group (less concrete, the least loss of "

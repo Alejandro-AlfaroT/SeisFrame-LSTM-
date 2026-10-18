@@ -78,6 +78,17 @@ SPACING_GRID_IN = 1.0
 SPACING_MIN_IN = 3.0
 STIRRUP_LADDER = ((4, 2), (4, 3), (4, 4), (5, 2), (5, 3), (5, 4), (5, 6))   # (bar, legs): beam hoops
 COLUMN_HOOP_BARS = (4, 5)   # column hoop bars; legs per direction come from the cage (SMRF_Cage_Layout)
+# The largest hoop bar of both ladders: the bar layout is set for it (Structure_Parameters.BAR_LAYOUT_HOOP_DB_IN,
+# design-basis rule 2026-10-14) and the confinement core is measured to it, so a hoop selection never moves the
+# bars or the core it is checked on.
+LAYOUT_HOOP_DB_IN = _BAR[max(max(bar for bar, _legs in STIRRUP_LADDER), max(COLUMN_HOOP_BARS))][0]
+_GRID_OMITTED = object()
+
+
+def _grid_of(member):
+    """The bar grid of a state's member: the record's (bar_position_grid_in, None before the 2026-10-14 rule) or the module's."""
+    import Structure_Parameters as sp
+    return member["bar_position_grid_in"] if "bar_position_grid_in" in member else sp.MODULE_GRID
 # ACI 318-19 Table 18.8.4.3 (printed p. 313): Vn = gamma lambda sqrt(f'c) Aj,
 # gamma by (column, beam in the direction of Vu, confinement by transverse
 # beams according to 15.2.8). "continuous" = the table's "Continuous or meets
@@ -321,7 +332,7 @@ def design_beam_shear(state, strengths, transfer):
     if cover is None:
         raise ValueError("Beam clear cover is required for the hoop arrangement.")
     result = {"families": families, **select_beam_hoops(bw, d, fc, fy, beam["bar_size"], cover, beam["top_bars"],
-                                                        beam["bot_bars"], worst_ve, worst_mechanism)}
+                                                        beam["bot_bars"], worst_ve, worst_mechanism, grid_in=_grid_of(beam))}
     selected = result["hoops"]
     for entries in families.values():
         for data in entries:
@@ -332,7 +343,8 @@ def design_beam_shear(state, strengths, transfer):
     return result
 
 
-def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bars, worst_ve, worst_mechanism):
+def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bars, worst_ve, worst_mechanism,
+                      grid_in=_GRID_OMITTED):
     """Hinge-zone hoops of one beam cage for its governing capacity shear (18.6.4.4, 18.6.5, 22.5.1.2).
 
     Returns the entries design_beam_shear reports beside its families: ve_kip, mechanism_shear_kip,
@@ -349,10 +361,12 @@ def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bar
     # Hinge-zone hoops must also support the top and bottom bars (18.6.4.4 /
     # 25.7.2.3): the leg count is bounded by what the bars need and can engage.
     from Design.SMRF_Cage_Layout import beam_cage, cage_passes
+    import Structure_Parameters as sp
+    grid = sp.MODULE_GRID if grid_in is _GRID_OMITTED else grid_in
     cover = clear_cover_in
     selected, cage = None, None
     for bar, legs in STIRRUP_LADDER:
-        trial = beam_cage(bw, cover, _BAR[bar][0], db, top_bars, bot_bars, legs=legs)
+        trial = beam_cage(bw, cover, _BAR[bar][0], db, top_bars, bot_bars, legs=legs, grid_in=grid)
         if not cage_passes(trial):
             continue
         av = legs * _BAR[bar][1]
@@ -366,7 +380,7 @@ def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bar
             cage = trial
             break
     if cage is None:
-        first = beam_cage(bw, cover, _BAR[STIRRUP_LADDER[0][0]][0], db, top_bars, bot_bars)
+        first = beam_cage(bw, cover, _BAR[STIRRUP_LADDER[0][0]][0], db, top_bars, bot_bars, grid_in=grid)
         cage = {**first, "legs": None, "constructible": False, "arrangement": None, "hx_in": None,
                 "checks": [{"rule": "18.6.4.4 / 25.7.2.3", "passes": False,
                             "detail": f"no hoop in the ladder is constructible: bars allow {first['legs_max']} legs, "
@@ -1048,7 +1062,12 @@ def design_column_shear(state, strengths, method=None):
     h_beam = sections["h_beam_in"] if clear_heights is None else None
     ln_face = story_h - h_beam if clear_heights is None else None
     offset = col["centroid_offset_in"]
-    cc = col["clear_cover_in"]
+    # The hoop core the confinement is checked on: the cover outside the LAYOUT hoop (#5, the largest of the
+    # ladder, which the bar layout is set for: Structure_Parameters.BAR_LAYOUT_HOOP_DB_IN), the bar offset less
+    # half the bar and that hoop, never less than the specified cover. A core taken from the selected hoop
+    # would move with the selection (a #4 hoop leaves a core 0.25 in wider than a #5) and the hoop selection
+    # would have no fixed point; a record from before the bar grid keeps its specified cover exactly.
+    cc = max(col["clear_cover_in"], offset - 0.5 * _BAR[col["bar_size"]][0] - LAYOUT_HOOP_DB_IN)
     ag = b * h
     envelopes = state.get("column_action_envelopes") or {}
     # Beam probable moments a joint can deliver to its columns, per direction.
@@ -1285,7 +1304,8 @@ def design_column_shear(state, strengths, method=None):
 
     selected, cage, bounds = None, None, None
     for bar in COLUMN_HOOP_BARS:
-        base = column_cage(b, h, cc, _BAR[bar][0], db, col["top_bars"], col["side_bars"], high_axial=high_axial)
+        base = column_cage(b, h, cc, _BAR[bar][0], db, col["top_bars"], col["side_bars"], high_axial=high_axial,
+                           grid_in=_grid_of(col))
         options = base["constructible_legs_by_direction"]
         # Every constructible leg pair is priced; the pick for this bar is the
         # largest spacing the pair allows, then the fewest legs -- a crosstie
@@ -1294,7 +1314,7 @@ def design_column_shear(state, strengths, method=None):
         for nb in options["across_b_face"]:
             for nh in options["across_h_face"]:
                 legs = {"across_b_face": nb, "across_h_face": nh}
-                trial = column_cage(b, h, cc, _BAR[bar][0], db, col["top_bars"], col["side_bars"],
+                trial = column_cage(b, h, cc, _BAR[bar][0], db, col["top_bars"], col["side_bars"], grid_in=_grid_of(col),
                                     high_axial=high_axial, legs=legs)
                 if cage_passes(trial):
                     candidates.append((legs, trial))
@@ -1339,7 +1359,7 @@ def design_column_shear(state, strengths, method=None):
         break
     if cage is None:
         # Nothing selected: report the arrangement bounds for the first hoop bar.
-        first = column_cage(b, h, cc, _BAR[COLUMN_HOOP_BARS[0]][0], db, col["top_bars"], col["side_bars"],
+        first = column_cage(b, h, cc, _BAR[COLUMN_HOOP_BARS[0]][0], db, col["top_bars"], col["side_bars"], grid_in=_grid_of(col),
                             high_axial=high_axial)
         hx = max(m["hx_in"] for m in first["minimal_support"].values())
         bounds = bounds_for(hx)
@@ -1667,7 +1687,8 @@ def design_anchorage(state):
         depth = sections["h_col_in"] if axis == "x" else sections["b_col_in"]
         bays = geometry.get("num_bay_x" if axis == "x" else "num_bay_y")
         through = True if bays is None else bays >= 2
-        available = depth - col["clear_cover_in"] - hoop_db
+        # embedment to the inside of the far hoop as built: the column depth less the far bar offset plus half its bar
+        available = depth - (col["centroid_offset_in"] - 0.5 * _BAR[col["bar_size"]][0])
         results[axis] = {"ldh_required_in": ldh, "embedment_available_in": available,
                          "hook": "standard 90-degree hook into the confined core, 18.8.5.1",
                          "passes": ldh <= available,
@@ -1712,7 +1733,7 @@ def design_column_bar_bond(state):
         basis = ("face-to-face clear height story_h - h_beam of a typical story; the base story runs to the fixed base "
                  "and is longer, so the typical story governs")
     cb = column_bar_cb_in(sections["b_col_in"], sections["h_col_in"], col["clear_cover_in"], col["stirrup_bar_size"],
-                          col["bar_size"], col["top_bars"], col["side_bars"])
+                          col["bar_size"], col["top_bars"], col["side_bars"], grid_in=_grid_of(col))
     result = column_bar_bond_18_7_4_3(col["bar_size"], sections["fc_col_ksi"], mats["fy_ksi"], cb["cb_in"], lu,
                                       normalweight=bool(mats.get("normalweight", True)))
     return {**result, "cb": cb, "clear_height_basis": basis,
@@ -1789,6 +1810,7 @@ def design_bar_threading(state):
             "beam_clear_cover_in": beam["clear_cover_in"],
             "beam_longitudinal_centroid_offset_in": beam["centroid_offset_in"],
             "beam_bar_area_in2": _BAR[beam["bar_size"]][1],
+            **({"bar_position_grid_in": beam["bar_position_grid_in"]} if "bar_position_grid_in" in beam else {}),
             "beam_bar_stacking": {"max_layers": max_layers, "layer_order": layer_order,
                                   "convention": beam.get("stacking_convention")}},
         "materials": {"fy_ksi": state["materials"]["fy_ksi"],

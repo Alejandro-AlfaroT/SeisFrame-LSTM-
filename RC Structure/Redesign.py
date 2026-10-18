@@ -154,9 +154,7 @@ def _layers_for_Ast(Ast, candidate=None):
             layers.insert(1, (Ast * n_side / n_tot, h / 2.0))
         else:
             n_side_pf = n_side // 2
-            layers[1:1] = [(2 * Ast / n_tot,
-                            cover + (h - 2 * cover) * k / (n_side_pf + 1))
-                           for k in range(1, n_side_pf + 1)]
+            layers[1:1] = [(2 * Ast / n_tot, y) for y in sp.face_bar_positions_in(h, cover, n_side_pf + 2)[1:-1]]
     return layers
 
 
@@ -419,9 +417,22 @@ def _col_candidates(Ast_lo, Ast_hi, cfg=None, threading=False):
                          if sp.SLAB_THICKNESS_IN is not None else cfg.rebar.cover_in)
                 if n_top < 2 or n_side_pf < 0:
                     continue
-                if (sp.B_COL - 2 * cover) / (n_top - 1) - db < clear_min:
+                if sp.SLAB_THICKNESS_IN is not None:
+                    # The cage's grid arrangement (Structure_Parameters.face_bar_pitches_in): least pitch for
+                    # the clear spacing, greatest pitch for the supported-bar spacing below.
+                    try:
+                        pitch_b_min = sp.face_bar_min_pitch_in(sp.B_COL, cover, n_top)
+                        pitch_h_min = sp.face_bar_min_pitch_in(sp.H_COL, cover, n_side_pf + 2)
+                        pitch_b_max = sp.face_bar_max_pitch_in(sp.B_COL, cover, n_top)
+                        pitch_h_max = sp.face_bar_max_pitch_in(sp.H_COL, cover, n_side_pf + 2)
+                    except ValueError:
+                        continue
+                else:
+                    pitch_b_min = pitch_b_max = (sp.B_COL - 2 * cover) / (n_top - 1)
+                    pitch_h_min = pitch_h_max = (sp.H_COL - 2 * cover) / (n_side_pf + 1)
+                if pitch_b_min - db < clear_min:
                     continue
-                if (sp.H_COL - 2 * cover) / (n_side_pf + 1) - db < clear_min:
+                if pitch_h_min - db < clear_min:
                     continue
                 # ACI 318-19 18.7.5.2(f): laterally supported bars no more than
                 # 14 in apart around the perimeter (every face bar is tied by
@@ -429,8 +440,8 @@ def _col_candidates(Ast_lo, Ast_hi, cfg=None, threading=False):
                 # bars on its side faces fails this, so the SMRF path never
                 # offers it; the legacy bundled-load path keeps its old cages.
                 if sp.SLAB_THICKNESS_IN is not None and (
-                        (sp.B_COL - 2 * cover) / (n_top - 1) > COLUMN_SUPPORTED_BAR_HX_MAX_IN
-                        or (sp.H_COL - 2 * cover) / (n_side_pf + 1) > COLUMN_SUPPORTED_BAR_HX_MAX_IN):
+                        pitch_b_max > COLUMN_SUPPORTED_BAR_HX_MAX_IN
+                        or pitch_h_max > COLUMN_SUPPORTED_BAR_HX_MAX_IN):
                     continue
                 # The capacity-design hoops support every corner and alternate
                 # bar with a leg or a crosstie (SMRF_Cage_Layout); a face with
@@ -515,8 +526,8 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
                 d = sp.H_BEAM - sp.beam_worst_centroid_offset_in(bar_size, n_top, n_top)
                 code_min = _beam_As_min(sp.FC_BEAM_KSI, sp.FY_KSI, sp.B_BEAM, d)
             elif sp.SLAB_THICKNESS_IN is not None:
-                # Fallback: one layer across the width, the stacked-cage depth only.
-                if (sp.B_BEAM - 2 * cover) / (n_top - 1) - db < clear_min:
+                # Fallback: one layer across the width (grid pitches), the stacked-cage depth only.
+                if sp.face_bar_min_pitch_in(sp.B_BEAM, cover, n_top) - db < clear_min:
                     continue
                 d = sp.H_BEAM - sp.beam_worst_centroid_offset_in(bar_size, n_top, n_top, max_layers=1)
                 code_min = _beam_As_min(sp.FC_BEAM_KSI, sp.FY_KSI, sp.B_BEAM, d)
@@ -544,6 +555,9 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
                 if sp.SLAB_THICKNESS_IN is not None and threading:
                     fit_bot = min(sp.beam_bars_per_layer(bar_size, n_bot).values())
                     if fit_bot <= 0 or math.ceil(n_bot / fit_bot) > sp.BEAM_BAR_MAX_LAYERS:
+                        continue
+                elif sp.SLAB_THICKNESS_IN is not None:
+                    if sp.face_bar_min_pitch_in(sp.B_BEAM, cover, n_bot) - db < clear_min:
                         continue
                 elif (sp.B_BEAM - 2 * cover) / (n_bot - 1) - db < clear_min:
                     continue

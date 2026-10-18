@@ -84,6 +84,7 @@ _STATE_KEYS = (
     "BEAM_CLEAR_COVER_IN", "COL_CLEAR_COVER_IN", "AGGREGATE_MAX_SIZE_IN",
     "REINFORCEMENT_SPECIFICATION", "MATERIAL_EXPOSURE", "FLOOR_TRANSFER",
     "SLAB_REINFORCEMENT", "SLAB_ACTIONS", "BEAM_BAR_STACKING", "BEAM_BAR_MAX_LAYERS", "BEAM_BAR_LAYER_ORDER",
+    "BAR_POSITION_GRID_IN", "LATERAL_DESIGN_MODEL",
 )
 
 
@@ -348,6 +349,24 @@ def _update_slab_reinforcement(cfg, slab):
     return record
 
 
+def _design_diaphragm(cfg, final):
+    """ACI 318-19 18.12 diaphragm design of the selected slab on the final frame (Design.SMRF_Diaphragm).
+
+    The ELF story forces of the final model period give the ASCE 7-22 12.10.1.1 diaphragm forces; the slab
+    thickness and mats are the installed ones. None without a slab (legacy route) or without a slab layout.
+    """
+    if sp.SLAB_THICKNESS_IN is None or not (sp.SLAB_REINFORCEMENT or {}).get("layout"):
+        return None
+    from Design.SMRF_Diaphragm import design_diaphragm, diaphragm_inputs_from_state
+    from Loads.Seismic_ELF import elf_story_forces
+    elf = elf_story_forces(final.get("model_period_sec"))
+    base_shear = final.get("base_shear_kip")
+    if base_shear is not None and not math.isclose(float(base_shear), elf["base_shear_kip"], rel_tol=1e-9, abs_tol=1e-9):
+        raise ValueError(f"The final base shear {base_shear} kip does not reproduce from the final period "
+                         f"({elf['base_shear_kip']:.6g} kip); the diaphragm forces would not belong to this frame.")
+    return design_diaphragm(diaphragm_inputs_from_state(elf, risk_category=cfg.demands.risk_category))
+
+
 def _thicker_slab(cfg, slab):
     """The next thickness of the declared ladder that passes the screen above ``slab``, applied.
 
@@ -534,6 +553,18 @@ def _analyze_combination(combination, model_period_sec, torsion=None):
     optional ``sign`` (+1/-1) flips the eccentricity side for the
     12.3.2.1.1 assessment cases and is never set for a strength combination.
     """
+    elf = _apply_combination_loads(combination, model_period_sec, torsion)
+    with _quiet():
+        run_gravity_analysis()
+    return elf
+
+
+def _apply_combination_loads(combination, model_period_sec, torsion=None):
+    """Build the design model and apply one combination's factored gravity and ELF loads without solving.
+
+    The solve of _analyze_combination, separated so the compatibility run of the perimeter-SFRS basis
+    (Design.Perimeter_Systems) can add its imposed-displacement pattern before the analysis.
+    """
     with _quiet():
         ops.wipe()
         build_model()
@@ -555,8 +586,6 @@ def _analyze_combination(combination, model_period_sec, torsion=None):
                                   accidental_torsion_ratio=(torsion or {}).get("ratio", 0.0),
                                   torsion_amplification=(torsion or {}).get("amplification", 1.0),
                                   torsion_sign=(torsion or {}).get("sign", 1.0) * (1.0 if factor > 0 else -1.0))
-    with _quiet():
-        run_gravity_analysis()
     return elf
 
 
@@ -878,7 +907,7 @@ def _col_steel_layers_about_z():
     layers = [(outer, cover)]
     for count in (n_top, n_bot):
         if count > 2:
-            layers += [(ab, cover + (b - 2.0 * cover) * k / (count - 1)) for k in range(1, count - 1)]
+            layers += [(ab, x) for x in sp.face_bar_positions_in(b, cover, count)[1:-1]]
     layers.append((outer, b - cover))
     return sorted(layers, key=lambda layer: layer[1])
 
@@ -909,7 +938,7 @@ def _capacity_state(cfg, combination_actions):
                       "aggregate_size_in": sp.AGGREGATE_MAX_SIZE_IN},
         "beam": {"bar_size": sp.BEAM_BAR_SIZE, "top_bars": sp.BEAM_TOP_BARS, "bot_bars": sp.BEAM_BOT_BARS,
                  "centroid_offset_in": sp.longitudinal_cover_in("beam"), "clear_cover_in": sp.BEAM_CLEAR_COVER_IN,
-                 "stirrup_bar_size": sp.BEAM_STIRRUP_BAR_SIZE,
+                 "stirrup_bar_size": sp.BEAM_STIRRUP_BAR_SIZE, "bar_position_grid_in": sp.BAR_POSITION_GRID_IN,
                  # Orthogonal layers stacked at the joints: each direction's top/bottom offsets, the
                  # worst single value for shear depth, and the convention (design-basis rule 2026-09-27).
                  "centroid_offsets_by_axis_in": sp.beam_bar_stacking_offsets_in(),
@@ -926,6 +955,7 @@ def _capacity_state(cfg, combination_actions):
         "column": {"bar_size": sp.COL_BAR_SIZE, "top_bars": sp.COL_TOP_BARS, "bot_bars": sp.COL_BOT_BARS,
                    "side_bars": sp.COL_SIDE_BARS, "centroid_offset_in": sp.longitudinal_cover_in("column"),
                    "clear_cover_in": sp.COL_CLEAR_COVER_IN, "stirrup_bar_size": sp.COL_STIRRUP_BAR_SIZE,
+                   "bar_position_grid_in": sp.BAR_POSITION_GRID_IN,
                    # Bending through h (x frame) and through b (y frame); the
                    # capacity design takes Mpr, Ve and the hoop legs per direction.
                    "layers": _col_steel_layers(),
@@ -1105,8 +1135,23 @@ def _state_record_core():
             "beam_stirrup_spacing_in": sp.BEAM_STIRRUP_SPACING,
             "legacy_centroid_offset_in": sp.COVER,
             "cover_basis": "clear_cover_outside_hoops",
+            # The specified (minimum) clear covers, and the covers as built: every bar centre on the bar
+            # position grid with the first bars in the hoop corners, the hoops dimensioned to the bars
+            # (design-basis rule 2026-10-14). A beam's hoop follows the first layer of its direction at
+            # each face (beam_hoop_cover_in); its lateral cover is beam_clear_cover_provided_in.
             "beam_clear_cover_in": sp.BEAM_CLEAR_COVER_IN,
             "col_clear_cover_in": sp.COL_CLEAR_COVER_IN,
+            "bar_position_grid_in": sp.BAR_POSITION_GRID_IN,
+            "beam_clear_cover_provided_in": sp.clear_cover_provided_in("beam"),
+            "col_clear_cover_provided_in": sp.clear_cover_provided_in("column"),
+            "beam_hoop_cover_in": sp.beam_hoop_cover_in(),
+            "bar_layout_hoop_db_in": sp.BAR_LAYOUT_HOOP_DB_IN,
+            "bar_position_basis": ("bar centres, face pitches and layer pitches on a 0.5 in grid; the first bar of a "
+                                   "face at the first grid step at or beyond the specified cover + the layout hoop (#5, "
+                                   "the largest of the hoop ladders, so the selected hoop never moves the bars) + half "
+                                   "the bar; hoops fabricated to the bars, so the corner bars sit in the hoop corners "
+                                   "and the clear cover provided is what remains outside the hoop (never below the "
+                                   "specified)"),
             "beam_longitudinal_centroid_offset_in": sp.longitudinal_cover_in("beam"),
             # The orthogonal top and bottom layers stacked at the joints: the convention and each
             # direction's face offsets; the nominal offset above is the upper layer's.
@@ -2312,6 +2357,10 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     sp.BEAM_CLEAR_COVER_IN = cfg.rebar.beam_clear_cover_in
     sp.COL_CLEAR_COVER_IN = cfg.rebar.col_clear_cover_in
     sp.AGGREGATE_MAX_SIZE_IN = cfg.rebar.aggregate_max_size_in
+    grid = cfg.rebar.bar_position_grid_in
+    if grid is not None and (isinstance(grid, bool) or not math.isfinite(grid) or grid <= 0):
+        raise ValueError("The bar position grid must be positive and finite, or None.")
+    sp.BAR_POSITION_GRID_IN = grid
     sp.REINFORCEMENT_SPECIFICATION = cfg.materials.reinforcement_specification
     sp.MATERIAL_EXPOSURE = cfg.materials.exposure
     if type(cfg.iteration.uniform_reduction_trials) is not int or cfg.iteration.uniform_reduction_trials < 0:
@@ -2835,6 +2884,9 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
         "floor_transfer": sp.FLOOR_TRANSFER,
         "slab_reinforcement": sp.SLAB_REINFORCEMENT,
         "slab_actions": sp.SLAB_ACTIONS,
+        # The slab as the diaphragm (ACI 318-19 18.12 on the ASCE 7-22 12.10.1.1 forces of the final frame;
+        # 2026-10-14): a check, not a search lever; its evidence is audited by exact recomputation.
+        "slab_diaphragm": _design_diaphragm(cfg, final),
         "geometry": core["geometry"],
         "sections": core["sections"],
         "reinforcement": core["reinforcement"],
@@ -3026,12 +3078,22 @@ def apply_design(record):
     aggregate = record.get("materials", {}).get("aggregate_size_in")
     if aggregate is None or not math.isfinite(aggregate) or aggregate <= 0:
         raise ValueError("Cached design lacks a valid aggregate size.")
+    # The bar position grid the record was laid out on: None (even spacing, unsnapped offsets) for a record
+    # from before the 2026-10-14 rule, so its layout reproduces as designed.
+    grid = rebar.get("bar_position_grid_in")
+    if grid is not None and (isinstance(grid, bool) or not math.isfinite(grid) or grid <= 0):
+        raise ValueError("Cached bar position grid must be positive and finite.")
     for prefix in ("beam", "col"):
         clear = rebar[f"{prefix}_clear_cover_in"]
-        expected = clear + sp.rebar_diameter(rebar[f"{prefix}_stirrup_bar_size"]) + sp.rebar_diameter(rebar[f"{prefix}_bar_size"]) / 2
+        hoop_db = sp.rebar_diameter(rebar[f"{prefix}_stirrup_bar_size"])
+        bar_db = sp.rebar_diameter(rebar[f"{prefix}_bar_size"])
+        expected = sp.first_bar_offset_in(clear, hoop_db, bar_db, grid_in=grid)
         if (not math.isfinite(clear) or clear < 1.5
                 or not math.isclose(expected, rebar[f"{prefix}_longitudinal_centroid_offset_in"], abs_tol=1e-12)):
             raise ValueError("Cached member cover/bar positions are inconsistent.")
+        provided = rebar.get(f"{prefix}_clear_cover_provided_in")
+        if provided is not None and not math.isclose(float(provided), expected - hoop_db - bar_db / 2, abs_tol=1e-12):
+            raise ValueError("Cached member cover as built does not reproduce from its bar positions.")
     sp.B_COL = sections["b_col_in"]
     sp.H_COL = sections["h_col_in"]
     sp.FC_COL_KSI = sections["fc_col_ksi"]
@@ -3061,6 +3123,7 @@ def apply_design(record):
             raise ValueError(f"Cached design lacks {key}; cannot reproduce its reinforcement.")
         setattr(sp, name, rebar[key])
     sp.COL_STIRRUP_LEGS_BY_DIRECTION = dict(rebar["col_stirrup_legs_by_direction"])
+    sp.BAR_POSITION_GRID_IN = grid
     _apply_slab(slab)
     sp.AGGREGATE_MAX_SIZE_IN = aggregate
     sp.REINFORCEMENT_SPECIFICATION = material["reinforcement_specification"]
@@ -3109,6 +3172,13 @@ def apply_design(record):
             raise ValueError("Cached beam bar stacking does not reproduce.")
         # The actual rows (2026-09-27): a record that carries them must reproduce them, row by row,
         # and they must be well formed (Design.SMRF_Beam_Slab_Strength.validate_bar_rows).
+        recorded_hoops = rebar.get("beam_hoop_cover_in")
+        if recorded_hoops is not None:
+            live_hoops = sp.beam_hoop_cover_in()
+            if any(not math.isclose(live_hoops[axis][face], float((recorded_hoops.get(axis) or {}).get(face, float("nan"))),
+                                    abs_tol=1e-9)
+                   for axis in ("x", "y") for face in ("top", "bottom")):
+                raise ValueError("Cached beam hoop covers do not reproduce.")
         recorded_rows = stacking.get("layers")
         if recorded_rows is not None:
             from Design.SMRF_Beam_Slab_Strength import validate_bar_rows

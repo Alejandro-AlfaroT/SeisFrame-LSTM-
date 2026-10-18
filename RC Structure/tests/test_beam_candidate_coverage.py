@@ -14,9 +14,12 @@ from Design.Section_Design import beam_ladder, beam_widths_for_depth
 
 class BeamCandidateCoverage(unittest.TestCase):
     def test_wide_rung_remains_inside_existing_proportioning_limits(self):
-        self.assertIn((34., 36., 8.), beam_ladder(span_in=318., story_height_in=174.))
+        # beams deeper than wide (2026-10-14): the widest 36 in rung is 26 in, the former 34 in web is gone
+        ladder = beam_ladder(span_in=318., story_height_in=174.)
+        self.assertIn((26., 36., 8.), ladder)
+        self.assertNotIn((34., 36., 8.), ladder)
         for depth in range(18, 37, 2):
-            self.assertTrue(all(width <= depth for width in beam_widths_for_depth(depth)))
+            self.assertTrue(all(width <= 0.75 * depth + 1e-9 for width in beam_widths_for_depth(depth)))
 
     def frame(self, **overrides):
         state = dict(B_COL=36., H_COL=36., FC_COL_KSI=10.,
@@ -54,15 +57,16 @@ class BeamCandidateCoverage(unittest.TestCase):
             self.assertEqual(rd._beam_candidates(lo, math.inf, lo, math.inf, cfg), [])
 
     def test_two_rows_on_both_faces_are_not_rejected_by_one_row_width(self):
-        with self.frame(B_BEAM=14.):
+        with self.frame(B_BEAM=18.):
             cfg = DesignConfig()
             cfg.rebar.bar_sizes_beam = [8]
-            cfg.rebar.beam_n_range = (6, 6)
-            # Six No. 8 bars do not fit across this web in one row, but two
-            # rows pass the actual column lanes in both directions.
+            cfg.rebar.beam_n_range = (8, 8)
+            # Eight No. 8 bars do not fit across this web in one row, but two rows of four pass the
+            # actual column lanes in both directions (on the 0.5 in bar grid the lanes of this column
+            # hold four bars per layer in an 18 in web).
             cover = sp.longitudinal_cover_in('beam', 8)
-            self.assertLess((14. - 2 * cover) / 5 - 1., sp.longitudinal_clear_spacing_in('beam', 8))
-            self.assertIn((8, 6, 6), rd._beam_candidates(0., math.inf, 0., math.inf, cfg, threading=True))
+            self.assertLess((18. - 2 * cover) / 7 - 1., sp.longitudinal_clear_spacing_in('beam', 8))
+            self.assertIn((8, 8, 8), rd._beam_candidates(0., math.inf, 0., math.inf, cfg, threading=True))
             with patch.object(sp, 'BEAM_BAR_MAX_LAYERS', 1):
                 self.assertEqual(rd._beam_candidates(0., math.inf, 0., math.inf, cfg, threading=True), [])
             self.assertEqual(rd._beam_candidates(0., math.inf, 0., math.inf, cfg, threading=False), [])

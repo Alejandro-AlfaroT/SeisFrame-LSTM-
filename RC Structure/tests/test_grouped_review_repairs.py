@@ -346,7 +346,7 @@ class SettlementContract(unittest.TestCase):
         def select(state, actions, cfg, scwb_margin=1.0):
             return state, {"settled": next(selections), "exhausted_groups": []}
 
-        def build(actions, expected_ids, cfg, transfers, state):
+        def build(actions, expected_ids, cfg, transfers, state, compatibility=None):
             built.append(state)
             return {"built_for": state}
 

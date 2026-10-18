@@ -13,7 +13,10 @@ the review of 2026-09-27 asked for and the design record still calls "scalar onl
    mats against the beam bars, and the hook tails of terminating beam bars inside the joint.
 
 Everything here is pure geometry from the design record and the ACI tables. It reports what fits and what
-does not; it changes no strength. The conventions it declares (which direction's bars sit on top, the
+does not; it changes no strength. Bar centres, lane positions and layer pitches lie on the bar position grid
+(Structure_Parameters.BAR_POSITION_GRID_IN, design-basis rule 2026-10-14): the first bar of every face sits in
+the hoop corner at the first grid step at or beyond cover + hoop + half the bar, the hoops are dimensioned to
+the bars, and a beam's hoop follows the first layer of its direction at each face. The conventions it declares (which direction's bars sit on top, the
 clearance used between a beam bar and a column bar it passes) are recorded in the output. Units: inches.
 """
 from __future__ import annotations
@@ -21,6 +24,19 @@ from __future__ import annotations
 import math
 
 from Design.SMRF_Cage_Layout import beam_cage, column_cage, face_bar_positions
+
+_OMITTED = object()      # a grid_in left out: the module's grid; None is the even spacing of a record from before the rule
+
+
+def _grid(grid_in):
+    import Structure_Parameters as sp
+    return sp.MODULE_GRID if grid_in is _OMITTED else grid_in
+
+
+def record_grid(record):
+    """The bar grid a record was laid out on: its reinforcement.bar_position_grid_in (None before the rule)."""
+    rebar = record.get("reinforcement") or {}
+    return _grid(rebar["bar_position_grid_in"] if "bar_position_grid_in" in rebar else _OMITTED)
 
 BAR_DIAMETER = {3: 0.375, 4: 0.5, 5: 0.625, 6: 0.75, 7: 0.875, 8: 1.0, 9: 1.128, 10: 1.27, 11: 1.41, 14: 1.693, 18: 2.257}
 SEISMIC_HOOK_MIN_EXTENSION_IN = 3.0          # ACI 318-19 2.3, seismic hook: 6db and 3 in
@@ -70,19 +86,23 @@ def hook_geometry(bar_size, kind):
     raise ValueError(f"Unknown hook kind {kind!r}")
 
 
-def tie_set(width_in, depth_in, clear_cover_in, tie_size, crosstie_spans, set_index=0):
+def tie_set(width_in, depth_in, clear_cover_in, tie_size, crosstie_spans, set_index=0, depth_covers_in=None):
     """One hoop set: the perimeter hoop and its crossties, dimensioned, with the 90-degree ends alternated.
 
     ``crosstie_spans`` is a list of (axis, position_in, length_in): a crosstie along ``axis`` ("x" runs
     across the width, "y" across the depth) at the given lateral position, engaging bars ``length_in``
     apart centre to centre. ``set_index`` alternates the side of the 90-degree hook from one set to the
-    next (18.7.5.2(c) for columns, 18.6.4.3 for beams).
+    next (18.7.5.2(c) for columns, 18.6.4.3 for beams). ``clear_cover_in`` is the cover outside the hoop
+    as built (the bars in the hoop corners); ``depth_covers_in`` = (near face, far face) gives a beam
+    hoop whose two depth-direction covers differ (the stacked direction's deeper first layer).
     """
     db = bar_diameter(tie_size)
     seismic = hook_geometry(tie_size, "seismic_135")
     ninety = hook_geometry(tie_size, "crosstie_90")
+    near, far = (clear_cover_in, clear_cover_in) if depth_covers_in is None else depth_covers_in
     hoop = {"element": "perimeter_hoop", "bar_size": int(tie_size),
-            "out_to_out_in": [width_in - 2.0 * clear_cover_in, depth_in - 2.0 * clear_cover_in],
+            "out_to_out_in": [width_in - 2.0 * clear_cover_in, depth_in - near - far],
+            "clear_cover_in": {"width_faces": clear_cover_in, "depth_faces": [near, far]},
             "inside_bend_diameter_in": seismic["inside_bend_diameter_in"],
             "hooks": ["seismic_135", "seismic_135"], "hook_extension_in": seismic["extension_in"],
             "hook_location": "one corner, both ends with seismic hooks engaging the corner bar (25.7.4.2)"}
@@ -113,31 +133,40 @@ def layer_clearances(positions, bar_db_in):
 
 
 # ---- the assembled joint --------------------------------------------------------------------------
-def thread_bars(n, bar_db, lo, hi, obstacles, obstacle_db, clear_min):
+def thread_bars(n, bar_db, lo, hi, obstacles, obstacle_db, clear_min, grid_in=_OMITTED):
     """Place ``n`` bars of diameter ``bar_db`` between ``lo`` and ``hi`` (centre limits), keeping
     ``clear_min`` clear from each other and from the obstacle bars (column bars the beam bars pass).
-    Greedy from the left. Returns the positions placed (fewer than n when they do not fit)."""
+    Greedy from the left, every centre on the bar position grid (the first admissible grid point past
+    each obstacle and past the previous bar; exact positions without a grid). Returns the positions
+    placed (fewer than n when they do not fit)."""
+    import Structure_Parameters as sp
+    grid = _grid(grid_in)
     blocked = [(o - (obstacle_db + bar_db) / 2.0 - clear_min, o + (obstacle_db + bar_db) / 2.0 + clear_min) for o in obstacles]
-    placed, x = [], lo
+    placed, x = [], sp.snap_up_to_grid(lo, grid)
     while len(placed) < n and x <= hi + 1e-9:
-        for a, b in blocked:
-            if a < x < b:
-                x = b
+        moved = True
+        while moved:
+            moved = False
+            for a, b in blocked:
+                if a < x < b:
+                    x, moved = sp.snap_up_to_grid(b, grid), True
         if x > hi + 1e-9:
             break
         placed.append(x)
-        x += bar_db + clear_min
+        x = sp.snap_up_to_grid(x + bar_db + clear_min, grid)
     return placed
 
 
-def column_bars_plan(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, side_bars):
+def column_bars_plan(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, side_bars, grid_in=_OMITTED):
     """Plan positions (x, y) of every column bar, from the cage layout SMRF_Cage_Layout uses.
 
     The faces of width b (perpendicular to X, at x = c and x = h - c) carry ``top_bars`` bars along Y;
     the faces of depth h (at y = c and y = b - c) carry ``side_bars`` interior bars along X plus the corners.
     """
-    cage = column_cage(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, side_bars)
-    c = clear_cover_in + hoop_db_in + bar_db_in / 2.0
+    import Structure_Parameters as sp
+    grid = _grid(grid_in)
+    cage = column_cage(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, side_bars, grid_in=grid)
+    c = sp.first_bar_offset_in(clear_cover_in, hoop_db_in, bar_db_in, grid_in=grid)
     bars = []
     for y in cage["faces"]["b_face"]:
         bars += [(c, y), (h_in - c, y)]
@@ -147,22 +176,26 @@ def column_bars_plan(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars
 
 
 def beam_bars_threading(b_col_in, h_col_in, b_beam_in, beam_cover_in, beam_hoop_db_in, beam_db_in, bars_per_face,
-                        column_bars, col_db_in, clear_in):
+                        column_bars, col_db_in, clear_in, grid_in=_OMITTED):
     """Per direction: how many beam bars pass between the column bars in one layer, and where.
 
     An X-beam runs along X: its bars at lateral positions y must avoid every column bar whose y lies in
     the beam band; a Y-beam likewise against the column bars' x positions.
     """
+    import Structure_Parameters as sp
+    grid = _grid(grid_in)
     directions = {}
+    first = sp.first_bar_offset_in(beam_cover_in, beam_hoop_db_in, beam_db_in, grid_in=grid)
     for axis, width_axis_extent in (("x", b_col_in), ("y", h_col_in)):
         offset = (width_axis_extent - b_beam_in) / 2.0
-        inner_lo = offset + beam_cover_in + beam_hoop_db_in + beam_db_in / 2.0
-        inner_hi = offset + b_beam_in - beam_cover_in - beam_hoop_db_in - beam_db_in / 2.0
+        inner_lo = offset + first
+        inner_hi = offset + b_beam_in - first
         lateral = [y if axis == "x" else x for x, y in column_bars]
         obstacles = sorted(set(p for p in lateral if offset - col_db_in < p < offset + b_beam_in + col_db_in))
-        nominal = [offset + p for p in face_bar_positions(b_beam_in, beam_cover_in, beam_hoop_db_in, beam_db_in, bars_per_face)]
+        nominal = [offset + p for p in face_bar_positions(b_beam_in, beam_cover_in, beam_hoop_db_in, beam_db_in, bars_per_face,
+                                                          grid_in=grid)]
         conflicts = [p for p in nominal if any(abs(p - o) < (col_db_in + beam_db_in) / 2.0 + clear_in - 1e-9 for o in obstacles)]
-        placed = thread_bars(bars_per_face, beam_db_in, inner_lo, inner_hi, obstacles, col_db_in, clear_in)
+        placed = thread_bars(bars_per_face, beam_db_in, inner_lo, inner_hi, obstacles, col_db_in, clear_in, grid_in=grid)
         per_layer = len(placed)
         directions[axis] = {
             "beam_band_in": [offset, offset + b_beam_in], "bar_centre_limits_in": [inner_lo, inner_hi],
@@ -178,17 +211,18 @@ def beam_bars_threading(b_col_in, h_col_in, b_beam_in, beam_cover_in, beam_hoop_
 
 def column_cage_admits_beam_bars(b_col_in, h_col_in, col_cover_in, col_hoop_db_in, col_db_in, top_bars, side_bars,
                                  b_beam_in, beam_cover_in, beam_hoop_db_in, beam_db_in, bars_per_face, aggregate_in,
-                                 max_layers=1):
+                                 max_layers=1, grid_in=_OMITTED):
     """The column cage rule (2026-09-27): do the beam bars of both directions pass this cage in at most
     ``max_layers`` layers (one until the two-layer decision of the same day)?
 
     The same geometry as the capacity check beam.bars_thread_column, so a cage the rule offers is one
     the check accepts. Returns {"passes", "bars_per_layer": {axis: n}, "layers_needed": {axis: n}, ...}.
     """
-    column_bars = column_bars_plan(b_col_in, h_col_in, col_cover_in, col_hoop_db_in, col_db_in, top_bars, side_bars)
+    grid = _grid(grid_in)
+    column_bars = column_bars_plan(b_col_in, h_col_in, col_cover_in, col_hoop_db_in, col_db_in, top_bars, side_bars, grid_in=grid)
     clear = clear_spacing_limit("beam", beam_db_in, aggregate_in)
     directions = beam_bars_threading(b_col_in, h_col_in, b_beam_in, beam_cover_in, beam_hoop_db_in, beam_db_in,
-                                     bars_per_face, column_bars, col_db_in, clear)
+                                     bars_per_face, column_bars, col_db_in, clear, grid_in=grid)
     return {"passes": all(d["layers_needed"] is not None and d["layers_needed"] <= max_layers for d in directions.values()),
             "max_layers": max_layers,
             "bars_per_layer": {axis: d["bars_per_layer_that_fit"] for axis, d in directions.items()},
@@ -239,22 +273,24 @@ def joint_assembly(record, stacking="x_over_y", pass_clearance_in=None, max_laye
     beam_db, beam_tie_db = bar_diameter(r["beam_bar_size"]), bar_diameter(r["beam_stirrup_bar_size"])
     col_cover, beam_cover = r["col_clear_cover_in"], r["beam_clear_cover_in"]
     clear = pass_clearance_in if pass_clearance_in is not None else clear_spacing_limit("beam", beam_db, aggregate)
+    grid = record_grid(record)
 
     # Column bar plan positions and the beam bars threading them (shared with the column cage rule).
-    column_bars = column_bars_plan(bc, hc, col_cover, col_tie_db, col_db, r["col_top_bars"], r["col_side_bars"])
+    column_bars = column_bars_plan(bc, hc, col_cover, col_tie_db, col_db, r["col_top_bars"], r["col_side_bars"], grid_in=grid)
     # Both faces cross the same column cage. Independent face counts can
     # make the bottom face govern; checking only the top accepted V4 case 0009.
     threading_count = max(r["beam_top_bars"], r["beam_bot_bars"])
     directions = beam_bars_threading(bc, hc, bw, beam_cover, beam_tie_db, beam_db, threading_count,
-                                     column_bars, col_db, clear)
+                                     column_bars, col_db, clear, grid_in=grid)
 
     # Vertical stacking of the two orthogonal cages at the joint (top and, mirrored, bottom). Where the
     # lanes force a second layer (max_layers > 1) a direction's bars split into layers one pitch apart,
     # and the lower direction's first layer sits below the upper direction's last.
     upper, lower = ("x", "y") if stacking == "x_over_y" else ("y", "x")
+    import Structure_Parameters as sp
     centroid = r["beam_longitudinal_centroid_offset_in"]
     inter = max(INTERLAYER_CLEAR_MIN_IN, beam_db)
-    pitch = beam_db + inter
+    pitch = sp.snap_up_to_grid(beam_db + inter, _grid(grid))
     n_bars = r["beam_top_bars"]
 
     def split(n, fit):
@@ -358,7 +394,7 @@ def joint_assembly(record, stacking="x_over_y", pass_clearance_in=None, max_laye
     # A second layer, where the lanes force one, moves the centroid of the bars down by half a layer.
     for axis, d in directions.items():
         if d["layers_needed"] and d["layers_needed"] > 1:
-            second = centroid + beam_db + inter
+            second = centroid + pitch
             group_centroid = (centroid * d["bars_per_layer_that_fit"] + second * (r["beam_top_bars"] - d["bars_per_layer_that_fit"])) / r["beam_top_bars"]
             d["two_layer_centroid_from_face_in"] = group_centroid
             d["two_layer_lever_arm_ratio"] = (hb - group_centroid - a / 2.0) / (d_nominal - a / 2.0)
@@ -404,8 +440,11 @@ def column_cage_geometry(record):
     bc, hc = s["b_col_in"], s["h_col_in"]
     db, tie_db = bar_diameter(r["col_bar_size"]), bar_diameter(r["col_stirrup_bar_size"])
     legs = r["col_stirrup_legs_by_direction"]
-    cage = column_cage(bc, hc, r["col_clear_cover_in"], tie_db, db, r["col_top_bars"], r["col_side_bars"], legs=legs)
-    c = r["col_clear_cover_in"] + tie_db + db / 2.0
+    import Structure_Parameters as sp
+    grid = record_grid(record)
+    cage = column_cage(bc, hc, r["col_clear_cover_in"], tie_db, db, r["col_top_bars"], r["col_side_bars"], legs=legs, grid_in=grid)
+    c = sp.first_bar_offset_in(r["col_clear_cover_in"], tie_db, db, grid_in=_grid(grid))
+    provided = c - tie_db - db / 2.0          # the cover outside the hoop as built
     spans = []
     if cage.get("arrangement"):
         # crossties across the b faces engage b-face bars: they run along X between x = c and x = h - c
@@ -415,7 +454,7 @@ def column_cage_geometry(record):
         for pos, sup in zip(cage["arrangement"]["h_face"]["positions_in"], cage["arrangement"]["h_face"]["supported"]):
             if sup and pos not in (cage["arrangement"]["h_face"]["positions_in"][0], cage["arrangement"]["h_face"]["positions_in"][-1]):
                 spans.append(("y", pos, bc - 2.0 * c))
-    sets = [tie_set(hc, bc, r["col_clear_cover_in"], r["col_stirrup_bar_size"], spans, set_index=k) for k in range(2)]
+    sets = [tie_set(hc, bc, provided, r["col_stirrup_bar_size"], spans, set_index=k) for k in range(2)]
     limit = clear_spacing_limit("column", db, aggregate)
     clearances = {face: layer_clearances(pos, db) for face, pos in cage["faces"].items()}
     clear_ok = all(min(v) >= limit - 1e-9 for v in clearances.values() if v)
@@ -423,6 +462,7 @@ def column_cage_geometry(record):
     checks.append({"rule": "25.2.3 column bar clear spacing", "passes": clear_ok,
                    "detail": f"min clear {min(min(v) for v in clearances.values() if v):.2f} in vs limit {limit:.2f} in"})
     return {"arrangement": cage, "tie_sets": sets, "clearances_in": clearances, "clear_limit_in": limit,
+            "clear_cover_provided_in": provided, "clear_cover_specified_in": r["col_clear_cover_in"],
             "hoop_spacing_in": r["col_stirrup_spacing_in"], "checks": checks,
             "passes": bool(cage.get("constructible")) and all(c["passes"] for c in checks)}
 
@@ -432,22 +472,36 @@ def beam_cage_geometry(record):
     aggregate = float((record.get("materials") or {}).get("aggregate_size_in", 0.75))
     bw, hb = s["b_beam_in"], s["h_beam_in"]
     db, tie_db = bar_diameter(r["beam_bar_size"]), bar_diameter(r["beam_stirrup_bar_size"])
-    cage = beam_cage(bw, r["beam_clear_cover_in"], tie_db, db, r["beam_top_bars"], r["beam_bot_bars"], legs=r["beam_stirrup_legs"])
-    c = r["beam_clear_cover_in"] + tie_db + db / 2.0
+    import Structure_Parameters as sp
+    grid = record_grid(record)
+    cage = beam_cage(bw, r["beam_clear_cover_in"], tie_db, db, r["beam_top_bars"], r["beam_bot_bars"], legs=r["beam_stirrup_legs"],
+                     grid_in=grid)
+    c = sp.first_bar_offset_in(r["beam_clear_cover_in"], tie_db, db, grid_in=_grid(grid))
+    provided = c - tie_db - db / 2.0          # the lateral cover outside the hoop as built
     spans = []
     if cage.get("arrangement"):
         top = cage["arrangement"]["top"]
         for pos, sup in zip(top["positions_in"], top["supported"]):
             if sup and pos not in (top["positions_in"][0], top["positions_in"][-1]):
                 spans.append(("y", pos, hb - 2.0 * c))
-    sets = [tie_set(bw, hb, r["beam_clear_cover_in"], r["beam_stirrup_bar_size"], spans, set_index=k) for k in range(2)]
+    sets = [tie_set(bw, hb, provided, r["beam_stirrup_bar_size"], spans, set_index=k) for k in range(2)]
+    # The hoop of each direction follows that direction's first layer at each face (the stacked lower
+    # direction runs one layer deeper at one face): one dimensioned set per direction when the record
+    # carries the per-face hoop covers.
+    hoop_covers = r.get("beam_hoop_cover_in") or {}
+    sets_by_axis = {axis: [tie_set(bw, hb, provided, r["beam_stirrup_bar_size"], spans, set_index=k,
+                                   depth_covers_in=(covers["top"], covers["bottom"])) for k in range(2)]
+                    for axis, covers in hoop_covers.items() if isinstance(covers, dict)}
     limit = clear_spacing_limit("beam", db, aggregate)
     clearances = {face: layer_clearances(pos, db) for face, pos in cage["faces"].items()}
     clear_ok = all(min(v) >= limit - 1e-9 for v in clearances.values() if v)
     checks = list(cage.get("checks", []))
     checks.append({"rule": "25.2.1 beam bar clear spacing", "passes": clear_ok,
                    "detail": f"min clear {min(min(v) for v in clearances.values() if v):.2f} in vs limit {limit:.2f} in"})
-    return {"arrangement": cage, "tie_sets": sets, "clearances_in": clearances, "clear_limit_in": limit,
+    return {"arrangement": cage, "tie_sets": sets, "tie_sets_by_direction": sets_by_axis,
+            "clearances_in": clearances, "clear_limit_in": limit,
+            "clear_cover_provided_in": provided, "clear_cover_specified_in": r["beam_clear_cover_in"],
+            "hoop_cover_by_direction_in": hoop_covers or None,
             "hoop_spacing_in": r["beam_stirrup_spacing_in"], "checks": checks,
             "passes": bool(cage.get("constructible")) and all(c["passes"] for c in checks)}
 

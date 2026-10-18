@@ -89,7 +89,7 @@ class JointAssembly(unittest.TestCase):
                                      "col_bot_bars": 4, "col_side_bars": 2,
                                      "beam_bar_size": 6, "beam_top_bars": 2,
                                      "beam_bot_bars": 3,
-                                     "beam_longitudinal_centroid_offset_in": 2.375,
+                                     "beam_longitudinal_centroid_offset_in": 2.5,
                                      "beam_bar_area_in2": .44})
         result = cg.joint_assembly(data, max_layers=2, layer_order="interleaved")
         for direction in result["directions"].values():
@@ -102,7 +102,8 @@ class JointAssembly(unittest.TestCase):
         self.assertTrue(res["beam"]["passes"])
         joint = res["joint"]
         self.assertEqual(joint["directions"]["x"]["bars_per_layer_that_fit"], 3)
-        self.assertEqual(joint["directions"]["y"]["bars_per_layer_that_fit"], 4)
+        # on the 0.5 in bar grid (2026-10-14) a 2.1 in lane between column bars holds one beam bar, not two
+        self.assertEqual(joint["directions"]["y"]["bars_per_layer_that_fit"], 2)
         self.assertEqual(joint["directions"]["x"]["layers_needed"], 2)
         self.assertFalse(joint["passes"])
         self.assertAlmostEqual(joint["stacking"]["lower_layer_centroid_from_face_in"], 4.5)
@@ -122,7 +123,7 @@ class JointAssembly(unittest.TestCase):
         self.assertAlmostEqual(joint["exterior_hooks"]["tail_reaches_from_top_face_in"], 4.5 + 3.0 + 1.0 + 12.0)
 
     def test_narrow_beam_with_few_bars_threads_cleanly(self):
-        res = cg.evaluate_cage_geometry(record(reinforcement={"beam_top_bars": 3, "beam_bot_bars": 3, "beam_stirrup_legs": 2}))
+        res = cg.evaluate_cage_geometry(record(reinforcement={"beam_top_bars": 2, "beam_bot_bars": 2, "beam_stirrup_legs": 2}))
         self.assertTrue(res["joint"]["directions"]["x"]["fits_in_one_layer"])
         self.assertTrue(res["joint"]["directions"]["y"]["fits_in_one_layer"])
 

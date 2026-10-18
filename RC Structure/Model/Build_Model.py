@@ -5,7 +5,7 @@ here, together with the constraint handler the chosen element formulation
 needs (penalty ties for the IMK springs' equalDOF chains, Transformation
 otherwise). The numbering helpers (node_tag, diaphragm_master_tag,
 floor_master_node, roof_master_node) are the contract every analysis, load
-and export module relies on; Design.Export_SAP2000 mirrors them so SAP2000
+and export module relies on; an independent model must mirror them so that
 joint labels match. Merged on 2026-09-25 from Model/nodes.py,
 Model/diaphragms.py, Model/mass.py, Model/elements.py and
 Analysis/Constraints.py; no numbering or ordering changed.

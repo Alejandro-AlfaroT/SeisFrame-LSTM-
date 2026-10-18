@@ -53,6 +53,11 @@ for _path in (RC_DIR, RC_DIR / "Data_Generation"):
 from Design.Verification_Integrity import exclusive_lease, file_sha256             # noqa: E402
 
 STAGES = ("design", "gravity_modal")
+# Grouping policies (Model.Member_Groups): the two-system policy of 2026-10-16 (perimeter special moment frames and an
+# interior gravity system, one design per tie) is the default; the story-band policy of 2026-10-02 stays available.
+SYSTEM_GROUPING = "system_uniform_v1"
+BAND_GROUPING = "story_pairs_from_base_orphan_merged__location_class_v1"
+GROUPINGS = (SYSTEM_GROUPING, BAND_GROUPING)
 SUMMARY_NAME = "grouped_summary.md"
 FAILED_NAME = "grouped_search_failed.json"
 
@@ -83,15 +88,16 @@ def _find_case(manifest, case_id):
 
 def _seed(args):
     from Design import Grouped_Record as gr
+    grouping = getattr(args, "grouping", SYSTEM_GROUPING)
     if args.seed_design:
         if args.seed_column or args.seed_beam:
             raise SystemExit("Give --seed-design or --seed-column/--seed-beam, not both.")
         path = Path(args.seed_design).resolve()
-        state, seed = gr.seed_from_uniform_record(json.loads(path.read_text(encoding="utf-8")))
+        state, seed = gr.seed_from_uniform_record(json.loads(path.read_text(encoding="utf-8")), policy_id=grouping)
         return state, {**seed, "source_path": str(path), "source_sha256": file_sha256(path)}
     if not (args.seed_column and args.seed_beam):
         raise SystemExit("A seed is required: --seed-column b h fc --seed-beam b h fc, or --seed-design <design.json>.")
-    return gr.seed_from_sections(args.seed_column, args.seed_beam)
+    return gr.seed_from_sections(args.seed_column, args.seed_beam, policy_id=grouping)
 
 
 def _status(record, probe, probe_date, stages, stage_results):
@@ -142,6 +148,23 @@ def write_summary(record, path):
     for name, item in record["margins"].items():
         lines.append(f"| {name} | not evaluated | | |" if item is None else
                      f"| {name} | {item['demand_over_capacity']:.3f} | {item['margin']:.3f} | {item['at']} |")
+    systems = record.get("systems")
+    if systems:
+        lines += ["", "**Systems**", "",
+                  f"Grouping {systems['policy_id']}; lateral design model {systems['lateral_design_model']}.",
+                  f"Compatibility: {json.dumps(systems['compatibility'].get('roof_design_displacement_in'))} in roof design displacement "
+                  f"(Cd {systems['compatibility'].get('cd')}, Ie {systems['compatibility'].get('importance_factor')}); "
+                  f"strong-column rule not required at {len(systems['scwb_not_required'])} joint direction(s).", "",
+                  "| tie | system | b x h (in) | fc (ksi) | bars (size top/bot/side) | hoops | members |", "|---|---|---|---|---|---|---|"]
+        for tie, item in systems["ties"].items():
+            d = item["design"]
+            lines.append(f"| {tie} | {item['system']} | {d['b_in']:g} x {d['h_in']:g} | {d['fc_ksi']:g} | "
+                         f"No. {d['bar_size']} {d['top_bars']}/{d['bot_bars']}/{d['side_bars']} | "
+                         f"No. {d['stirrup_bar_size']} {d['stirrup_legs']} @ {d['stirrup_spacing_in']:g} | {item['members']} |")
+        lines += ["", "| gravity group | tie | 18.14.3 branch | induced M ratio | induced V ratio |", "|---|---|---|---|---|"]
+        for gid, g in systems["gravity_frame"].items():
+            lines.append(f"| {gid} | {g['tie']} | {g['branch']} | {'' if g['moment_ratio'] is None else format(g['moment_ratio'], '.3f')} | "
+                         f"{'' if g['shear_ratio'] is None else format(g['shear_ratio'], '.3f')} |")
     lines += ["", "**Transitions at band boundaries**", "", "| lower > upper | kind | supported | joints |", "|---|---|---|---|"]
     for key, transition in sorted((record["capacity_design"].get("transitions") or {}).items()):
         lines.append(f"| {key} | {transition['kind']} | {transition['supported']} | {len(transition['joints'])} |")
@@ -196,11 +219,11 @@ def run(args):
         cfg = probe_config(args.probe_date) if args.probe_assertions else DesignConfig.from_structure_parameters()
         seed_state, seed = _seed(args)
         policy = gs.SearchPolicy(max_feasibility_trials=args.max_feasibility_trials, max_reduction_trials=args.max_reduction_trials)
-        identity = gr.grouped_request_identity(cfg, seed, policy)
+        identity = gr.grouped_request_identity(cfg, seed, policy, grouping_policy_id=seed_state.policy_id)
         result.update({"seed": seed, "search_policy": identity["search"], "request_sha256": identity["sha256"],
-                       "group_count": identity["grouping"]["group_count"]})
+                       "group_count": identity["grouping"]["group_count"], "grouping_policy": seed_state.policy_id})
         print(f"Grouped design of {case['case_id']} ({case.get('geometry_name')}); profile {profile_id}; "
-              f"{identity['grouping']['group_count']} groups; request {identity['sha256'][:16]}")
+              f"grouping {seed_state.policy_id}; {identity['grouping']['group_count']} groups; request {identity['sha256'][:16]}")
         print(f"Seed {json.dumps(seed)}")
         print(f"Budget: {policy.max_feasibility_trials} feasibility and {policy.max_reduction_trials} reduction evaluations; "
               f"policy {policy.improvement_policy}")
@@ -237,6 +260,10 @@ def run(args):
                 "fail_ids": sorted({str(i).split(":")[0] for i in qualification.get("failed") or []}),
                 "not_evaluated_ids": sorted({str(i).split(":")[0] for i in qualification.get("not_evaluated") or []}),
                 "sections_by_group": {gid: [d["b_in"], d["h_in"], d["fc_ksi"]] for gid, d in record["member_groups"]["designs"].items()},
+                "systems": None if not record.get("systems") else {
+                    "ties": {tie: [t["design"]["b_in"], t["design"]["h_in"], t["design"]["fc_ksi"]] for tie, t in record["systems"]["ties"].items()},
+                    "gravity_frame_branches": {gid: g["branch"] for gid, g in record["systems"]["gravity_frame"].items()},
+                    "roof_design_displacement_in": (record["systems"]["compatibility"] or {}).get("roof_design_displacement_in")},
                 "distinct_form_sizes": record["quantities"]["distinct_form_sizes"],
                 "quantities": {k: v for k, v in record["quantities"].items() if k not in ("groups", "basis")},
                 "margins": record["margins"], "dcr": record["dcr"],
@@ -286,6 +313,9 @@ def build_parser():
     parser.add_argument("--seed-beam", nargs=3, type=float, metavar=("B", "H", "FC"), default=None,
                         help="Seed beam section for every beam group: b h fc (in, in, ksi).")
     parser.add_argument("--seed-design", default=None, help="A saved uniform design.json of the same case, expanded into its groups.")
+    parser.add_argument("--grouping", default=SYSTEM_GROUPING, choices=GROUPINGS,
+                        help="Grouping policy: the two-system policy (perimeter special moment frames and an interior gravity "
+                             "system, one design per tie; default) or the story-band policy.")
     parser.add_argument("--max-feasibility-trials", type=int, required=True,
                         help="Complete candidate evaluations the feasibility phase may spend (part of the request identity).")
     parser.add_argument("--max-reduction-trials", type=int, required=True,

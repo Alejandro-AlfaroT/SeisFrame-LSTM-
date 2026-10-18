@@ -57,8 +57,11 @@ def evaluate_layered_beam_spacing(beam, column):
     if not isinstance(layers, dict) or not all(isinstance(layers.get(a), dict) for a in ("x", "y")):
         raise ValueError("Both directional beam row declarations are required")
     b, h, db = (_number(beam, k) for k in ("b_in", "h_in", "bar_db_in"))
+    import Structure_Parameters as sp
     tie, cover = _number(beam, "stirrup_db_in"), _number(beam, "clear_cover_in", positive=False)
-    base = cover + tie + db / 2
+    # the bar grid of the record under check (None: even spacing, a record from before the 2026-10-14 rule)
+    grid = beam["bar_position_grid_in"] if "bar_position_grid_in" in beam else sp.MODULE_GRID
+    base = sp.first_bar_offset_in(cover, tie, db, grid_in=grid)
     if 2 * base >= min(b, h):
         raise ValueError("Beam bar centers must fit inside the section")
     clear = clear_spacing_limit("beam", db, _number(beam, "aggregate_size_in"))
@@ -79,7 +82,7 @@ def evaluate_layered_beam_spacing(beam, column):
                 raise ValueError(f"{axis}/{face} declared layers contradict the rows or exceed the limit")
     # Match the same convention/elevations consumed by saved strengths. A
     # different layout must not silently replace the one being qualified.
-    pitch = db + max(1.0, db)
+    pitch = sp.snap_up_to_grid(db + max(1.0, db), grid)
     upper, lower = ("x", "y") if convention == "x_over_y" else ("y", "x")
     for face in totals:
         near, far = (upper, lower) if face == "top" else (lower, upper)
@@ -102,8 +105,8 @@ def evaluate_layered_beam_spacing(beam, column):
         side = _count(column, "n_side_per_face", 0)
         if nt != nb or 2 * (cc + ctie + cdb / 2) >= min(cb, ch):
             raise ValueError("Column threading requires valid symmetric top/bottom face geometry")
-        bars = column_bars_plan(cb, ch, cc, ctie, cdb, nt, side)
-        directions = beam_bars_threading(cb, ch, b, cover, tie, db, max(totals.values()), bars, cdb, clear)
+        bars = column_bars_plan(cb, ch, cc, ctie, cdb, nt, side, grid_in=grid)
+        directions = beam_bars_threading(cb, ch, b, cover, tie, db, max(totals.values()), bars, cdb, clear, grid_in=grid)
     checks = []
     for face in totals:
         evidence, spacings, unplaced, cover_margins = {}, [], [], []

@@ -11,10 +11,14 @@ by Latin hypercube sampling on the discrete levels, and writes
                                  so a later (adaptive) round can add points to the same space
   run_shard.ps1                  the two launches of one shard, with paths relative to the repository
 
-Sampling (``latin_hypercube_discrete_v1``): each of the seven parameters gets one point in each of ``count``
+Sampling (``latin_hypercube_discrete_v2``): each of the seven parameters gets one point in each of ``count``
 equal strata of [0, 1), in an independent random order; a coordinate u maps to level floor(u * levels). The
 marginal of every parameter is therefore as even as its level count allows. A draw that repeats a geometry
-and site already taken is redrawn in its own stratum (recorded). Nothing is launched by this tool.
+and site already taken, or whose height over least plan width exceeds the population cap
+(Generate_Parameterized_Dataset.MAX_HEIGHT_TO_WIDTH_RATIO, user decision 2026-10-14), is redrawn in its own
+stratum: one of its strata is exchanged with a later row's for one parameter at random (the design stays
+Latin, and the discrete level can change, which a redraw inside the same stratum cannot do once count exceeds
+the level count). Both counts are recorded. Nothing is launched by this tool.
 
 Usage:
   python tools/build_lhs_pilot.py --count 100 --seed 20261004 --shards 4 --name v2DesignPilot100 --out pilots/v2DesignPilot100
@@ -30,35 +34,60 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "Data_Generation"))
 
-SAMPLING_METHOD = "latin_hypercube_discrete_v1"
+SAMPLING_METHOD = "latin_hypercube_discrete_v2"
 
 
-def latin_hypercube(count, levels, seed):
-    """``count`` points; levels = {parameter: (values...)}. Returns [{"u": {...}, "index": {...}, "values": {...}}]."""
+def latin_hypercube(count, levels, seed, admissible=None):
+    """``count`` points; levels = {parameter: (values...)}. Returns [{"u": {...}, "index": {...}, "values": {...}}],
+    the redraws for repeated structures and the redraws for inadmissible ones (``admissible(values)`` False)."""
     rng = random.Random(seed)
     columns = {}
     for name in levels:
         strata = list(range(count))
         rng.shuffle(strata)
         columns[name] = [(stratum + rng.random()) / count for stratum in strata]
-    points, seen, redraws = [], set(), 0
+    def evaluate(row):
+        u = {name: columns[name][row] for name in levels}
+        index = {name: min(int(u[name] * len(levels[name])), len(levels[name]) - 1) for name in levels}
+        key = tuple(index[name] for name in levels)
+        values = {name: levels[name][index[name]] for name in levels}
+        return u, index, key, values, key in seen, admissible is not None and not admissible(values)
+
+    points, seen, redraws, rejected = [], set(), 0, 0
+    names = list(levels)
     for row in range(count):
-        for _attempt in range(1000):
-            u = {name: columns[name][row] for name in levels}
-            index = {name: min(int(u[name] * len(levels[name])), len(levels[name]) - 1) for name in levels}
-            key = tuple(index[name] for name in levels)
-            if key not in seen:
+        for _attempt in range(4000):
+            u, index, key, values, repeated, inadmissible = evaluate(row)
+            if not repeated and not inadmissible:
                 break
-            # a repeated structure: redraw the last coordinate inside its own stratum, then the next ones
-            redraws += 1
-            name = rng.choice(list(levels))
-            stratum = int(columns[name][row] * count)
-            columns[name][row] = (stratum + rng.random()) / count
+            redraws += int(repeated)
+            rejected += int(inadmissible and not repeated)
+            # Exchange one parameter's stratum with a later row (the rows not yet accepted); the last row may
+            # exchange with an earlier accepted row only when that row stays accepted and distinct.
+            name = rng.choice(names)
+            if row + 1 < count:
+                other = rng.randrange(row + 1, count)
+                columns[name][row], columns[name][other] = columns[name][other], columns[name][row]
+            else:
+                other = rng.randrange(row)
+                columns[name][row], columns[name][other] = columns[name][other], columns[name][row]
+                _u, _i, other_key, _v, other_repeated, other_inadmissible = evaluate(other)
+                old_key = points[other]["_key"]
+                still_fine = (not other_inadmissible and (other_key == old_key or other_key not in seen))
+                if not still_fine:
+                    columns[name][row], columns[name][other] = columns[name][other], columns[name][row]
+                    continue
+                if other_key != old_key:
+                    seen.discard(old_key)
+                    seen.add(other_key)
+                    points[other] = {"u": _u, "index": _i, "values": _v, "_key": other_key}
         else:
-            raise RuntimeError("could not draw distinct structures; the sample is too dense for the population")
+            raise RuntimeError("could not draw distinct admissible structures; the sample is too dense for the population")
         seen.add(key)
-        points.append({"u": u, "index": index, "values": {name: levels[name][index[name]] for name in levels}})
-    return points, redraws
+        points.append({"u": u, "index": index, "values": values, "_key": key})
+    for point in points:
+        point.pop("_key", None)
+    return points, redraws, rejected
 
 
 def main():
@@ -79,8 +108,8 @@ def main():
         raise SystemExit("count and shards must be positive, with at most one shard per case")
 
     import Structure_Parameters as sp
-    from Generate_Parameterized_Dataset import (GEOMETRY_INCREMENT_FT, POPULATION_BASIS, RANGES, SEISMIC_SITES,
-                                                feet_label)
+    from Generate_Parameterized_Dataset import (GEOMETRY_INCREMENT_FT, MAX_HEIGHT_TO_WIDTH_RATIO, POPULATION_BASIS,
+                                                RANGES, SEISMIC_SITES, feet_label, geometry_admissible)
     from Design.Screening_Manifest import MANIFEST_SCHEMA, load_manifest
     from Model.Analysis_Profile import PROFILES
 
@@ -89,7 +118,8 @@ def main():
         raise SystemExit(f"Unknown profile {profile_id!r}; known: {sorted(PROFILES)}")
     settings = PROFILES[profile_id]["settings"]
     levels = {**{key: tuple(values) for key, values in RANGES.items()}, "seismic_site": tuple(SEISMIC_SITES)}
-    points, redraws = latin_hypercube(args.count, levels, args.seed)
+    points, redraws, rejected = latin_hypercube(
+        args.count, levels, args.seed, admissible=lambda v: geometry_admissible({key: v[key] for key in RANGES}))
 
     cases = []
     for number, point in enumerate(points, start=1):
@@ -109,6 +139,8 @@ def main():
                 "level_counts": {key: len(values) for key, values in levels.items()},
                 "discrete_mapping": "u in [0, 1) -> level floor(u * level_count); one point per stratum of width 1 / count",
                 "redraws_for_repeated_structures": redraws,
+                "redraws_for_inadmissible_structures": rejected,
+                "max_height_to_width_ratio": MAX_HEIGHT_TO_WIDTH_RATIO,
                 "extension_note": "a later round adds points to the same unit cube; keep this file with the dataset"}
 
     def manifest(case_list, label):
@@ -120,6 +152,7 @@ def main():
             "design_basis": {"bay_and_story_height_increment_ft": GEOMETRY_INCREMENT_FT,
                              "risk_category": basis["risk_category"], "importance_factor": basis["importance_factor"],
                              **{key: [min(values), max(values)] for key, values in RANGES.items()},
+                             "max_height_to_width_ratio": MAX_HEIGHT_TO_WIDTH_RATIO,
                              "site_class": basis.get("site_class"), "population_basis": POPULATION_BASIS},
             "nonlinear_profile": {"element_formulation": settings["ELEMENT_FORMULATION"], "member_material": settings["IMK_MATERIAL_TYPE"],
                                   "apply_to_beams": settings["IMK_APPLY_TO_BEAMS"], "apply_to_columns": settings["IMK_APPLY_TO_COLUMNS"],
@@ -170,7 +203,8 @@ Set-Location $rc
     for name in written:
         load_manifest(args.out / name) if name.endswith("screening_plan.json") else None
     (args.out / "SHA256SUMS.json").write_text(json.dumps(written, indent=1), encoding="utf-8")
-    print(json.dumps({"cases": len(cases), "shards": args.shards, "redraws": redraws, "out": str(args.out),
+    print(json.dumps({"cases": len(cases), "shards": args.shards, "redraws": redraws, "rejected_by_aspect_cap": rejected,
+                      "out": str(args.out),
                       "marginals": {key: {str(value): sum(1 for c in cases if c[key] == value) for value in values}
                                     for key, values in levels.items() if len(values) <= 6}}, indent=1))
 

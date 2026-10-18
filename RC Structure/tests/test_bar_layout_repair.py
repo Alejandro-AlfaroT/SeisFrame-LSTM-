@@ -146,6 +146,7 @@ class LayoutRepair(unittest.TestCase):
                       SLAB_THICKNESS_IN=7.5)
         for key, value in values.items():
             setattr(sp, key, value)
+        sp.BAR_POSITION_GRID_IN = None          # the pilot's layout predates the 2026-10-14 bar grid
         sp.SLAB_REINFORCEMENT = {"layout": {"outer_axis": "x", "layers": {
             f"{axis}_{face}": {"bar_size": 4, "bar_area_in2": .2, "spacing_in": 12., "axis": axis,
                 "layer": "outer" if axis == "x" else "inner", "clear_cover_outer_mat_in": .75,

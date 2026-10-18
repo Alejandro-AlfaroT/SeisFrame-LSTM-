@@ -122,8 +122,10 @@ def lap_length_in(lower_bar, upper_bar, fc_ksi, fy_ksi, favourable=True):
 
 # ---- bar coordinates ------------------------------------------------------------------------------------------
 def centroid_cover_in(design, clear_cover_in):
-    """Face to the centroid of a longitudinal bar: clear cover + hoop diameter + half the bar diameter."""
-    return clear_cover_in + _BAR[int(design.stirrup_bar_size)][0] + 0.5 * _BAR[int(design.bar_size)][0]
+    """Face to the centroid of a first longitudinal bar: the bar position grid step at or beyond clear cover +
+    hoop diameter + half the bar diameter (Structure_Parameters.first_bar_offset_in)."""
+    import Structure_Parameters as sp
+    return sp.first_bar_offset_in(clear_cover_in, _BAR[int(design.stirrup_bar_size)][0], _BAR[int(design.bar_size)][0])
 
 
 def bar_coordinates(design, clear_cover_in):
@@ -131,20 +133,22 @@ def bar_coordinates(design, clear_cover_in):
 
     x runs along b and y along h. The top and bottom rows (y = +/- (h/2 - c)) hold ``top_bars`` and
     ``bot_bars`` bars including the corners, evenly spaced; each side face (x = +/- (b/2 - c)) holds
-    ``side_bars`` bars between the rows. c is ``centroid_cover_in``.
+    ``side_bars`` bars between the rows, every bar on the bar position grid
+    (Structure_Parameters.face_bar_positions_in). c is ``centroid_cover_in``.
     """
+    import Structure_Parameters as sp
     c = centroid_cover_in(design, clear_cover_in)
     half_b, half_h = 0.5 * design.b_in - c, 0.5 * design.h_in - c
     if half_b <= 0.0 or half_h <= 0.0:
         raise ValueError("The bar centroids do not fit inside the section.")
     bars = []
     for face, y, count in (("top", half_h, design.top_bars), ("bottom", -half_h, design.bot_bars)):
-        for i in range(count):
-            x = 0.0 if count == 1 else -half_b + 2.0 * half_b * i / (count - 1)
-            bars.append({"face": face, "index": i, "x_in": x, "y_in": y})
+        for i, x in enumerate(sp.face_bar_positions_in(design.b_in, c, int(count))):
+            bars.append({"face": face, "index": i, "x_in": x - 0.5 * design.b_in, "y_in": y})
+    side = sp.face_bar_positions_in(design.h_in, c, int(design.side_bars) + 2)[1:-1]
     for face, x in (("left", -half_b), ("right", half_b)):
-        for k in range(1, design.side_bars + 1):
-            bars.append({"face": face, "index": k - 1, "x_in": x, "y_in": -half_h + 2.0 * half_h * k / (design.side_bars + 1)})
+        for k, y in enumerate(side):
+            bars.append({"face": face, "index": k, "x_in": x, "y_in": y - 0.5 * design.h_in})
     return bars
 
 
@@ -159,7 +163,9 @@ def development_case(design, clear_cover_in):
     """Which row of Table 25.4.2.3 the bars of one column cage are in, with the quantities that decide it."""
     db = _BAR[int(design.bar_size)][0]
     spacing = minimum_clear_spacing_in(design, clear_cover_in)
-    cover = clear_cover_in + _BAR[int(design.stirrup_bar_size)][0]
+    # clear cover to the bar as built: the first bar in the hoop corner on the grid, less half the bar
+    # (rounded to the nanoinch so an even-spacing cage returns the exact specified cover plus hoop)
+    cover = round(centroid_cover_in(design, clear_cover_in) - 0.5 * db, 9)
     favourable = spacing >= db - 1e-9 and cover >= db - 1e-9
     return {"table": "ACI 318-19 Table 25.4.2.3", "favourable": favourable,
             "row": ("clear spacing at least db, clear cover at least db, ties not less than the Code minimum" if favourable

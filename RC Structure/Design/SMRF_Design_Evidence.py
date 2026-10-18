@@ -34,11 +34,15 @@ def capacity_state_from_record(record):
     drop_weight = unit_weight * b_beam * (h_beam - thickness)
     self_weight = {"x": drop_weight * (1.0 - sections["h_col_in"] / geometry["bay_x_in"]),
                    "y": drop_weight * (1.0 - sections["b_col_in"] / geometry["bay_y_in"])}
+    import Structure_Parameters as sp
     cover = rebar["col_longitudinal_centroid_offset_in"]
     h_col, ab = sections["h_col_in"], rebar["col_bar_area_in2"]
     side = int(rebar["col_side_bars"])
+    # Bar positions on the record's bar grid, as its cage lays them (Structure_Parameters.face_bar_positions_in;
+    # None, even spacing, for a record from before the 2026-10-14 rule).
+    grid = rebar.get("bar_position_grid_in")
     layers = [(rebar["col_top_bars"] * ab, cover)]
-    layers += [(2 * ab, cover + (h_col - 2 * cover) * k / (side + 1)) for k in range(1, side + 1)]
+    layers += [(2 * ab, y) for y in sp.face_bar_positions_in(h_col, cover, side + 2, grid_in=grid)[1:-1]]
     layers += [(rebar["col_bot_bars"] * ab, h_col - cover)]
     # Bending through b (the y frame): corners plus side-face bars in the outer
     # layers, one top and one bottom bar at each interior top/bottom position
@@ -47,7 +51,8 @@ def capacity_state_from_record(record):
     outer = (2 + side) * ab
     layers_about_z = [(outer, cover)]
     for count in (max(2, int(rebar["col_top_bars"])), max(2, int(rebar["col_bot_bars"]))):
-        layers_about_z += [(ab, cover + (b_col - 2 * cover) * k / (count - 1)) for k in range(1, count - 1)]
+        if count > 2:
+            layers_about_z += [(ab, x) for x in sp.face_bar_positions_in(b_col, cover, count, grid_in=grid)[1:-1]]
     layers_about_z.append((outer, b_col - cover))
     layers_about_z.sort(key=lambda layer: layer[1])
     per_story = (geometry["num_bay_x"] + 1) * (geometry["num_bay_y"] + 1)
@@ -73,7 +78,7 @@ def capacity_state_from_record(record):
                       "aggregate_size_in": materials.get("aggregate_size_in", 0.75)},
         "beam": {"bar_size": rebar["beam_bar_size"], "top_bars": rebar["beam_top_bars"], "bot_bars": rebar["beam_bot_bars"],
                  "centroid_offset_in": nominal, "clear_cover_in": rebar["beam_clear_cover_in"],
-                 "stirrup_bar_size": rebar["beam_stirrup_bar_size"],
+                 "stirrup_bar_size": rebar["beam_stirrup_bar_size"], "bar_position_grid_in": grid,
                  "centroid_offsets_by_axis_in": offsets,
                  "worst_centroid_offset_in": max(v for faces in offsets.values() for v in faces.values()),
                  "stacking_convention": stacking.get("convention", "none"),
@@ -83,7 +88,7 @@ def capacity_state_from_record(record):
         "column": {"bar_size": rebar["col_bar_size"], "top_bars": rebar["col_top_bars"], "bot_bars": rebar["col_bot_bars"],
                    "side_bars": rebar["col_side_bars"], "centroid_offset_in": cover,
                    "clear_cover_in": rebar["col_clear_cover_in"], "stirrup_bar_size": rebar["col_stirrup_bar_size"],
-                   "layers": layers, "layers_about_z": layers_about_z},
+                   "bar_position_grid_in": grid, "layers": layers, "layers_about_z": layers_about_z},
         "slab": {"thickness_in": thickness, "layout": (record.get("slab_reinforcement") or {}).get("layout")},
         "transfer": record.get("floor_transfer"), "sds": record["seismic"]["sds"],
         "column_axial_envelope": axial, "column_shear_demand": shear,

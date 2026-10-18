@@ -17,8 +17,6 @@ from unittest.mock import patch
 RC = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RC))
 import Structure_Parameters as sp
-from Design import Compare_SAP2000 as compare
-from Design import Export_SAP2000 as export
 from Design import Verify_Designs as verify
 from Design import Verification_Integrity as integrity
 from Design.Config import DesignConfig
@@ -48,98 +46,6 @@ def export_record():
         "floor_transfer": {"mesh_per_bay": 16, "unit_cases": {
             key: copy.deepcopy(unit) for key in ["dead", "live"] + ["live_pattern_" + p["id"] for p in patterns]}},
     }
-
-
-class SAPExportRepairs(unittest.TestCase):
-    def setUp(self):
-        self.snapshot = dict(vars(sp))
-        self.record = export_record()
-        self.elf_patch = patch.object(export, "elf_story_forces", return_value={
-            "story_forces_kip": [10.], "base_shear_kip": 10., "design_period_sec": .5,
-            "cs": .1, "seismic_weight_kip": 100.})
-        self.elf_patch.start()
-
-    def tearDown(self):
-        self.elf_patch.stop()
-        for key in set(vars(sp)) - set(self.snapshot):
-            delattr(sp, key)
-        vars(sp).update(self.snapshot)
-
-    def test_y_beam_local_couples_rotate_to_global(self):
-        model, _ = export.build(self.record, "frame")
-        rows = dict(model.tables)["FRAME LOADS - POINT"]
-        rows = [r for r in rows if r["LoadPat"] == "DEAD_FLOOR" and r["Type"] == "Moment"]
-        self.assertEqual({r["Dir"]: r["Force"] for r in rows}, {"X": -20., "Y": 10.})
-
-    def test_every_saved_combination_and_pattern_is_preserved(self):
-        model, target = export.build(self.record, "frame")
-        tables = dict(model.tables)
-        for combo in self.record["design_actions"]["combinations"]:
-            rows = [r for r in tables["COMBINATION DEFINITIONS"] if r["ComboName"] == combo["id"]]
-            live = "LIVE" if combo["live_pattern"] == "all" else "LIVE_" + combo["live_pattern"]
-            expected = {"DEAD_FLOOR": combo["dead"], "SELF_WT": combo["dead"],
-                        live: combo["live"], "EQX": combo["ex"], "EQY": combo["ey"]}
-            self.assertEqual({r["CaseName"]: r["ScaleFactor"] for r in rows},
-                             {k: v for k, v in expected.items() if v})
-        self.assertEqual(len(target["required_strength_combinations"]), 24)
-        live_cases = [r for r in tables["LOAD CASE DEFINITIONS"] if r["Case"].startswith("LIVE")]
-        self.assertEqual(len(live_cases), 7)
-        self.assertTrue(all(r["DesignType"] == "Live" for r in live_cases))
-
-    def test_mesh_is_subdivisions_per_edge_and_area_patterns_match_panels(self):
-        model, _ = export.build(self.record, "slab")
-        tables = dict(model.tables)
-        self.assertTrue(all(r["N1"] == r["N2"] == 16 for r in tables["AREA AUTO MESH ASSIGNMENTS"]))
-        rows = tables["AREA LOADS - UNIFORM"]
-        for pattern in self.record["demand_basis"]["live_load_patterns"]:
-            self.assertEqual({r["Area"] for r in rows if r["LoadPat"] == "LIVE_" + pattern["id"]},
-                             {j * 2 + i + 1 for i, j in pattern["panels"]})
-
-    def test_weight_modifiers_remove_overlaps_without_changing_stiffness(self):
-        model, target = export.build(self.record, "frame")
-        weights = target["member_weight_modifiers"]
-        self.assertAlmostEqual(weights["column"], 115 / 120)
-        self.assertAlmostEqual(weights["x"], 13 / 18 * 100 / 120)
-        self.assertAlmostEqual(weights["y"], 13 / 18 * 160 / 180)
-        gamma = .15 / 1728
-        corrected = (9 * 20 * 20 * 120 * weights["column"] +
-                     6 * 10 * 18 * 120 * weights["x"] + 6 * 10 * 18 * 180 * weights["y"]) * gamma
-        exact = (9 * 20 * 20 * 115 + 6 * 10 * 13 * 100 + 6 * 10 * 13 * 160) * gamma
-        self.assertAlmostEqual(corrected, exact)
-        self.assertTrue(all(r["I22Mod"] in (.7, .35) for r in dict(model.tables)["FRAME PROPERTY MODIFIERS"]))
-
-    def test_missing_transfer_or_combinations_fail_closed(self):
-        self.record["floor_transfer"]["unit_cases"].pop("live")
-        with self.assertRaisesRegex(ValueError, "Missing floor-transfer"):
-            export.build(self.record, "frame")
-        self.record["design_actions"]["combinations"] = []
-        with self.assertRaisesRegex(ValueError, "combinations are required"):
-            export.build(self.record, "slab")
-
-
-class SAPComparisonRepairs(unittest.TestCase):
-    def test_rad_units_row_is_not_a_joint(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "joints.csv"
-            path.write_text("Joint,OutputCase,U1,R1\nText,Text,in,rad\n1,DRIFT_X,0.1,0.2\n")
-            self.assertEqual(len(compare.read_csv(path)), 1)
-
-    def test_missing_tables_and_steel_area_are_not_a_pass(self):
-        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
-            (Path(tmp) / "beam_design.csv").write_text("Frame,AsTop\n1,0.8\n")
-            targets = {"case": "test", "variant": "frame", "elf": {"story_forces_kip": [1]},
-                       "drift_screen": {}, "dcr": {"beam": .8}}
-            report = compare.compare(targets, tmp)
-            self.assertEqual(report["status"], "incomplete")
-            self.assertTrue(any(r["label"] == "beam DCR" and r["status"] == "unavailable" for r in report["checks"]))
-
-    def test_nonfinite_ratios_cannot_silently_disappear(self):
-        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
-            (Path(tmp) / "beam_design.csv").write_text("Frame,Ratio\n1,0.8\n2,NaN\n")
-            targets = {"case": "test", "variant": "frame", "elf": {"story_forces_kip": [1]},
-                       "drift_screen": {}, "dcr": {"beam": .8}}
-            report = compare.compare(targets, tmp)
-            self.assertTrue(any(r["label"] == "beam DCR coverage" for r in report["checks"]))
 
 
 class VerificationRepairs(unittest.TestCase):

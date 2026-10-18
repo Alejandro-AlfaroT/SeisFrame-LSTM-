@@ -229,8 +229,9 @@ class ChangedGroupPropagation(unittest.TestCase):
         axial = sum(gf.hand_node_mass(k, 1, 1) * sp.G for k in (3, 4)) + 2 * sp.FLOOR_LIVE_LOAD_KSF * gf.BAY_X * gf.BAY_Y / 144.0
         close(self, entry["axial_kip"], axial, 1e-11)                 # SEISMIC_LIVE_LOAD_FRACTION is 0: mass weight + live
         ab = sp.rebar_area(d.bar_size)
-        cover = sp.COL_CLEAR_COVER_IN + sp.rebar_diameter(d.stirrup_bar_size) + 0.5 * sp.rebar_diameter(d.bar_size)
-        rows = [(d.top_bars * ab, cover), (2 * ab, cover + (d.h_in - 2 * cover) / 2.0), (d.bot_bars * ab, d.h_in - cover)]
+        # the first bar on the 0.5 in grid for the #5 layout hoop (2026-10-14), the one side bar at mid-depth
+        cover = sp.first_bar_offset_in(sp.COL_CLEAR_COVER_IN, sp.rebar_diameter(d.stirrup_bar_size), sp.rebar_diameter(d.bar_size))
+        rows = [(d.top_bars * ab, cover), (2 * ab, sp.face_bar_positions_in(d.h_in, cover, 3)[1]), (d.bot_bars * ab, d.h_in - cover)]
         my = column_moment_at_axial(axial, column_pm_nominal_for(d.b_in, d.h_in, d.fc_ksi, rows))
         close(self, entry["yield_moment_y_kip_in"], my, 1e-11)
         nu = axial / (d.b_in * d.h_in * d.fc_ksi)

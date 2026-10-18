@@ -153,20 +153,5 @@ class FrameTests(unittest.TestCase):
         self.assertAlmostEqual(column["iy"], sp.section_stiffness_modifier("column") * rect_iy(20.0, 20.0))
 
 
-class ExportTests(unittest.TestCase):
-    def test_sap_beam_modifiers_carry_the_t_section(self):
-        from Design.Export_SAP2000 import Frame, _beam_stiffness_ratios
-        record = {"geometry": {"num_bay_x": 6, "num_bay_y": 2, "num_floor": 8, "bay_x_in": 168.0, "bay_y_in": 132.0,
-                               "story_h_in": 120.0},
-                  "sections": {"b_beam_in": 10.0, "h_beam_in": 18.0, "b_col_in": 24.0, "h_col_in": 24.0},
-                  "slab": {"thickness_in": 5.0}}
-        ratios = _beam_stiffness_ratios(record, Frame(record))
-        self.assertAlmostEqual(ratios[("x", "interior")], 9038.0 / rect_iy(10.0, 18.0), delta=0.001)
-        self.assertAlmostEqual(ratios[("y", "edge")], 6475.0 / rect_iy(10.0, 18.0), delta=0.001)
-        self.assertTrue(all(r > 1.0 for r in ratios.values()))
-        record["slab"] = {"thickness_in": None}
-        self.assertEqual(set(_beam_stiffness_ratios(record, Frame(record)).values()), {1.0})
-
-
 if __name__ == "__main__":
     unittest.main()

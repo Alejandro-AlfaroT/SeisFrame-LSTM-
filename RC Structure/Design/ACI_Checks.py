@@ -624,14 +624,19 @@ DEVELOPMENT_LENGTH_MIN_IN = 12.0           # 25.4.2.1(b)
 GRADE_FACTOR_PSI_G = {40.0: 1.0, 60.0: 1.0, 80.0: 1.15, 100.0: 1.3}   # Table 25.4.2.5, psi_g
 
 
-def column_bar_cb_in(b_in, h_in, clear_cover_in, hoop_bar_size, bar_size, n_top, n_side_per_face):
+_CB_MODULE = object()      # grid_in left out: the module's bar grid; None is a record from before the rule
+
+
+def column_bar_cb_in(b_in, h_in, clear_cover_in, hoop_bar_size, bar_size, n_top, n_side_per_face, grid_in=_CB_MODULE):
     """cb of a column cage (ACI 318-19 2.2): the lesser of the bar centroid's distance to the nearest concrete
     surface and half the least center-to-center spacing of the bars, for the perimeter cage convention (the
     corners in the top and bottom rows of ``n_top`` bars, ``n_side_per_face`` bars between them on each side)."""
     db = sp.rebar_diameter(bar_size)
-    edge = clear_cover_in + sp.rebar_diameter(hoop_bar_size) + 0.5 * db
-    pitch_b = (b_in - 2.0 * edge) / (n_top - 1) if n_top > 1 else float("inf")
-    pitch_h = (h_in - 2.0 * edge) / (n_side_per_face + 1)
+    grid = sp.MODULE_GRID if grid_in is _CB_MODULE else grid_in
+    edge = sp.first_bar_offset_in(clear_cover_in, sp.rebar_diameter(hoop_bar_size), db, grid_in=grid)
+    # The least pitch of the grid arrangement (Structure_Parameters.face_bar_pitches_in), not the even one.
+    pitch_b = sp.face_bar_min_pitch_in(b_in, edge, int(n_top), grid_in=grid)
+    pitch_h = sp.face_bar_min_pitch_in(h_in, edge, int(n_side_per_face) + 2, grid_in=grid)
     spacing = min(pitch_b, pitch_h)
     return {"cb_in": min(edge, 0.5 * spacing), "edge_distance_in": edge, "min_center_spacing_in": spacing,
             "governed_by": "edge distance" if edge <= 0.5 * spacing else "half the bar spacing"}

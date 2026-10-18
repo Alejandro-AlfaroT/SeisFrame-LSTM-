@@ -477,17 +477,6 @@ class CoupledReference(unittest.TestCase):
 class DiagnosticModulesRefuse(unittest.TestCase):
     """Floor diagnostics that model one beam and one column say so instead of taking one line's section for all."""
 
-    def test_by_line_floors_are_refused(self):
-        from Design import SMRF_Cut_Regions, SMRF_Floor_Compatibility
-        with gf.frame():
-            mg.install(gf.changed_state())
-            by_line = fs.for_floor(1)
-        with self.assertRaisesRegex(ValueError, "not wired for a grouped design"):
-            SMRF_Floor_Compatibility.CompatibleFloor(SLAB, GEOMETRY, by_line)
-        with self.assertRaisesRegex(ValueError, "not wired for a grouped design"):
-            SMRF_Cut_Regions.effective_flange_regions(GEOMETRY, by_line, SLAB, axis="x", slab_perimeter="centerlines")
-
-
 # These hand totals describe the framed members; the column extension above the roof is verified on its own
 # (tests/test_roof_extension.py), so this module runs with the terminating roof column.
 def setUpModule():

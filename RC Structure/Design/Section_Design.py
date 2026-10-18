@@ -43,7 +43,11 @@ import math
 # mats credited to the top bars in hogging, the bottom bars sized to the
 # sagging demand and the concrete grade tried before any size, 38 to 42 in are
 # no longer offered: 1 in from 14 to 24, then 2 in from 24 to 36.
-COLUMN_SIZES_IN = tuple(float(size) for size in (*range(14, 25), *range(26, 37, 2)))
+# Capped at 32 in (user decision 2026-10-16, with the perimeter-frame basis): the tallest structure of the
+# population is 162 ft and the lever order is concrete strength, then reinforcement, then section size, so a
+# column is never offered beyond 32 in for now: 1 in from 14 to 24, then 2 in from 24 to 32.
+COLUMN_SIZE_CAP_IN = 32.0
+COLUMN_SIZES_IN = tuple(float(size) for size in (*range(14, 25), *range(26, int(COLUMN_SIZE_CAP_IN) + 1, 2)))
 
 # ACI 318-19 18.6.2.1(b) uses min(0.3h, 10 in). The ladder's
 # max(0.3h, 10 in) is a stricter PRACTICAL sizing preference, not that rule.
@@ -65,6 +69,14 @@ COLUMN_SIZE_LAST_RESORT_IN = 32.0
 COLUMN_MIN_DIMENSION_IN = 12.0
 BEAM_MIN_WIDTH_IN = 10.0
 BEAM_MIN_WIDTH_RATIO = 0.30
+# Beam proportions of the design basis (user decision 2026-10-14), stricter than
+# 18.6.2.1(b): the web is at least BEAM_MIN_WIDTH_DEPTH_RATIO of the depth (the
+# paired width, h/2 taken up to the 2 in width step, already met it) and the
+# depth is at least BEAM_MIN_DEPTH_WIDTH_RATIO of the web, so no rung is square
+# or nearly so (the former cap allowed widths up to the depth). Both are
+# enforced by the ladder and validate_rung, and checked by SMRF_Detailing.
+BEAM_MIN_WIDTH_DEPTH_RATIO = 0.5
+BEAM_MIN_DEPTH_WIDTH_RATIO = 4.0 / 3.0
 # Each depth is offered at its paired width and wider variants in 4 in
 # steps: the capacity-design shear section (22.5.1.2 with the 18.6.5.1 Ve),
 # short clear spans (18.6.2.1(a) ln >= 4d caps the depth) and, since
@@ -77,10 +89,11 @@ BEAM_MIN_WIDTH_RATIO = 0.30
 # the columns in SMRF_Detailing.
 BEAM_WIDTH_STEP_IN = 4.0
 BEAM_WIDTH_VARIANTS = 5
-# A stated proportioning preference (not a code rule; 18.6.2.1(b) allows
-# up to 3h): no offered variant is wider than it is deep, so the ladder does
-# not fill with band beams that outrank deeper rungs on the capacity proxy.
-BEAM_MAX_WIDTH_DEPTH_RATIO = 1.0
+# A stated proportioning rule (not a code rule; 18.6.2.1(b) allows up to 3h):
+# no offered variant is wider than the depth allows under
+# BEAM_MIN_DEPTH_WIDTH_RATIO, so the ladder does not fill with band beams that
+# outrank deeper rungs on the capacity proxy.
+BEAM_MAX_WIDTH_DEPTH_RATIO = 1.0 / BEAM_MIN_DEPTH_WIDTH_RATIO
 
 # Proportioning limits that keep generated frames buildable.
 #
@@ -92,17 +105,18 @@ BEAM_MAX_DEPTH_FRACTION_OF_STORY = 0.40
 
 
 def beam_width_for_depth(depth_in):
-    """Beam width paired with a depth: about h/2, snapped to 2 in, ACI-legal."""
-    raw = max(depth_in / 2.0, BEAM_MIN_WIDTH_RATIO * depth_in, BEAM_MIN_WIDTH_IN)
-    snapped = 2.0 * math.ceil(raw / 2.0)
+    """Beam width paired with a depth: BEAM_MIN_WIDTH_DEPTH_RATIO of the depth taken up to 2 in, ACI-legal."""
+    raw = max(BEAM_MIN_WIDTH_DEPTH_RATIO * depth_in, BEAM_MIN_WIDTH_RATIO * depth_in, BEAM_MIN_WIDTH_IN)
+    snapped = 2.0 * math.ceil(raw / 2.0 - 1e-9)
     return max(snapped, BEAM_MIN_WIDTH_IN)
 
 
 def beam_widths_for_depth(depth_in):
-    """The widths offered at a depth: the paired width and the 4-in wider variants, no wider than deep."""
+    """The widths offered at a depth: the paired width and the 4-in wider variants, none wider than the
+    depth allows under BEAM_MIN_DEPTH_WIDTH_RATIO (so none square or nearly so)."""
     base = beam_width_for_depth(depth_in)
     widths = [base + k * BEAM_WIDTH_STEP_IN for k in range(BEAM_WIDTH_VARIANTS)]
-    return [w for w in widths if w <= max(base, BEAM_MAX_WIDTH_DEPTH_RATIO * depth_in)]
+    return [w for w in widths if w <= max(base, BEAM_MAX_WIDTH_DEPTH_RATIO * depth_in + 1e-9)]
 
 
 def column_ladder():
@@ -237,6 +251,12 @@ def validate_rung(rung, member_type, span_in=None, story_height_in=None,
     else:
         if b < min(BEAM_MIN_WIDTH_RATIO * h, BEAM_MIN_WIDTH_IN):
             raise ValueError(f"Beam width {b} in violates ACI 18.6.2.1 for depth {h} in.")
+        if b < BEAM_MIN_WIDTH_DEPTH_RATIO * h - 1e-9:
+            raise ValueError(f"Beam width {b} in is less than {BEAM_MIN_WIDTH_DEPTH_RATIO:g} of the depth {h} in "
+                             "(design basis 2026-10-14).")
+        if h < BEAM_MIN_DEPTH_WIDTH_RATIO * b - 1e-9:
+            raise ValueError(f"Beam depth {h} in is less than {BEAM_MIN_DEPTH_WIDTH_RATIO:.3g} times the width {b} in "
+                             "(design basis 2026-10-14: beams deeper than wide).")
         if story_height_in is not None and h > BEAM_MAX_DEPTH_FRACTION_OF_STORY * story_height_in:
             raise ValueError(f"Beam depth {h} in exceeds {BEAM_MAX_DEPTH_FRACTION_OF_STORY} of story height.")
         if span_in is not None and (not math.isfinite(span_in) or span_in <= 0):

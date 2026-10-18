@@ -63,6 +63,10 @@ def _problem_list(manifest, ranges, sites, increment_ft):
         code = [min(ranges[key]), max(ranges[key])]
         if declared is not None and [float(v) for v in declared] != [float(v) for v in code]:
             problems.append(f"design_basis.{key} is {declared}; the population range is {code}")
+    from Generate_Parameterized_Dataset import MAX_HEIGHT_TO_WIDTH_RATIO, height_to_width_ratio
+    declared_cap = basis.get("max_height_to_width_ratio")
+    if declared_cap is not None and abs(float(declared_cap) - MAX_HEIGHT_TO_WIDTH_RATIO) > 1e-12:
+        problems.append(f"design_basis.max_height_to_width_ratio is {declared_cap}; the population cap is {MAX_HEIGHT_TO_WIDTH_RATIO}")
     declared_profile = manifest.get("nonlinear_profile") or {}
     if profile_id in PROFILES:
         settings = PROFILES[profile_id]["settings"]
@@ -109,6 +113,14 @@ def _problem_list(manifest, ranges, sites, increment_ft):
             elif float(value) not in [float(v) for v in ranges[key]]:
                 problems.append(f"{where}: {key} = {value} ft is not a level of the population "
                                 f"({min(ranges[key])}..{max(ranges[key])} ft in {increment_ft}-ft steps)")
+        try:
+            ratio = height_to_width_ratio(**{key: case[key] for key in ("num_bay_x", "num_bay_y", "num_floor",
+                                                                        "story_height_ft", "bay_x_width_ft", "bay_y_width_ft")})
+            if ratio > MAX_HEIGHT_TO_WIDTH_RATIO + 1e-12:
+                problems.append(f"{where}: height over least plan width {ratio:.2f} exceeds the population cap "
+                                f"{MAX_HEIGHT_TO_WIDTH_RATIO} (user decision 2026-10-14)")
+        except (KeyError, TypeError, ValueError):
+            pass
         if case.get("seismic_site") not in sites:
             problems.append(f"{where}: seismic_site {case.get('seismic_site')!r} is not one of {list(sites)}")
     execution = manifest.get("execution") or {}

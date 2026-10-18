@@ -43,13 +43,30 @@ def reinforcement_consistency_checks(record):
             clear = bars[f"{prefix}_clear_cover_in"]
             if isinstance(clear, bool) or not math.isfinite(clear) or clear < 1.5:
                 raise ValueError("Frame clear cover must be at least 1.5 in outside hoops.")
+            # on the record's own grid (None: a record from before the 2026-10-14 rule, even spacing)
+            offset = sp.first_bar_offset_in(clear, sp.rebar_diameter(hoop), sp.rebar_diameter(size),
+                                            grid_in=bars.get("bar_position_grid_in"))
             expected = {f"{prefix}_bar_area_in2": sp.rebar_area(size),
                         f"{prefix}_bar_diameter_in": sp.rebar_diameter(size),
                         f"{prefix}_stirrup_diameter_in": sp.rebar_diameter(hoop),
-                        f"{prefix}_longitudinal_centroid_offset_in": clear + sp.rebar_diameter(hoop) + sp.rebar_diameter(size)/2}
+                        f"{prefix}_longitudinal_centroid_offset_in": offset}
+            # The cover as built (the first bars in the hoop corners on the grid) and, for beams, the
+            # per-face hoop covers, where the record carries them (design-basis rule 2026-10-14).
+            if f"{prefix}_clear_cover_provided_in" in bars:
+                expected[f"{prefix}_clear_cover_provided_in"] = offset - sp.rebar_diameter(hoop) - sp.rebar_diameter(size) / 2
             matches = all(not isinstance(bars.get(key), bool) and
                           math.isclose(bars[key], value, rel_tol=0, abs_tol=1e-12)
                           for key, value in expected.items())
+            if prefix == "beam" and "beam_hoop_cover_in" in bars:
+                rows = (bars.get("beam_bar_stacking") or {}).get("layers") or {}
+                inset = sp.rebar_diameter(hoop) + sp.rebar_diameter(size) / 2
+                hoop_covers = bars["beam_hoop_cover_in"]
+                matches = matches and all(
+                    isinstance(hoop_covers.get(axis), dict)
+                    and math.isclose(float(hoop_covers[axis][face]),
+                                     float(rows[axis][face]["offsets_in"][0]) - inset, rel_tol=0, abs_tol=1e-12)
+                    and float(hoop_covers[axis][face]) >= clear - 1e-12
+                    for axis in ("x", "y") for face in ("top", "bottom"))
             checks.append(make_check(f"reinforcement.{prefix}_model_consistency",
                                      "Saved bar database / actual clear-cover geometry", int(matches), 1, "=="))
         except (KeyError, ValueError, TypeError, OverflowError) as exc:
@@ -85,13 +102,19 @@ def detailing_inputs(record):
                   "hoop_spacing_in": bars.get(f"{prefix}_stirrup_spacing_in"),
                   "aggregate_size_in": material.get("aggregate_size_in")}
         try:
-            # Existing COVER means centroid offset, NOT clear concrete cover.
-            # Show the actual consequence; never silently relabel it as 1.5 in clear.
-            centroid = bars.get(f"{prefix}_longitudinal_centroid_offset_in", bars.get("longitudinal_centroid_offset_in"))
-            values["clear_cover_in"] = (centroid -
-                                        values["stirrup_db_in"] - values["bar_db_in"] / 2)
+            # The specified clear cover the layout was set from (the record carries it since the slab-aware
+            # route); the legacy COVER means centroid offset, NOT clear concrete cover, so an older record
+            # shows the actual consequence and is never silently relabelled as 1.5 in clear.
+            if bars.get(f"{prefix}_clear_cover_in") is not None and bars.get("bar_position_grid_in") is not None:
+                values["clear_cover_in"] = bars[f"{prefix}_clear_cover_in"]
+            else:
+                centroid = bars.get(f"{prefix}_longitudinal_centroid_offset_in", bars.get("longitudinal_centroid_offset_in"))
+                values["clear_cover_in"] = (centroid -
+                                            values["stirrup_db_in"] - values["bar_db_in"] / 2)
         except (KeyError, TypeError):
             pass
+        # the bar grid the record was laid out on (None: even spacing, a record from before the 2026-10-14 rule)
+        values["bar_position_grid_in"] = bars.get("bar_position_grid_in")
         if member == "column":
             try:
                 values["clear_height_in"] = geometry["story_h_in"] - sections["h_beam_in"]
@@ -458,6 +481,10 @@ def qualify_design(record):
     # unasserted design still shows what there is to review.
     checks.extend(evaluate_slab_actions((strength or {}).get("inputs", {}).get("demand_evidence")
                                         or record.get("slab_actions")))
+    # The slab as the diaphragm (ACI 318-19 18.12 on the ASCE 7-22 12.10.1.1 forces; 2026-10-14): the saved
+    # design is recomputed from its inputs and its inputs are checked against the record.
+    from Design.SMRF_Diaphragm import evaluate_slab_diaphragm
+    checks.extend(evaluate_slab_diaphragm(record))
     slab_inputs = (record.get("slab") or {}).get("inputs", {})
     if slab_inputs:
         for group in ("geometry", "sections"):

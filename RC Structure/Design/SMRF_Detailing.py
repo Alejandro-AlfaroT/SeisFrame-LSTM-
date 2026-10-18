@@ -46,10 +46,19 @@ def _dimensions(member):
 
 
 def _bar_geometry(member):
+    """Face to the first bar's centre (on the bar position grid, Structure_Parameters.first_bar_offset_in)
+    and the bar diameter."""
+    import Structure_Parameters as sp
     cover = _num(member, "clear_cover_in")
     hoop = _num(member, "stirrup_db_in", strictly_positive=True)
     db = _num(member, "bar_db_in", strictly_positive=True)
-    return cover + hoop + db / 2, db
+    return sp.first_bar_offset_in(cover, hoop, db, grid_in=_grid_of(member)), db
+
+
+def _grid_of(member):
+    """The bar grid of the inputs: the record's (bar_position_grid_in, None before the rule) or the module's."""
+    import Structure_Parameters as sp
+    return member["bar_position_grid_in"] if "bar_position_grid_in" in member else sp.MODULE_GRID
 
 
 def select_transverse_geometry(inputs, minimum_spacing_in=3, spacing_step_in=1):
@@ -155,6 +164,14 @@ def evaluate_detailing(inputs):
     try:
         b, h = _dimensions(beam)
         check("beam.minimum_width", "ACI 318-19 18.6.2.1(b)", b, min(0.3 * h, 10), ">=")
+        # Proportioning rules of the design basis (2026-10-14), stricter than 18.6.2.1(b): the web is at
+        # least BEAM_MIN_WIDTH_DEPTH_RATIO of the depth and the depth at least BEAM_MIN_DEPTH_WIDTH_RATIO
+        # of the web (no square beams).
+        from Design.Section_Design import BEAM_MIN_WIDTH_DEPTH_RATIO, BEAM_MIN_DEPTH_WIDTH_RATIO
+        check("beam.width_to_depth_design_basis", "design basis 2026-10-14 (beam web at least half the depth)",
+              b / h, BEAM_MIN_WIDTH_DEPTH_RATIO, ">=", units="ratio")
+        check("beam.depth_to_width_design_basis", "design basis 2026-10-14 (beam deeper than wide)",
+              h / b, BEAM_MIN_DEPTH_WIDTH_RATIO, ">=", units="ratio")
         cb, ch = _dimensions(col)
         check("column.minimum_dimension", "ACI 318-19 18.7.2.1(a)", min(cb, ch), 12, ">=")
         check("column.aspect_ratio", "ACI 318-19 18.7.2.1(b)", min(cb, ch) / max(cb, ch), 0.4, ">=", units="ratio")
@@ -184,14 +201,17 @@ def evaluate_detailing(inputs):
                 from Design.SMRF_Beam_Spacing import evaluate_layered_beam_spacing
                 checks.extend(evaluate_layered_beam_spacing(member, col))
             else:
+                import Structure_Parameters as sp
                 for face, count in (("top", top), ("bottom", bottom)):
-                    spacing = (b - 2 * offset) / (count - 1) - db
+                    # The least pitch of the grid arrangement (Structure_Parameters.face_bar_pitches_in).
+                    spacing = sp.face_bar_min_pitch_in(b, offset, count, grid_in=_grid_of(member)) - db
                     check(f"{name}.bar_clear_spacing", "ACI 318-19 25.2.1; 25.2.3", spacing,
                           clearance, ">=", face)
             if name == "column":
+                import Structure_Parameters as sp
                 side = _count(member, "n_side_per_face")
                 check("column.side_bar_clear_spacing", "ACI 318-19 25.2.3",
-                      (h - 2 * offset) / (side + 1) - db, clearance, ">=")
+                      sp.face_bar_min_pitch_in(h, offset, side + 2, grid_in=_grid_of(member)) - db, clearance, ">=")
         except (ValueError, TypeError, AttributeError, KeyError, OverflowError) as exc:
             unknown(f"{name}.bar_fit_complete", "ACI 318-19 25.2", exc)
         # Steel ratios do not require an aggregate size; keep independent evidence.

@@ -69,8 +69,12 @@ LIMITATIONS = (
     "supported scope, not a statement that no other detail can be built. They await engineering review; a face step of "
     "3 in or more (dowels, ACI 318-19 10.7.4.2) is not a supported transition, and hoop-leg engagement at offset bends, "
     "the lap zone and the confinement above a reduced column are not established.",
-    "Concrete grades are those of the seed and are not searched: no size is shown to be a minimum, and no geometry "
-    "infeasible, over the full material domain.",
+    "Concrete grades step up before any section grows (strength, then reinforcement, then size; Design.Grouped_Search) "
+    "and are not stepped back down after a size grows: no size is shown to be a minimum, and no geometry infeasible, "
+    "over the full material domain.",
+    "Under the system policy the gravity members keep the special-frame hoops the capacity design selects (conservative "
+    "for ACI 318-19 18.14); the Chapter 15 joint strength of a joint direction outside the SFRS uses the Table 18.8.4.3 "
+    "row of the same joint (at or below the Table 15.4.2.3 value).",
     "One column concrete grade and one beam concrete grade for the whole frame; group-specific grades are not available.",
     "Square columns; opposite sides of the plan share a group; the two-story band rule is a research policy, not a code rule.",
     "The story-strength model is provisional (review item M1); vertical strength regularity is recorded, not established.",
@@ -137,19 +141,20 @@ def _require_seed_sections(column, beam):
         raise ValueError(f"The grouped search keeps square columns; the seed column is {column[0]:g} x {column[1]:g}.")
 
 
-def seed_from_sections(column, beam):
-    """(GroupedDesign, description): every group starts on one column and one beam section (b, h, fc)."""
+def seed_from_sections(column, beam, policy_id=mg.POLICY_ID):
+    """(GroupedDesign, description): every group starts on one column and one beam section (b, h, fc), under the
+    grouping policy ``policy_id`` (the band policy, or the two-system policy of 2026-10-16)."""
     column, beam = tuple(float(v) for v in column), tuple(float(v) for v in beam)
     _require_seed_sections(column, beam)
     state = mg.GroupedDesign.uniform(sp.NUM_BAY_X, sp.NUM_BAY_Y, sp.NUM_FLOOR,
                                      mg.MemberDesign("column", *column, **NOMINAL_COLUMN_CAGE),
-                                     mg.MemberDesign("beam_x", *beam, **NOMINAL_BEAM_CAGE))
-    return state, {"kind": "explicit_uniform_sections", "column": list(column), "beam": list(beam),
+                                     mg.MemberDesign("beam_x", *beam, **NOMINAL_BEAM_CAGE), policy_id=policy_id)
+    return state, {"kind": "explicit_uniform_sections", "column": list(column), "beam": list(beam), "grouping_policy": policy_id,
                    "note": ("where the search starts, not a lower or upper bound on any group; the cages are placeholders "
                             "and every group's reinforcement is selected by the first evaluation")}
 
 
-def seed_from_uniform_record(record):
+def seed_from_uniform_record(record, policy_id=mg.POLICY_ID):
     """(GroupedDesign, description): a saved uniform design expanded into its groups (the equivalence fixture)."""
     sections, rebar = record["sections"], record["reinforcement"]
     column = (sections["b_col_in"], sections["h_col_in"], sections["fc_col_ksi"])
@@ -163,31 +168,34 @@ def seed_from_uniform_record(record):
                         rebar["col_stirrup_spacing_in"], None if legs is None else mg._legs_tuple(legs)),
         mg.MemberDesign("beam_x", *beam, rebar["beam_bar_size"], rebar["beam_top_bars"], rebar["beam_bot_bars"],
                         rebar["beam_side_bars"], rebar["beam_stirrup_bar_size"], rebar["beam_stirrup_legs"],
-                        rebar["beam_stirrup_spacing_in"]))
-    return state, {"kind": "uniform_design_record", "column": list(column), "beam": list(beam),
+                        rebar["beam_stirrup_spacing_in"]), policy_id=policy_id)
+    return state, {"kind": "uniform_design_record", "column": list(column), "beam": list(beam), "grouping_policy": policy_id,
                    "source_schema": record.get("schema_version"),
                    "source_request_sha256": (record.get("request_identity") or {}).get("sha256"),
                    "note": "the saved uniform design expanded into its groups; the search may change any group"}
 
 
 # ---- identity --------------------------------------------------------------------------------------------------
-def grouped_request_identity(cfg=None, seed=None, policy=None):
+def grouped_request_identity(cfg=None, seed=None, policy=None, grouping_policy_id=None):
     """Portable identity of a grouped design request: the uniform request's inputs, policy and source, plus the
-    grouping policy and assignments, the seed, the search policy and budget, and the declared rule versions."""
+    grouping policy and assignments, the seed, the search policy and budget, and the declared rule versions.
+    The grouping policy is ``grouping_policy_id``, else the seed's ``grouping_policy``, else the band policy."""
     if mg.is_grouped():
         raise mg.GroupedStateError("A grouped request identity is built before a grouped design is installed.")
     policy = policy or gs.SearchPolicy()
     base = driver.design_request_identity(cfg)
-    assignments = mg.build_assignments(sp.NUM_BAY_X, sp.NUM_BAY_Y, sp.NUM_FLOOR)
+    policy_id = grouping_policy_id or (seed or {}).get("grouping_policy") or mg.POLICY_ID
+    assignments = mg.build_assignments(sp.NUM_BAY_X, sp.NUM_BAY_Y, sp.NUM_FLOOR, policy_id)
     payload = {"schema": SCHEMA, "inputs": base["inputs"], "policy": base["policy"], "source_sha256": base["source_sha256"],
                "uniform_request_sha256": base["sha256"],
-               "grouping": {"policy_id": mg.POLICY_ID, "policy": mg.POLICY, "assignments_sha256": assignments["sha256"],
+               "grouping": {"policy_id": policy_id, "policy": mg.policy_of(policy_id), "assignments_sha256": assignments["sha256"],
                             "group_count": len(assignments["groups"])},
                "seed": seed,
                "search": {"version": gs.SEARCH_VERSION, **asdict(policy),
                           "max_column_size_step_in": gs.MAX_COLUMN_SIZE_STEP_IN,
                           "max_beam_reduction_options": gs.MAX_BEAM_REDUCTION_OPTIONS},
                "rules": {"evaluation": gd.EVALUATION_VERSION, "reinforcement_selection": selection.RULES_ID,
+                         "system_reinforcement_selection": selection.SYSTEM_RULES_ID, "lever_order": gs.LEVER_ORDER_ID,
                          "column_transitions": transition_rules.RULES_ID, "bar_layers": bar_layers.RULE_ID,
                          "capacity_design": capacity_design.METHOD_VERSION, "qualification": QUALIFICATION_VERSION}}
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -255,6 +263,37 @@ def beam_end_strengths(state):
     return result
 
 
+def systems_block(state, evidence, capacity):
+    """The two-system description of a record under the system policy (None under the band policy): the ties and
+    their designs, the lateral design model, the compatibility run's outcome and the gravity groups' 18.14 branches,
+    the joint rules by joint type and the joint directions where the strong-column rule is not required."""
+    from Design import Perimeter_Systems as systems
+    if not systems.two_system(state):
+        return None
+    designs = state.tie_designs()
+    induced = evidence.get("gravity_induced") or {}
+    fields = ("b_in", "h_in", "fc_ksi", "bar_size", "top_bars", "bot_bars", "side_bars", "stirrup_bar_size", "stirrup_legs",
+              "stirrup_spacing_in")
+    return {
+        "policy_id": state.policy_id,
+        "lateral_design_model": systems.design_model_for(state),
+        "ties": {tie: {"system": mg.SYSTEM_DESIGN_TIES[tie]["system"], "member_type": mg.SYSTEM_DESIGN_TIES[tie]["member_type"],
+                       "groups": list(gids), "members": sum(len(state.groups[g]["member_tags"]) for g in gids),
+                       "design": {key: getattr(designs[tie], key) for key in fields}}
+                 for tie, gids in state.ties().items()},
+        "compatibility": systems.compatibility_stage(evidence.get("compatibility"), induced),
+        "gravity_frame": {gid: {key: row.get(key) for key in ("tie", "member_type", "branch", "moment_ratio", "shear_ratio", "reason")}
+                          for gid, row in induced.items()},
+        "joint_rules": capacity.get("joint_rules"),
+        "scwb_not_required": gd.joint_check_inputs(capacity, state)["scwb_not_required"],
+        "drift_model": ((evidence.get("drift_screen") or {}).get("assumptions") or {}).get("model"),
+        "basis": ("perimeter special moment frames as the seismic force-resisting system and an interior gravity system "
+                  "(user decision 2026-10-16): one design per tie; the lateral solves on the released frame, the gravity "
+                  "members read from the continuous frame and checked for deformation compatibility (ACI 318-19 18.14.2.1, "
+                  "ASCE 7-22 12.12.5); Design.Perimeter_Systems"),
+    }
+
+
 def _legacy_summary(state):
     """A labelled digest for readers of the old one-section tables. Not a design input; nothing installs it."""
     columns = [d for d in state.designs.values() if d.is_column]
@@ -318,6 +357,8 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
         "member_strength": evidence["strengths"],
         "beam_end_strengths": beam_end_strengths(state),
         "capacity_design": capacity,
+        "compatibility": evidence.get("compatibility"),
+        "systems": systems_block(state, evidence, capacity),
         "joint_checks": evidence["joint_checks"],
         "drift_screen": evidence["drift_screen"],
         "demand_basis": evidence["demand_basis"],
@@ -732,7 +773,8 @@ def _qualification_checks(record, state):
     capacity = None
     if actions is not None:
         try:
-            recomputed = capacity_design.build_group_capacity_design(actions, expected_ids, cfg, transfers, state)
+            recomputed = capacity_design.build_group_capacity_design(actions, expected_ids, cfg, transfers, state,
+                                                                     compatibility=record.get("compatibility"))
             found = differences(record.get("capacity_design"), _canonical(recomputed))
         except Exception as exc:                      # noqa: BLE001 -- any failure is a finding, not a pass
             recomputed, found = None, [f"recomputation failed: {type(exc).__name__}: {exc}"]
@@ -908,7 +950,7 @@ def load_or_create_grouped_design(design_path, cfg, seed_state, seed, policy=Non
     a log that already exists is never appended to or replaced: a new attempt takes a new directory.
     """
     design_path = Path(design_path)
-    identity = grouped_request_identity(cfg, seed, policy)
+    identity = grouped_request_identity(cfg, seed, policy, grouping_policy_id=seed_state.policy_id)
     if design_path.exists():
         record = json.loads(design_path.read_text(encoding="utf-8"))
         if record.get("schema_version") != SCHEMA or (record.get("request_identity") or {}).get("sha256") != identity["sha256"]:
