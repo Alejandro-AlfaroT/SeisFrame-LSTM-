@@ -53,11 +53,16 @@ def effective_flange_width(bw, slab_h, clear_span, clear_to_adjacent_web, slab_s
 def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, flange_depth=0.0):
     """Nominal moment (kip-in) of a section with steel ``layers`` and no axial load.
 
-    ``layers``: iterable of (depth_from_compression_face_in, area_in2). The
-    compression block occupies ``flange_width`` down to ``flange_depth`` and
-    ``web_width`` below it; pass flange_width=None for a rectangular section.
+    ``layers``: iterable of (depth_from_compression_face_in, area_in2) or
+    (depth, area, fy_ksi) for a layer of another grade (slab mats at
+    SLAB_FY_KSI beside Grade 80 beam bars); a layer without its own grade
+    takes ``fy_ksi``. The compression block occupies ``flange_width`` down to
+    ``flange_depth`` and ``web_width`` below it; pass flange_width=None for a
+    rectangular section.
     """
-    layers = [(float(y), float(a)) for y, a in layers if a > 0]
+    layers = [(float(layer[0]), float(layer[1]),
+               float(layer[2]) if len(layer) > 2 and isinstance(layer[2], (int, float)) and not isinstance(layer[2], bool) else float(fy_ksi))
+              for layer in layers if layer[1] > 0]
     if not layers or depth <= 0:
         raise ValueError("A section needs steel layers and positive depth.")
     b1 = beta1(fc_ksi)
@@ -75,9 +80,9 @@ def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, 
 
     def steel(c):
         forces = []
-        for y, area in layers:
+        for y, area, f in layers:
             strain = 0.003 * (c - y) / c
-            stress = max(-fy_ksi, min(fy_ksi, ES_KSI * strain))   # compression positive
+            stress = max(-f, min(f, ES_KSI * strain))           # compression positive, the layer's own grade
             forces.append((y, area * stress))
         return forces
 
@@ -98,7 +103,7 @@ def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, 
     force, centroid, a = block(c)
     forces = steel(c)
     moment = -(force * centroid + sum(y * f for y, f in forces))
-    extreme = max(y for y, _ in layers)
+    extreme = max(y for y, _, _ in layers)
     tension_strain = 0.003 * (extreme - c) / c
     return {"mn_kip_in": moment, "neutral_axis_in": c, "stress_block_in": a,
             "tension_strain": tension_strain, "tension_controlled": tension_strain >= fy_ksi / ES_KSI + 0.003,
@@ -143,6 +148,12 @@ def validate_bar_rows(face_rows, count, name="beam bars", depth_in=None):
     return list(zip(per, offs))
 
 
+def _slab_fy_default():
+    """Slab mats are ASTM A706 Grade 60 at every story height (Structure_Parameters.SLAB_FY_KSI)."""
+    import Structure_Parameters as sp
+    return float(sp.SLAB_FY_KSI)
+
+
 def _slab_layers_from_top(slab_h, layout, axis, flange_width):
     """Slab mats parallel to the beam inside the flange: (depth from slab top, area)."""
     result = []
@@ -163,7 +174,8 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
     (review item 1, 2026-09-27), so a second row of the compression face that lies below the
     neutral axis is counted in tension where it belongs. Without ``layers`` each face is one
     row at its centroid offset (a number, or {"top", "bottom"} for the stacked orthogonal cages).
-    slab: thickness_in. layout: the slab reinforcement layout record.
+    slab: thickness_in and, optionally, fy_ksi of the slab mats (default SLAB_FY_KSI; a probable-strength
+    caller passes its factored value). layout: the slab reinforcement layout record.
     geometry: bay_x_in, bay_y_in, h_col_in, b_col_in. axis 'x'/'y';
     position 'edge' or 'interior'.
     flange: the member's own ACI 6.3.2 flange (Model.Member_Properties.effective_flange: unequal
@@ -207,13 +219,14 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
     top_area, bot_area = beam["top_bars"] * ab, beam["bot_bars"] * ab
     slab_layers = _slab_layers_from_top(t, layout, axis, bf) if layout is not None else []
     slab_area = sum(area for _, area, _ in slab_layers)
+    slab_fy = float(slab.get("fy_ksi") or _slab_fy_default())           # the grade of the mats, not of the beam bars
     # Rectangular beam only. Layers are (depth from the compression face, area), one per bar row.
     rect_neg = section_moment(web_layers("negative"), fc, fy, h, bw)
     rect_pos = section_moment(web_layers("positive"), fc, fy, h, bw)
     # Composite. Negative: compression face is the beam bottom.
-    neg_layers = web_layers("negative") + [(h - y, a) for y, a, _ in slab_layers]
+    neg_layers = web_layers("negative") + [(h - y, a, slab_fy) for y, a, _ in slab_layers]
     comp_neg = section_moment(neg_layers, fc, fy, h, bw)
-    pos_layers = web_layers("positive") + [(y, a) for y, a, _ in slab_layers]
+    pos_layers = web_layers("positive") + [(y, a, slab_fy) for y, a, _ in slab_layers]
     comp_pos = section_moment(pos_layers, fc, fy, h, bw, flange_width=bf, flange_depth=t)
     # Where the slab bars are not developed (an exterior end whose hook does
     # not fit the perimeter beam) neither mat is counted in either sign: the
@@ -228,7 +241,7 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
         "steel_area_in2": {"top": top_area, "bottom": bot_area},
         "effective_flange_width_in": bf, "flange_overhang_in": overhang,
         "clear_span_in": clear_span, "clear_to_adjacent_web_in": clear_web,
-        "slab_steel_in_flange_in2": slab_area,
+        "slab_steel_in_flange_in2": slab_area, "slab_steel_fy_ksi": slab_fy,
         "slab_layers_from_top": [{"face": face, "depth_in": y, "area_in2": a} for y, a, face in slab_layers],
         "rectangular": {"positive": rect_pos, "negative": rect_neg},
         "composite": {"positive": comp_pos, "negative": comp_neg},
@@ -419,7 +432,9 @@ def hogging_strength_kip_in(as_top_in2, d_in, beam_depth_in, beam_width_in, fc_k
     Without slab layers this is the singly reinforced rectangular section the beam flexure check and
     the bar sizing used before 2026-10-11 (one steel layer at its effective depth, Whitney block).
     """
-    layers = [(d_in, as_top_in2)] + list(slab_layers)
+    # credited slab layers come as (depth, area) and are priced at the slab grade unless they name their own
+    slab_fy = _slab_fy_default()
+    layers = [(d_in, as_top_in2)] + [(layer[0], layer[1], layer[2] if len(layer) > 2 else slab_fy) for layer in slab_layers]
     return section_moment(layers, fc_ksi, fy_ksi, beam_depth_in, beam_width_in)["mn_kip_in"]
 
 
@@ -434,7 +449,8 @@ def web_top_steel_for_hogging(mn_required_kip_in, d_in, beam_depth_in, beam_widt
     if mn_required_kip_in <= 0.0:
         return 0.0
     slab_layers = list(slab_layers)
-    high = 0.025 * beam_width_in * d_in if as_max_in2 is None else as_max_in2
+    from Structure_Parameters import beam_rho_max_code
+    high = beam_rho_max_code() * beam_width_in * d_in if as_max_in2 is None else as_max_in2     # 18.6.3.1 by grade
 
     def strength(area):
         if area <= 0.0 and not slab_layers:
@@ -468,7 +484,8 @@ def beam_slab_strengths(record):
             "fy_ksi": record["materials"]["fy_ksi"], "bar_size": rebar["beam_bar_size"],
             "top_bars": rebar["beam_top_bars"], "bot_bars": rebar["beam_bot_bars"],
             "centroid_offset_in": rebar["beam_longitudinal_centroid_offset_in"]}
-    slab = {"thickness_in": record["slab"]["thickness_in"]}
+    slab_fy = float(record["materials"].get("slab_fy_ksi") or _slab_fy_default())
+    slab = {"thickness_in": record["slab"]["thickness_in"], "fy_ksi": slab_fy}
     geom = {"bay_x_in": geometry["bay_x_in"], "bay_y_in": geometry["bay_y_in"],
             "h_col_in": sections["h_col_in"], "b_col_in": sections["b_col_in"]}
     # Stacked orthogonal layers (reinforcement.beam_bar_stacking) give each direction its own
@@ -487,7 +504,7 @@ def beam_slab_strengths(record):
     # hook into the perimeter beam develops them (ACI 318-19 25.4.3.1).
     anchorage = {axis: perimeter_slab_bar_anchorage(layout, axis, sections["b_beam_in"], rebar["beam_clear_cover_in"],
                                                     rebar["beam_stirrup_diameter_in"], sections["fc_beam_ksi"],
-                                                    record["materials"]["fy_ksi"])
+                                                    slab_fy)
                  for axis in ("x", "y")}
     for axis in ("x", "y"):
         for position in ("edge", "interior"):

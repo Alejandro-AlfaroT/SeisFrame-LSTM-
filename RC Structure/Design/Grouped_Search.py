@@ -48,6 +48,7 @@ from Model import Member_Groups as mg
 from Model import Member_Properties as mp
 
 SEARCH_VERSION = "grouped_search_v2"
+STEEL_GRADE_RETRY_RULE = "grade60_limits_then_grade80_full_search_v1"
 IMPROVEMENT_POLICY_ID = "dominance_concrete_and_total_reinforcement_v1"
 # The lever order of the iterative design (user decision 2026-10-16): concrete strength first, then the reinforcement
 # (which every evaluation exhausts through the cage selection), and the section size last. A growth move therefore
@@ -71,6 +72,7 @@ class SearchPolicy:
     quantity_tolerance: float = 1e-9
     reduction_order: str = "top_band_first__columns_then_beams__one_step_per_group_per_sweep"
     lever_order: str = LEVER_ORDER_ID
+    grade80_retry_on_limits: bool = True
 
     def problems(self):
         issues = []
@@ -82,7 +84,47 @@ class SearchPolicy:
             issues.append(f"unknown improvement policy {self.improvement_policy!r}")
         if self.lever_order != LEVER_ORDER_ID:
             issues.append(f"unknown lever order {self.lever_order!r}")
+        if type(self.grade80_retry_on_limits) is not bool:
+            issues.append("grade80_retry_on_limits must be a boolean")
         return issues
+
+
+def grade80_retry_reasons(evaluation):
+    """Explicit strength/congestion evidence at the end of a failed Grade 60 search.
+
+    Drift, solver errors, missing evidence, slab thickness and unsupported
+    column transitions alone are not reasons to increase longitudinal fy.
+    The resulting Grade 80 search must still satisfy every normal constraint.
+    """
+    if evaluation.get("feasible") or evaluation.get("status") not in ("evaluated", "infeasible"):
+        return []
+    reasons = []
+    evidence = evaluation.get("failure_evidence") or {}
+    if evaluation.get("status") == "infeasible":
+        if evaluation.get("failed_stage") == "bar_rows" and evidence.get("group_ids"):
+            reasons.append({"id": "beam.bar_rows", "groups": evidence["group_ids"]})
+        if (evaluation.get("failed_stage") == "capacity_design"
+                and evidence.get("exception") == "SectionAxialDomainError" and evidence.get("group_id")):
+            reasons.append({"id": "column.axial_strength_domain", "groups": [evidence["group_id"]]})
+        return reasons
+    constraints = evaluation.get("constraints") or {}
+    if constraints.get("strength_within_ceiling") is False:
+        reasons.append({"id": "member.strength_ceiling", "dcr": evaluation.get("dcr")})
+    if constraints.get("lane_limited_beam_groups"):
+        reasons.append({"id": "beam.lane_congestion", "groups": constraints["lane_limited_beam_groups"]})
+    # An exhausted beam domain means no admissible cage reaches its demand.
+    beams = [gid for gid in constraints.get("exhausted_groups", []) if "__beam_" in gid]
+    if beams:
+        reasons.append({"id": "beam.reinforcement_domain_exhausted", "groups": beams})
+    for line, item in (constraints.get("exhausted_column_lines") or {}).items():
+        if str(item.get("blocked_by", "")).startswith("no admissible cage of this band meets its own strength"):
+            reasons.append({"id": "column.reinforcement_domain_exhausted", "line": line, **item})
+    eligible = {"beam.bars_thread_column", "beam.bar_stacking_clear_of_slab_mats",
+                "beam.cage_layout", "column.cage_layout"}
+    for item in constraints.get("capacity_design_failed_checks", []):
+        if item.get("status") == "fail" and item.get("id") in eligible:
+            reasons.append({"id": item["id"], "location": item.get("location", "")})
+    return reasons
 
 
 # ---- ladders ------------------------------------------------------------------------------------------------
@@ -197,9 +239,9 @@ def _dominating_rung(member_type, b, h):
 def system_coupling_problem(state, gid, size):
     """Why an SFRS tie may not take ``size`` beside the gravity tie, or None; nothing under the band policy."""
     tie = state.tie_of(gid)
-    if tie not in ("sfrs_column", "sfrs_beam"):
+    if tie is None or mg.tie_kind(tie) not in ("sfrs_column", "sfrs_beam"):
         return None
-    other = state.tie_designs().get("gravity_column" if tie == "sfrs_column" else "gravity_beam")
+    other = state.tie_designs().get(state.related_tie(tie, "gravity_column" if mg.tie_kind(tie) == "sfrs_column" else "gravity_beam"))
     if other is None:
         return None
     if size[0] < other.b_in - 1e-9 or size[1] < other.h_in - 1e-9:
@@ -214,24 +256,29 @@ def enforce_system_coupling(state):
     designs = state.tie_designs()
     if not designs:
         return state, changes
-    sfrs, gravity = designs.get("sfrs_column"), designs.get("gravity_column")
-    if sfrs is not None and gravity is not None and gravity.b_in > sfrs.b_in + 1e-9:
-        target = (gravity.b_in, gravity.h_in)
-        changes.append(("sfrs_column", [sfrs.b_in, sfrs.h_in], list(target),
-                        "the perimeter columns are never smaller than the interior columns (decision D6)"))
-        state = state.with_tied_designs({"sfrs_column": replace(sfrs, b_in=target[0], h_in=target[1])})
-    sfrs, gravity = designs.get("sfrs_beam"), designs.get("gravity_beam")
-    if sfrs is not None and gravity is not None and (gravity.b_in > sfrs.b_in + 1e-9 or gravity.h_in > sfrs.h_in + 1e-9):
-        target = _dominating_rung(sfrs.member_type, max(sfrs.b_in, gravity.b_in), max(sfrs.h_in, gravity.h_in))
-        if target is not None and (target[0], target[1]) != (sfrs.b_in, sfrs.h_in):
-            changes.append(("sfrs_beam", [sfrs.b_in, sfrs.h_in], list(target),
-                            "the perimeter beams are never smaller than the interior beams (decision D6)"))
-            state = state.with_tied_designs({"sfrs_beam": replace(sfrs, b_in=target[0], h_in=target[1])})
+    for tie in sorted(designs):
+        family = mg.tie_kind(tie)
+        if family not in ("sfrs_column", "sfrs_beam"):
+            continue
+        sfrs = state.tie_designs()[tie]
+        gravity = state.tie_designs().get(state.related_tie(tie, family.replace('sfrs_', 'gravity_')))
+        if gravity is None or (gravity.b_in <= sfrs.b_in + 1e-9 and gravity.h_in <= sfrs.h_in + 1e-9):
+            continue
+        b, h = max(sfrs.b_in, gravity.b_in), max(sfrs.h_in, gravity.h_in)
+        target = (b,h) if sfrs.is_column else _dominating_rung(sfrs.member_type,b,h)
+        if target is None:
+            raise mg.GroupedStateError(f"No beam rung can enforce gravity/perimeter coupling for {tie}.")
+        changes.append((tie,[sfrs.b_in,sfrs.h_in],list(target),"the perimeter sections are never smaller than the gravity sections in this band (decision D6)"))
+        state = state.with_tied_designs({tie: replace(sfrs,b_in=target[0],h_in=target[1])})
     return state, changes
 
 
 def column_taper_problem(state, gid, size):
     """Why a column group may not take ``size`` beside the bands below and above it, or None."""
+    if state.policy_id == mg.SYSTEM_BANDED_POLICY_ID:
+        problems = mg.section_order_problems(resized(state,gid,size))
+        if problems:
+            return problems[0]
     for chain in _chains(state).values():
         index = next((k for k, band in enumerate(chain) if gid in band), None)
         if index is None:
@@ -255,6 +302,8 @@ def column_taper_problem(state, gid, size):
 
 def enforce_column_taper(state):
     """Grow columns until no line grows upward or steps in too far. Returns (state, [(gid, from, to, reason)])."""
+    if state.policy_id == mg.SYSTEM_BANDED_POLICY_ID:
+        return enforce_banded_section_order(state)
     changes = []
     for chain in _chains(state).values():
         for _ in range(4 * len(chain)):
@@ -278,9 +327,61 @@ def enforce_column_taper(state):
     return state, changes
 
 
+def enforce_banded_section_order(state):
+    """Normalize growth BEFORE any solve: both beam/column dimensions never increase upward.
+
+    Lower bands grow to support enlarged upper bands. Column steps retain the existing <=4-in
+    dimension-change rule for supported transitions; system coupling is rechecked after each sweep.
+    Only enlargement is allowed here. If no ladder can satisfy the rule, refuse the state.
+    """
+    changes = []
+    for _ in range(8 * len(state.groups)):
+        previous = state.identity()
+        state,coupled = enforce_system_coupling(state)
+        changes.extend(coupled)
+        lines = {}
+        for gid,group in state.groups.items():
+            lines.setdefault((group['member_type'],group['location_class']),[]).append(gid)
+        for gids in lines.values():
+            gids.sort(key=lambda g:min(state.groups[g]['stories_or_floors']))
+            for low,up in zip(gids,gids[1:]):
+                a,b = state.designs[low],state.designs[up]
+                if b.b_in > a.b_in + 1e-9 or b.h_in > a.h_in + 1e-9:
+                    width,depth=max(a.b_in,b.b_in),max(a.h_in,b.h_in)
+                    if a.is_column:
+                        size=next((v for v in COLUMN_SIZES_IN if v>=max(width,depth)-1e-9),None)
+                        target=None if size is None else (size,size)
+                    else:
+                        # A beam tie spans X/Y: its rung must fit both directions' ladders.
+                        common=None
+                        for g in _tied_groups(state,low):
+                            rungs=set(beam_rungs(state.designs[g].member_type))
+                            common=rungs if common is None else common & rungs
+                        eligible=[r for r in common if r[0]>=width-1e-9 and r[1]>=depth-1e-9]
+                        target=min(eligible,key=lambda r:(r[0]*r[1],r)) if eligible else None
+                    if target is None:
+                        raise mg.GroupedStateError(f"No ladder section for {low} can support the section above within the hard size rule.")
+                    changes.append((low,[a.b_in,a.h_in],list(target),"both section dimensions must not increase upward"))
+                    state=resized(state,low,target)
+                elif a.is_column and max(a.b_in-b.b_in,a.h_in-b.h_in)>MAX_COLUMN_SIZE_STEP_IN+1e-9:
+                    target=_column_step(b,+1)
+                    if target is None:
+                        raise mg.GroupedStateError(f"No column rung can support the transition above {low}.")
+                    changes.append((up,[b.b_in,b.h_in],list(target),"retain the supported column transition step"))
+                    state=resized(state,up,target)
+        if state.identity()==previous:
+            mg.require_section_order(state)
+            return state,changes
+    raise mg.GroupedStateError("The hard section-size envelope and system coupling did not settle.")
+
+
 def beam_size_problem(state, gid, size):
     """Why a beam group may not take ``size`` between its own end columns and over the slab, or None."""
     trial = resized(state, gid, size)
+    if state.policy_id == mg.SYSTEM_BANDED_POLICY_ID:
+        problems = mg.section_order_problems(trial)
+        if problems:
+            return problems[0]
     b, h = size
     if b < min(0.3 * h, 10.0):
         return f"width {b:g} in is below min(0.3 h, 10 in) (ACI 318-19 18.6.2.1(b))"
@@ -373,8 +474,15 @@ def propose_growth(evaluation, state):
     constraints = evaluation["constraints"]
     capacity = (evaluation.get("evidence") or {}).get("capacity") or {}
     types = capacity.get("joint_types") or {}
-    blocked = {item["blocked_at"]: item.get("blocked_by") for item in (constraints.get("exhausted_column_lines") or {}).values()
-               if item.get("blocked_at")}
+    blocked = {}
+    for item in (constraints.get("exhausted_column_lines") or {}).values():
+        # A tied column band's key joins several location groups. Resolve all of them back to
+        # physical groups and the band-local size tie, so a failed upper chain can actually grow.
+        for key in (item.get("blocked_at") or "").split('+'):
+            if key:
+                blocked[key] = item.get('blocked_by')
+                if key in state.groups:
+                    blocked[size_key(key)] = item.get('blocked_by')
     lane_limited = set(constraints.get("lane_limited_beam_groups") or [])
     for gid in constraints.get("exhausted_groups", []):
         if state.groups[gid]["member_type"] != "column":
@@ -449,7 +557,9 @@ def reduction_order(state):
     under the system policy: the perimeter columns, the interior columns, the perimeter beams, the interior beams)."""
     ties = state.ties()
     if ties:
-        return [ties[name][0] for name in ("sfrs_column", "gravity_column", "sfrs_beam", "gravity_beam") if name in ties]
+        families = ("sfrs_column", "gravity_column", "sfrs_beam", "gravity_beam")
+        names = sorted(ties,key=lambda t:(-min(state.groups[ties[t][0]]['stories_or_floors']),families.index(mg.tie_kind(t))))
+        return [ties[name][0] for name in names]
     bands = sorted({g["band"] for g in state.groups.values()}, reverse=True)
     order = []
     for band in bands:
@@ -530,7 +640,9 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
 
     def evaluate(state, phase, proposal):
         try:
+            mg.require_section_order(state)
             evaluation = gd.evaluate_candidate(state, cfg, context, label=f"{phase}_{len(log.entries) + 1}")
+            mg.require_section_order(evaluation.get('state') or state)
         except Exception as exc:                                    # an error, not a design outcome: keep the evidence, re-raise
             log.add({"phase": phase, "proposal": proposal, "decision": "error",
                      "decision_reason": f"{type(exc).__name__}: {exc}", "traceback": traceback.format_exc(),
@@ -540,6 +652,7 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
 
     def record(phase, proposal, evaluation, decision, reason, comparison=None):
         entry = log.add({"phase": phase, "proposal": proposal, "decision": decision, "decision_reason": reason,
+                         "longitudinal_grade_ksi": sp.FY_KSI,
                          "comparison": comparison, "evaluation": gd.public_evaluation(evaluation)})
         if verbose:
             print(_summary_line(entry), flush=True)

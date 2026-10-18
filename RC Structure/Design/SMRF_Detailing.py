@@ -1,16 +1,17 @@
-"""Pure checks for a declared Grade-60, normalweight rectangular RC scope.
+"""Pure checks for a declared Grade-60/80, normalweight rectangular RC scope.
 
 ACI 318-19: 18.6.2--18.6.4, 18.7.2, 18.7.4--18.7.5, 25.2.
 Units: kip, inch, ksi. Each member dictionary carries dimensions, bar areas,
 diameters, counts, clear cover to OUTSIDE of hoops, and hoop spacing. Columns
 use n_side_per_face (excluding corners). Geometry spans are center-to-center;
-column h is along X, b along Y. Beam bar_stacking supplies declared layers;
-records without it retain the legacy single-row geometry.
+column h is along X, b along Y. Grouped beams supply bar_rows per face;
+uniform beams supply directional bar_stacking. Records without either retain
+the legacy single-row geometry.
 
 This does not create a complete bar cage or certify hooks, anchorage, splices,
 confinement area, development, or capacity shear. Those remain explicit open
 checks. NIST GCR16-917-40 provides methodology (older code edition); the
-numeric rules here use the declared ACI318-19 Grade60 scope.
+numeric rules here use the declared ACI318-19 Grade60/80 scope.
 https://www.ocf.berkeley.edu/~chiep/wp-content/uploads/2024/01/CE-123-ACI-318-19.pdf
 """
 from __future__ import annotations
@@ -18,6 +19,8 @@ from __future__ import annotations
 import math
 
 from Design.SMRF_Common import make_check, not_evaluated
+from Design.SMRF_Beam_Slab_Strength import validate_bar_rows
+from Design.SMRF_Beam_Steel import beam_face_steel_limits
 
 
 def _num(data, key, minimum=0.0, strictly_positive=False):
@@ -61,6 +64,31 @@ def _grid_of(member):
     return member["bar_position_grid_in"] if "bar_position_grid_in" in member else sp.MODULE_GRID
 
 
+def _beam_steel_by_face(member, fy_ksi, nominal_offset):
+    """All declared directional sections; no fallback from malformed row evidence."""
+    if "bar_rows" in member and "bar_stacking" in member:
+        raise ValueError("Declare either grouped bar_rows or uniform bar_stacking, not both")
+    if "bar_rows" in member:
+        declarations = {"group": member["bar_rows"]}
+    elif "bar_stacking" in member:
+        declarations = member["bar_stacking"]["layers"]
+        if not isinstance(declarations, dict) or set(declarations) != {"x", "y"}:
+            raise ValueError("Both directional beam row declarations are required")
+    else:
+        declarations = {"legacy_single_row": {
+            face: {"per_layer": [_count(member, f"n_{face}", 2)], "offsets_in": [nominal_offset]}
+            for face in ("top", "bottom")}}
+    result = {"top": {}, "bottom": {}}
+    b, h = _dimensions(member)
+    for direction, faces in declarations.items():
+        for face in result:
+            result[face][direction] = beam_face_steel_limits(
+                b_in=b, h_in=h, fc_ksi=_num(member, "fc_ksi", strictly_positive=True), fy_ksi=fy_ksi,
+                bar_area_in2=_num(member, "bar_area_in2", strictly_positive=True),
+                count=_count(member, f"n_{face}", 2), rows=faces[face])
+    return result
+
+
 def select_transverse_geometry(inputs, minimum_spacing_in=3, spacing_step_in=1):
     """Select bounded Grade-60 end-zone geometry, NOT a complete hoop cage.
 
@@ -80,12 +108,15 @@ def select_transverse_geometry(inputs, minimum_spacing_in=3, spacing_step_in=1):
     if not isinstance(inputs, dict) or not isinstance(inputs.get("material"), dict):
         raise ValueError("Explicit member and material dictionaries are required.")
     material = inputs["material"]
-    if _num(material, "fy_ksi", strictly_positive=True) != 60 or material.get("normalweight") is not True:
-        raise ValueError("Transverse geometry supports explicit Grade60 normalweight scope only.")
+    if _num(material, "fy_ksi", strictly_positive=True) not in (60, 80) or material.get("normalweight") is not True:
+        raise ValueError("Transverse geometry supports explicit ASTM A706 Grade 60 or Grade 80, normalweight scope only.")
+    import Structure_Parameters as sp
+    bar_factor = sp.hoop_spacing_bar_factor(material["fy_ksi"])         # 18.6.4.4 / 18.7.5.3: 6 db (Grade 60), 5 db (Grade 80)
     policy = {"minimum_spacing_in": minimum_spacing_in, "spacing_step_in": spacing_step_in}
     minimum = _num(policy, "minimum_spacing_in", strictly_positive=True)
     step = _num(policy, "spacing_step_in", strictly_positive=True)
-    result = {"method_version": "aci318_19_grade60_transverse_scalar_geometry_v1",
+    result = {"method_version": "aci318_19_grade60_80_transverse_scalar_geometry_v2",
+              "longitudinal_grade_ksi": material["fy_ksi"], "hoop_spacing_bar_diameters": bar_factor,
               "stage": "scalar_geometry_only", "full_cage_verified": False,
               "minimum_spacing_in": minimum, "spacing_step_in": step}
     for name in ("beam", "column"):
@@ -100,12 +131,12 @@ def select_transverse_geometry(inputs, minimum_spacing_in=3, spacing_step_in=1):
         if name == "beam":
             d = h - offset
             bounds = {"effective_depth_quarter_in": d / 4,
-                      "six_longitudinal_diameters_in": 6 * db, "absolute_bound_in": 6.0}
+                      "longitudinal_diameters_in": bar_factor * db, "absolute_bound_in": 6.0}
             zone = 2 * h
         else:
             clear_height = _num(member, "clear_height_in", strictly_positive=True)
             bounds = {"minimum_dimension_quarter_in": min(b, h) / 4,
-                      "six_longitudinal_diameters_in": 6 * db,
+                      "longitudinal_diameters_in": bar_factor * db,
                       "conservative_so_bound_in": 4.0}
             zone = max(b, h, clear_height / 6, 18)
         code_bound = min(bounds.values())
@@ -148,19 +179,21 @@ def evaluate_detailing(inputs):
     geo, material = inputs.get("geometry", {}), inputs.get("material", {})
     checks = []
 
-    def check(name, clause, demand, capacity, comparison="<=", location="", units="in"):
+    def check(name, clause, demand, capacity, comparison="<=", location="", units="in", details=None):
         checks.append(make_check(name, clause, demand, capacity, comparison,
-                                 units=units, location=location))
+                                 units=units, location=location, details=details))
 
     def unknown(name, clause, error):
         checks.append(not_evaluated(name, clause, str(error)))
 
-    supported = material.get("fy_ksi") == 60 and material.get("normalweight") is True
+    supported = material.get("fy_ksi") in (60, 80) and material.get("normalweight") is True
     if supported:
-        check("detailing.material_scope", "Declared Grade60/normalweight implementation scope", 1, 1, "==", units="")
+        check("detailing.material_scope", "Declared A706 Grade 60 or 80, normalweight implementation scope", 1, 1, "==", units="")
     else:
-        unknown("detailing.material_scope", "Declared Grade60/normalweight implementation scope",
-                "An explicit Grade60, normalweight basis is required for reinforcement rules in this module.")
+        unknown("detailing.material_scope", "Declared A706 Grade 60 or 80, normalweight implementation scope",
+                "An explicit ASTM A706 Grade 60 or Grade 80, normalweight basis is required for reinforcement rules in this module.")
+    import Structure_Parameters as sp
+    bar_factor = sp.hoop_spacing_bar_factor(material.get("fy_ksi") or 60)   # 18.6.4.4 / 18.7.5.3: 6 db (Grade 60), 5 db (Grade 80)
     try:
         b, h = _dimensions(beam)
         check("beam.minimum_width", "ACI 318-19 18.6.2.1(b)", b, min(0.3 * h, 10), ">=")
@@ -197,7 +230,23 @@ def evaluate_detailing(inputs):
             top, bottom = _count(member, "n_top", 2), _count(member, "n_bottom", 2)
             aggregate = _num(member, "aggregate_size_in", strictly_positive=True)
             clearance = max(1.0, db, 4 * aggregate / 3) if name == "beam" else max(1.5, 1.5 * db, 4 * aggregate / 3)
-            if name == "beam" and "bar_stacking" in member:
+            if name == "beam" and "bar_rows" in member:
+                if "bar_stacking" in member:
+                    raise ValueError("Declare either grouped bar_rows or uniform bar_stacking, not both")
+                rows = {face: validate_bar_rows(member["bar_rows"][face], count, face, h)
+                        for face, count in (("top", top), ("bottom", bottom))}
+                for face, layers in rows.items():
+                    widest = max(n for n, _ in layers)
+                    details = {"basis": "width fit of widest declared row; joint threading checked separately",
+                               "bars_per_layer": [n for n, _ in layers]}
+                    if widest == 1:
+                        check("beam.bar_clear_spacing", "ACI 318-19 25.2.1", 1, 1, "==", face, "",
+                              {**details, "applicability": "one bar per row; no adjacent pair"})
+                    else:
+                        spacing = sp.face_bar_min_pitch_in(b, offset, widest, grid_in=_grid_of(member)) - db
+                        check("beam.bar_clear_spacing", "ACI 318-19 25.2.1", spacing, clearance, ">=", face,
+                              details=details)
+            elif name == "beam" and "bar_stacking" in member:
                 from Design.SMRF_Beam_Spacing import evaluate_layered_beam_spacing
                 checks.extend(evaluate_layered_beam_spacing(member, col))
             else:
@@ -226,15 +275,16 @@ def evaluate_detailing(inputs):
                 check("column.minimum_rho", "ACI 318-19 18.7.4.1", rho, 0.01, ">=", units="ratio")
                 check("column.maximum_rho", "ACI 318-19 18.7.4.1", rho, 0.06, units="ratio")
             elif supported:
-                fc = _num(member, "fc_ksi", strictly_positive=True)
-                d = h - offset
-                if d <= 0:
-                    raise ValueError("Beam effective depth must be positive.")
-                amin = max(3 * math.sqrt(1000 * fc) / 60000, 200 / 60000) * b * d
-                for face, count in (("top", top), ("bottom", bottom)):
-                    check("beam.minimum_steel", "ACI 318-19 18.6.3.1; 9.6.1.2", count * area, amin, ">=", face, "in2")
-                    check("beam.maximum_rho", "ACI 318-19 18.6.3.1", count * area / (b * d), 0.025, location=face, units="ratio")
-        except (ValueError, TypeError, AttributeError) as exc:
+                steel = _beam_steel_by_face(member, material["fy_ksi"], offset)
+                for face, sections in steel.items():
+                    minimum = max(sections.values(), key=lambda value: value["as_min_in2"])
+                    ratio = max(sections.values(), key=lambda value: value["rho"])
+                    details = {"basis": "total face steel and bar-row centroid; web steel only", "sections": sections}
+                    check("beam.minimum_steel", "ACI 318-19 18.6.3.1; 9.6.1.2", minimum["as_in2"],
+                          minimum["as_min_in2"], ">=", face, "in2", details)
+                    check("beam.maximum_rho", "ACI 318-19 18.6.3.1", ratio["rho"],
+                          ratio["rho_max"], location=face, units="ratio", details=details)
+        except (ValueError, TypeError, AttributeError, KeyError, OverflowError) as exc:
             unknown(f"{name}.longitudinal_steel_complete", "ACI 318-19 18.6.3; 18.7.4", exc)
 
     try:
@@ -260,18 +310,18 @@ def evaluate_detailing(inputs):
         # are independent evidence. Missing one must not hide failure of another.
         try:
             if not supported:
-                raise ValueError("Grade60 transverse spacing rules require the declared material scope.")
+                raise ValueError("The transverse spacing rules require the declared A706 Grade 60 or 80, normalweight scope.")
             b, h = _dimensions(member)
             offset, db = _bar_geometry(member)
             spacing = _num(member, "hoop_spacing_in", strictly_positive=True)
             if name == "beam":
                 if h - offset <= 0:
                     raise ValueError("Beam effective depth must be positive.")
-                limit = min((h - offset) / 4, 6 * db, 6)
+                limit = min((h - offset) / 4, bar_factor * db, 6)
                 check("beam.end_hoop_spacing", "ACI 318-19 18.6.4.4", spacing, limit)
             else:
                 # Bounds independent of hx still reveal known violations.
-                basic_limit = min(min(b, h) / 4, 6 * db)
+                basic_limit = min(min(b, h) / 4, bar_factor * db)
                 check("column.end_hoop_spacing_dimension_bar", "ACI 318-19 18.7.5.3(a),(b)",
                       spacing, basic_limit)
                 try:

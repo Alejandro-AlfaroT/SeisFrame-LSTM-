@@ -27,15 +27,21 @@ Rules (the uniform rules, stated for unlike members; equal members give exactly 
   * ONE ARRANGEMENT PER GROUP. Offsets only ever increase while the joints are swept, until every
     joint is satisfied by the same rows; a sweep limit refuses an arrangement that does not settle.
 
-What this module does not decide: slab mats against the top layers, hook tails, and whether the rows
-fit the section (Design.SMRF_Cage_Geometry / the capacity checks, and validate_bar_rows).
+  * SLAB MATS. The selected slab mats stay at their designed elevations. A beam row that crosses a
+    mat moves inward to the next clear bar-grid elevation, then the crossing beam rows are coordinated
+    again. The existing interlayer clearance is a declared construction allowance at these orthogonal
+    crossings, not a claim that 25.2.2 prescribes that gap between orthogonal bars. No local bends or mat
+    displacements are assumed. The resulting rows are used by strength, capacity and model consumers.
+
+What this module does not decide: hook tails and whether the resulting rows fit the section
+(Design.SMRF_Cage_Geometry / the capacity checks, and validate_bar_rows).
 """
 from __future__ import annotations
 
 import Structure_Parameters as sp
 from Model import Member_Groups as mg
 
-RULE_ID = "group_bar_layers_v1__straight_bars_one_arrangement_per_group__deeper_soffit_first"
+RULE_ID = "group_bar_layers_v2__straight_bars_fixed_slab_mats__deeper_soffit_first"
 MAX_SWEEPS = 64
 _TOL = 1e-9
 _CACHE = {}
@@ -110,7 +116,30 @@ def _single_layer(design):
             for face, count in (("top", design.top_bars), ("bottom", design.bot_bars))}
 
 
-def _place(sequence, offsets, depth_of):
+def slab_mats():
+    """Selected mat centre planes shared by placement and the independent joint-clearance check.
+
+    Returns (mats, complete). Cover is outside the outer mat, with touching orthogonal slab layers
+    per the slab layout policy. Missing placement fields remain explicitly incomplete.
+    """
+    layout = (sp.SLAB_REINFORCEMENT or {}).get("layout") if sp.SLAB_THICKNESS_IN is not None else None
+    layers = (layout or {}).get("layers") or {}
+    mats, complete = [], bool(layers)
+    for name, layer in sorted(layers.items()):
+        if not name.endswith(("top", "bottom")):
+            continue
+        if any(k not in layer for k in ("bar_size", "clear_cover_outer_mat_in", "layer", "axis")):
+            complete = False
+            continue
+        db = _db(layer["bar_size"])
+        depth = layer["clear_cover_outer_mat_in"] + db / 2.0 + (0.0 if layer["layer"] == "outer" else db)
+        if name.endswith("bottom"):
+            depth = sp.SLAB_THICKNESS_IN - depth
+        mats.append({"mat": name, "db_in": db, "centroid_from_top_in": depth, "runs_along": layer["axis"]})
+    return mats, complete
+
+
+def _place(sequence, offsets, depth_of, fixed=None):
     """Sweep one joint's layers in order; raise each to its lowest admissible position.
 
     ``sequence``: [(group_id, layer_index, design)] from the face inward. ``offsets[(group, layer)]``
@@ -119,6 +148,7 @@ def _place(sequence, offsets, depth_of):
     beams are flush). Returns True when something moved.
     """
     moved, placed = False, []
+    fixed = fixed or {}
     for gid, layer, design in sequence:
         rise = depth_of[gid]
         position = rise + offsets[(gid, layer)]
@@ -131,6 +161,11 @@ def _place(sequence, offsets, depth_of):
             for g, _l, p, d in placed:
                 if g != gid and abs(position - p) < pitch_in(design, d) - _TOL:
                     position, changed = p + pitch_in(design, d), True
+            for p, db in fixed.get(gid, ()):
+                clearance = 0.5 * (_db(design.bar_size) + db) + sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN
+                if abs(position - (rise + p)) < clearance - _TOL:
+                    position = rise + sp.snap_up_to_grid(p + clearance)
+                    changed = True
         placed.append((gid, layer, position, design))
         if position - rise > offsets[(gid, layer)] + _TOL:
             offsets[(gid, layer)], moved = position - rise, True
@@ -149,9 +184,12 @@ def arrangement():
     convention = sp.beam_bar_stacking_convention()
     limit = sp.BEAM_BAR_MAX_LAYERS
     layout = (sp.SLAB_REINFORCEMENT or {}).get("layout") if sp.SLAB_THICKNESS_IN is not None else None
+    mats, mats_complete = slab_mats()
     key = ("arrangement", state.identity(), convention, limit, sp.BEAM_BAR_LAYER_ORDER, sp.SLAB_THICKNESS_IN,
            sp.COL_CLEAR_COVER_IN, sp.BEAM_CLEAR_COVER_IN, sp.AGGREGATE_MAX_SIZE_IN, sp.COVER,
-           sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, None if layout is None else layout.get("outer_axis"))
+           sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, sp.BAR_POSITION_GRID_IN,
+           None if layout is None else layout.get("outer_axis"), mats_complete,
+           tuple((m["mat"], m["db_in"], m["centroid_from_top_in"], m["runs_along"]) for m in mats))
     if key in _CACHE:
         return _CACHE[key]
     beam_groups = {gid: state.designs[gid] for gid, group in state.groups.items() if group["member_type"] != "column"}
@@ -205,9 +243,12 @@ def arrangement():
     sweeps = 0
     for face in ("top", "bottom"):
         plans = [sequence(kind, face) for kind in types]
+        fixed = {gid: [(m["centroid_from_top_in"] if face == "top" else design.h_in - m["centroid_from_top_in"],
+                        m["db_in"]) for m in mats if m["runs_along"] != state.groups[gid]["member_type"][-1]]
+                 for gid, design in beam_groups.items()}
         for _ in range(MAX_SWEEPS):
             sweeps += 1
-            if not any([_place(order, offsets[face], depth_of) for order, depth_of in plans]):
+            if not any([_place(order, offsets[face], depth_of, fixed) for order, depth_of in plans]):
                 break
         else:
             raise mg.GroupedStateError(f"The {face} beam bar layers did not settle in {MAX_SWEEPS} sweeps over the joints; "
@@ -223,7 +264,10 @@ def arrangement():
     result["_basis"] = {"rule": RULE_ID, "convention": convention, "layer_order": sp.BEAM_BAR_LAYER_ORDER, "max_layers": limit,
                         "stacked": True, "sweeps": sweeps, "joint_types": len(types),
                         "bars_per_layer_governing": {gid: fit.get(gid) for gid in sorted(beam_groups)},
-                        "interlayer_clear_min_in": sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN}
+                        "interlayer_clear_min_in": sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN,
+                        "slab_mats": mats, "slab_mats_complete": mats_complete,
+                        "slab_crossing_rule": "fixed mats; move straight beam rows inward on bar grid; "
+                                              "interlayer gap is a declared construction allowance at orthogonal crossings"}
     if len(_CACHE) > 8192:
         _CACHE.clear()
     _CACHE[key] = result

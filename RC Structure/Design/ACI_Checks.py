@@ -57,13 +57,16 @@ def _beta1(fc_ksi: float) -> float:
     return max(0.65, min(0.85, 0.85 - 0.05 * (fc_ksi - 4.0)))
 
 
-def _phi_PM(eps_t: float) -> float:
-    """ACI 318-19 Table 21.2.2 — tied-column φ factor (0.65 → 0.90)."""
-    if eps_t <= 0.002:
+def _phi_PM(eps_t: float, fy_ksi: float | None = None) -> float:
+    """ACI 318-19 Table 21.2.2 (21.2.2.1): tied-column φ, 0.65 at or below the compression-controlled strain limit
+    eps_ty = fy / Es, 0.90 at or above eps_ty + 0.003 (tension-controlled), linear between; the limits follow the
+    longitudinal grade (0.00207 and 0.00507 at Grade 60, 0.00276 and 0.00576 at Grade 80)."""
+    eps_ty = sp.steel_yield_strain(fy_ksi)
+    if eps_t <= eps_ty:
         return 0.65
-    if eps_t >= 0.005:
+    if eps_t >= eps_ty + 0.003:
         return 0.90
-    return 0.65 + (eps_t - 0.002) / 0.003 * 0.25
+    return 0.65 + (eps_t - eps_ty) / 0.003 * 0.25
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +252,7 @@ def pm_diagram_for(b, h, fc, fy, Es, layers, n_pts: int = 120) -> List[Tuple[flo
             Mn    += F_i * (hc - d_i)
 
         eps_t = ecu * (dt - c) / c
-        phi   = _phi_PM(eps_t)
+        phi   = _phi_PM(eps_t, fy)
         diagram.append((phi * Pn, phi * abs(Mn)))
 
     # Usable axial strength stops at phi Pn,max (22.4.2.1); the sweep does not.
@@ -776,7 +779,7 @@ def run_checks_phase1(
             fc_ksi=(cfg.materials.fc_col_ksi
                     if isinstance(cfg.materials.fc_col_ksi, float)
                     else sp.FC_COL_KSI),
-            Av=Av_col, s=cfg.rebar.stirrup_spacing_col_in, fy_ksi=fy,
+            Av=Av_col, s=cfg.rebar.stirrup_spacing_col_in, fy_ksi=sp.FYT_KSI,          # hoops: A706 Grade 60
             h=cfg.sections.h_col_in,
         )
         ls_slend = check_slenderness(
@@ -854,7 +857,7 @@ def run_checks_phase1(
             fc_ksi=(cfg.materials.fc_beam_ksi
                     if isinstance(cfg.materials.fc_beam_ksi, float)
                     else sp.FC_BEAM_KSI),
-            Av=Av_beam, s=cfg.rebar.stirrup_spacing_beam_in, fy_ksi=fy,
+            Av=Av_beam, s=cfg.rebar.stirrup_spacing_beam_in, fy_ksi=sp.FYT_KSI,        # stirrups: A706 Grade 60
         )
 
         result = MemberCheckResult(

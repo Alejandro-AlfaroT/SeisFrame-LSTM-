@@ -44,6 +44,22 @@ COL_CLEAR_COVER_IN = 1.5
 AGGREGATE_MAX_SIZE_IN = 0.75
 REINFORCEMENT_SPECIFICATION = "ASTM A706 Grade 60"
 MATERIAL_EXPOSURE = "sheltered_interior"
+# Transverse reinforcement (hoops, crossties, stirrups): ASTM A706 Grade 60 in every design. ACI 318-19 Table 20.2.2.4(a)
+# caps the fyt used for shear strength at 60 ksi (R20.2.2.4), so a higher hoop grade would not count in shear; one hoop
+# grade keeps the shear and confinement arithmetic on one value.
+FYT_KSI = 60.0
+TRANSVERSE_SPECIFICATION = "ASTM A706 Grade 60"
+# Slab and diaphragm bars: ASTM A706 Grade 60 at every story height. The slab screen (SMRF_Slab), its crack-control
+# and development rules (SMRF_Slab_Reinforcement) are Grade 60 rules, and Table 20.2.2.4(a) treats slab flexure apart
+# from the special frame. The composite beam strength prices the slab mats at this grade whatever the beam bars are.
+SLAB_FY_KSI = 60.0
+SLAB_REINFORCEMENT_SPECIFICATION = "ASTM A706 Grade 60"
+# Longitudinal grade by story height (user decision 2026-10-17): A706 Grade 80 at story heights of 16 ft and more, A706
+# Grade 60 below. Special seismic systems take ASTM A706 only (ACI 318-19 20.2.2.5; R20.2.2.4: A615 is not permitted as
+# longitudinal reinforcement there), so the specification is locked to the grade and anything else is refused.
+LONGITUDINAL_GRADE_STORY_HEIGHT_FT = 16.0
+LONGITUDINAL_GRADES_KSI = (60.0, 80.0)
+REINFORCEMENT_SPECIFICATION_BY_GRADE = {60.0: "ASTM A706 Grade 60", 80.0: "ASTM A706 Grade 80"}
 
 # Rebar database
 REBAR = {
@@ -993,6 +1009,59 @@ def apply_seismic_site(label):
     label, sds, sd1, s1 = seismic_site_by_label(label)
     SEISMIC_SITE_LABEL, ASCE_SDS, ASCE_SD1, ASCE_S1 = label, sds, sd1, s1
     return label
+
+
+def longitudinal_grade_for_story(story_h_in):
+    """fy (ksi) of the longitudinal bars by story height: Grade 80 at 16 ft and more, Grade 60 below (2026-10-17)."""
+    return 80.0 if float(story_h_in) >= 12.0 * LONGITUDINAL_GRADE_STORY_HEIGHT_FT - 1e-9 else 60.0
+
+
+def apply_reinforcement_grade(fy_ksi=None, story_h_in=None):
+    """Set the longitudinal grade (by story height unless given) and lock the specification to ASTM A706 of that grade.
+    The transverse steel stays A706 Grade 60 (FYT_KSI). Returns the grade set."""
+    global FY_KSI, REINFORCEMENT_SPECIFICATION
+    if fy_ksi is None:
+        fy_ksi = longitudinal_grade_for_story(STORY_H if story_h_in is None else story_h_in)
+    fy_ksi = float(fy_ksi)
+    if fy_ksi not in REINFORCEMENT_SPECIFICATION_BY_GRADE:
+        raise ValueError(f"longitudinal grade {fy_ksi:g} ksi is not one of {sorted(REINFORCEMENT_SPECIFICATION_BY_GRADE)} "
+                         "(ACI 318-19 20.2.2.5: ASTM A706 Grade 60 or 80 in special moment frames).")
+    FY_KSI = fy_ksi
+    REINFORCEMENT_SPECIFICATION = REINFORCEMENT_SPECIFICATION_BY_GRADE[fy_ksi]
+    return FY_KSI
+
+
+def require_a706(specification, fy_ksi=None):
+    """ACI 318-19 20.2.2.5: the longitudinal bars of a special moment frame are ASTM A706 of the design grade; any other
+    specification (A615 included, whatever its grade) raises."""
+    grade = float(FY_KSI if fy_ksi is None else fy_ksi)
+    expected = REINFORCEMENT_SPECIFICATION_BY_GRADE.get(grade)
+    if expected is None or specification != expected:
+        raise ValueError(f"reinforcement specification {specification!r} at fy {grade:g} ksi is not {expected!r} "
+                         "(ACI 318-19 20.2.2.5: ASTM A706 of the design grade; ASTM A615 is not permitted in special seismic systems).")
+    return specification
+
+
+def steel_yield_strain(fy_ksi=None):
+    """eps_ty = fy / Es, the compression-controlled strain limit of ACI 318-19 21.2.2.1 (0.00207 at Grade 60, 0.00276 at 80)."""
+    return float(FY_KSI if fy_ksi is None else fy_ksi) / ES_KSI
+
+
+def beam_rho_max_code(fy_ksi=None):
+    """ACI 318-19 18.6.3.1: the beam reinforcement ratio on each face, 0.025 for Grade 60 and 0.02 for Grade 80."""
+    return 0.02 if float(FY_KSI if fy_ksi is None else fy_ksi) >= 80.0 - 1e-9 else 0.025
+
+
+def through_joint_bar_depth_factor(fy_ksi=None):
+    """ACI 318-19 18.8.2.3: the joint depth parallel to through beam bars, at least 20 db for Grade 60 bars and 26 db for
+    Grade 80 (normalweight concrete, 18.8.2.3.1)."""
+    return 26.0 if float(FY_KSI if fy_ksi is None else fy_ksi) >= 80.0 - 1e-9 else 20.0
+
+
+def hoop_spacing_bar_factor(fy_ksi=None):
+    """ACI 318-19 18.6.4.4(c)/(d) and 18.7.5.3(b)/(c): the hoop spacing term in longitudinal bar diameters, 6 db for
+    Grade 60 bars and 5 db for Grade 80."""
+    return 5.0 if float(FY_KSI if fy_ksi is None else fy_ksi) >= 80.0 - 1e-9 else 6.0
 
 
 def apply_risk_category(category):

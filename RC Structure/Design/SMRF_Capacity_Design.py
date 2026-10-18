@@ -189,10 +189,11 @@ def probable_beam_strengths(state, position, axis):
                "centroid_offset_in": (beam.get("centroid_offsets_by_axis_in") or {}).get(axis, beam["centroid_offset_in"]),
                "layers": (beam.get("layers") or {}).get(axis)}
     layout = slab.get("layout")
-    slab_arg = {"thickness_in": slab["thickness_in"] if layout is not None else 0.0}
+    slab_arg = {"thickness_in": slab["thickness_in"] if layout is not None else 0.0,
+                "fy_ksi": float(state["materials"].get("slab_fy_ksi") or 60.0)}        # slab mats: A706 Grade 60
     nominal = composite_beam_strengths(section, slab_arg, layout, geometry, axis, position)
     probable = composite_beam_strengths({**section, "fy_ksi": 1.25 * section["fy_ksi"]},
-                                        slab_arg, layout, geometry, axis, position)
+                                        {**slab_arg, "fy_ksi": 1.25 * slab_arg["fy_ksi"]}, layout, geometry, axis, position)
     ab = _BAR[beam["bar_size"]][1]
     tension_hogging = beam["top_bars"] * ab + probable["slab_steel_in_flange_in2"]
     tension_sagging = beam["bot_bars"] * ab
@@ -300,6 +301,7 @@ def design_beam_shear(state, strengths, transfer):
     """Ve at the faces for both seismic gravity families and the hinge-zone hoops."""
     sections, mats, beam, geometry = state["sections"], state["materials"], state["beam"], state["geometry"]
     fc, fy = sections["fc_beam_ksi"], mats["fy_ksi"]
+    fyt = float(mats.get("fyt_ksi", fy))             # hoops: A706 Grade 60
     bw, h = sections["b_beam_in"], sections["h_beam_in"]
     # The smallest effective depth over directions and faces once the orthogonal layers stack.
     d = h - beam.get("worst_centroid_offset_in", beam["centroid_offset_in"])
@@ -331,7 +333,7 @@ def design_beam_shear(state, strengths, transfer):
     cover = beam.get("clear_cover_in")
     if cover is None:
         raise ValueError("Beam clear cover is required for the hoop arrangement.")
-    result = {"families": families, **select_beam_hoops(bw, d, fc, fy, beam["bar_size"], cover, beam["top_bars"],
+    result = {"families": families, **select_beam_hoops(bw, d, fc, fyt, beam["bar_size"], cover, beam["top_bars"],
                                                         beam["bot_bars"], worst_ve, worst_mechanism, grid_in=_grid_of(beam))}
     selected = result["hoops"]
     for entries in families.values():
@@ -357,7 +359,7 @@ def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bar
     vs_required = max(0.0, worst_ve / PHI_SHEAR - vc)
     vs_limit = 8.0 * math.sqrt(fc * 1000.0) * bw * d / 1000.0
     db = _BAR[bar_size][0]
-    bounds = {"d_over_4": d / 4.0, "six_db": 6.0 * db, "absolute": 6.0}
+    bounds = {"d_over_4": d / 4.0, "bar_diameters": _hoop_bar_factor() * db, "absolute": 6.0}   # 18.6.4.4: 6 db (Grade 60), 5 db (Grade 80)
     # Hinge-zone hoops must also support the top and bottom bars (18.6.4.4 /
     # 25.7.2.3): the leg count is bounded by what the bars need and can engage.
     from Design.SMRF_Cage_Layout import beam_cage, cage_passes
@@ -390,7 +392,7 @@ def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bar
             "vs_limit_kip": vs_limit, "section_adequate": vs_required <= vs_limit, "cage": cage,
             "spacing_bounds_in": bounds, "hoops": selected,
             "basis": ("Vc = 0 in the hinge zone when the Mpr mechanism shear is at least half of Ve (18.6.5.2); "
-                      "hoops at <= min(d/4, 6db, 6 in) and Av fyt d / Vs; uniform along the member")}
+                      "hoops at <= min(d/4, 6db Grade 60 or 5db Grade 80, 6 in) and Av fyt d / Vs; uniform along the member")}
 
 
 def column_probable_pm(state, fy_factor=1.25, n_pts=160):
@@ -1049,6 +1051,7 @@ def design_column_shear(state, strengths, method=None):
     sections, col, mats, geometry = state["sections"], state["column"], state["materials"], state["geometry"]
     b, h, fc = sections["b_col_in"], sections["h_col_in"], sections["fc_col_ksi"]
     fy, es = mats["fy_ksi"], mats["es_ksi"]
+    fyt = float(mats.get("fyt_ksi", fy))             # hoops: A706 Grade 60 (fyt for shear capped at 60 ksi, Table 20.2.2.4(a))
     method = method or state.get("column_shear_method") or COLUMN_SHEAR_METHOD_DEFAULT
     if method not in COLUMN_SHEAR_METHODS:
         raise ValueError(f"unknown column shear method {method!r}; expected one of {COLUMN_SHEAR_METHODS}")
@@ -1280,13 +1283,13 @@ def design_column_shear(state, strengths, method=None):
     # Confinement (18.7.5.4) per direction, with every face bar tied by a leg or crosstie.
     ach = (b - 2.0 * cc) * (h - 2.0 * cc)
     p_max_all = max(v["axial_max_kip"] for axis in stories for v in stories[axis].values()) if stories else 0.0
-    ratio = max(0.3 * (ag / ach - 1.0) * fc / fy, 0.09 * fc / fy)
+    ratio = max(0.3 * (ag / ach - 1.0) * fc / fyt, 0.09 * fc / fyt)
     high_axial = p_max_all > 0.3 * ag * fc
     if high_axial:
         kf = max(1.0, fc / 25.0 + 0.6)
         perimeter_bars = col["top_bars"] + col["bot_bars"] + 2 * col["side_bars"]
         kn = perimeter_bars / max(1, perimeter_bars - 2)
-        ratio = max(ratio, 0.2 * kf * kn * p_max_all / (fy * ach))
+        ratio = max(ratio, 0.2 * kf * kn * p_max_all / (fyt * ach))
     # The cage: a perimeter hoop plus crossties, each engaging a bar. Which
     # bars need support (25.7.2.3 through 18.7.5.2(d), hx per 18.7.5.2(e)/(f))
     # and which can carry a crosstie (18.7.5.2(b)) bound the leg count in
@@ -1299,7 +1302,8 @@ def design_column_shear(state, strengths, method=None):
     def bounds_for(hx):
         # The hx-dependent so (4-6 in) is recorded, but the methodology keeps a
         # conservative 4-in cap.
-        return {"quarter_min_dimension": min(b, h) / 4.0, "six_db": 6.0 * db,
+        # 18.7.5.3(b)/(c): 6 db of the smallest Grade 60 bar, 5 db of the smallest Grade 80 bar
+        return {"quarter_min_dimension": min(b, h) / 4.0, "bar_diameters": _hoop_bar_factor(fy) * db,
                 "so": max(4.0, min(6.0, 4.0 + (14.0 - hx) / 3.0)), "conservative_so_cap": 4.0}
 
     selected, cage, bounds = None, None, None
@@ -1329,7 +1333,7 @@ def design_column_shear(state, strengths, method=None):
                 per_direction[axis] = {
                     "legs_key": spec["legs_key"], "legs": legs[spec["legs_key"]], "av_in2": av, "d_in": d,
                     "bc_in": spec["bc_in"], "vs_required_kip": vs_req,
-                    "spacing_from_shear_in": av * fy * d / vs_req if vs_req > 0 else float("inf"),
+                    "spacing_from_shear_in": av * fyt * d / vs_req if vs_req > 0 else float("inf"),
                     "spacing_from_confinement_in": av / (ratio * spec["bc_in"]),
                     "ash_required_per_in": ratio * spec["bc_in"]}
             s_shear = min(v["spacing_from_shear_in"] for v in per_direction.values())
@@ -1344,7 +1348,7 @@ def design_column_shear(state, strengths, method=None):
         for axis, v in per_direction.items():
             v["ash_provided_per_in"] = v["av_in2"] / spacing
             v["phi_vn_kip"] = PHI_SHEAR * ((worst[axis]["vc_kip"] if axis in worst else 0.0)
-                                           + v["av_in2"] * fy * v["d_in"] / spacing)
+                                           + v["av_in2"] * fyt * v["d_in"] / spacing)
         selected = {"bar_size": bar, "legs": legs, "spacing_in": spacing,
                     # Scalars for the single-value consumers (IMK rho_sh, legacy Av): the lighter direction.
                     "legs_model": min(legs.values()),
@@ -1374,7 +1378,7 @@ def design_column_shear(state, strengths, method=None):
     hx_ok = (not high_axial) or hx <= 8.0
     # Provided-steel screen with the selected hoops: phi (Vc + min(Av fyt d / s,
     # Vs limit)) against the method's Ve, per story and direction.
-    screen = column_shear_screen(stories, selected, vs_limit, fy)
+    screen = column_shear_screen(stories, selected, vs_limit, fyt)
     if method == COLUMN_SHEAR_METHOD_ANALYSIS_SPLIT:
         method_basis = ("per direction: Ve = max((M,top + M,bottom) / ln, Vu); each column end takes the smaller of its own "
                         "probable moment over its factored axial range and the beams' probable delivery at that joint times "
@@ -1693,25 +1697,39 @@ def design_anchorage(state):
                          "hook": "standard 90-degree hook into the confined core, 18.8.5.1",
                          "passes": ldh <= available,
                          "through_bars_present": through,
-                         "through_bar_depth_required_in": 20.0 * db, "through_bar_depth_available_in": depth,
-                         "through_bar_passes": (20.0 * db <= depth) if through else True}
+                         "through_bar_depth_required_in": _sp_through_factor() * db, "through_bar_depth_available_in": depth,
+                         "through_bar_passes": (_sp_through_factor() * db <= depth) if through else True}
     return {"directions": results, "all_pass": all(v["passes"] and v["through_bar_passes"] for v in results.values()),
             "basis": ("ldh = fy db / (65 lambda sqrt(fc)) >= max(8db, 6 in); embedment = column depth - cover - hoop; "
                       "through bars need a joint depth of 20 db (normalweight, 18.8.2.3) where an interior joint exists")}
 
 
+def _sp_through_factor():
+    """18.8.2.3: 20 db for Grade 60 through bars, 26 db for Grade 80 (Structure_Parameters.through_joint_bar_depth_factor)."""
+    import Structure_Parameters as sp
+    return sp.through_joint_bar_depth_factor()
+
+
+def _hoop_bar_factor(fy_ksi=None):
+    """18.6.4.4 / 18.7.5.3: 6 db for Grade 60 longitudinal bars, 5 db for Grade 80 (Structure_Parameters.hoop_spacing_bar_factor)."""
+    import Structure_Parameters as sp
+    return sp.hoop_spacing_bar_factor(fy_ksi)
+
+
 def straight_development_length(bar, fc_ksi, fy_ksi, top_bar=False):
-    """ACI 318-19 25.4.2.4 straight development, uncoated Grade 60, normalweight.
+    """ACI 318-19 Table 25.4.2.3 straight development, uncoated ASTM A706 Grade 60 or 80, normalweight.
 
     Clear spacing >= db with cover >= db and hoops throughout (or spacing >=
     2db and cover >= db) selects the /25 (#6 and smaller) or /20 (#7 and
     larger) form; psi_t = 1.3 for bars with more than 12 in of fresh
-    concrete below them.
+    concrete below them; psi_g = 1.15 for Grade 80 (Table 25.4.2.5).
     """
+    from Design.ACI_Checks import GRADE_FACTOR_PSI_G
     db = _BAR[bar][0]
     divisor = 25.0 if bar <= 6 else 20.0
     psi_t = 1.3 if top_bar else 1.0
-    return max(12.0, fy_ksi * 1000.0 * psi_t / (divisor * math.sqrt(fc_ksi * 1000.0)) * db)
+    psi_g = GRADE_FACTOR_PSI_G[float(fy_ksi)]
+    return max(12.0, fy_ksi * 1000.0 * psi_t * psi_g / (divisor * math.sqrt(fc_ksi * 1000.0)) * db)
 
 
 def design_column_bar_bond(state):

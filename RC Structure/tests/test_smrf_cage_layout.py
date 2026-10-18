@@ -48,12 +48,30 @@ class ColumnCageTests(unittest.TestCase):
         self.assertEqual(cage["legs_max"], {"across_b_face": 3, "across_h_face": 5})
         self.assertNotIn(6, cage["constructible_legs"])
         self.assertLessEqual(max(cage["constructible_legs"]), 3)
+        self.assertFalse(cage["every_bar_supported"])
         realized = column_cage(28.0, 28.0, 1.5, 0.625, 1.27, 3, 3, legs=3)
         self.assertTrue(cage_passes(realized))
         self.assertEqual(realized["arrangement"]["b_face"]["supported"], [True, True, True])
         six = column_cage(28.0, 28.0, 1.5, 0.625, 1.27, 3, 3, legs=6)
         self.assertFalse(six["constructible"])
         self.assertFalse(cage_passes(six))
+
+    def test_the_every_bar_switch_ties_every_interior_bar(self):
+        """COLUMN_CROSSTIE_EVERY_BAR = True (the ACI example figure): one crosstie per interior bar, legs = bars per face."""
+        from unittest import mock
+        from Design import SMRF_Cage_Layout as layout
+        with mock.patch.object(layout, "COLUMN_CROSSTIE_EVERY_BAR", True):
+            cage = column_cage(28.0, 28.0, 1.5, 0.625, 1.27, top_bars=3, side_bars=4)
+            self.assertTrue(cage["every_bar_supported"])
+            self.assertEqual(cage["legs_min"], cage["legs_max"])
+            self.assertEqual(cage["constructible_legs_by_direction"], {"across_b_face": [3], "across_h_face": [6]})
+            fewer = column_cage(28.0, 28.0, 1.5, 0.625, 1.27, 3, 4, legs={"across_b_face": 3, "across_h_face": 4})
+            self.assertFalse(fewer["constructible"])
+            realized = column_cage(28.0, 28.0, 1.5, 0.625, 1.27, 3, 4, legs={"across_b_face": 3, "across_h_face": 6})
+            self.assertTrue(cage_passes(realized))
+            self.assertEqual(realized["arrangement"]["h_face"]["supported"], [True] * 6)
+            self.assertIn("every interior bar", cage["support_basis"])
+        self.assertFalse(column_cage(28.0, 28.0, 1.5, 0.625, 1.27, 3, 4)["every_bar_supported"])
 
     def test_legs_per_direction_for_an_asymmetric_layout(self):
         """28x28 with #10 bars, 3 top and 4 side per face: 3 legs across b, 4 to 6 across h."""

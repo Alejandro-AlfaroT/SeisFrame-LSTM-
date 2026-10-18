@@ -269,10 +269,14 @@ def slab_strength_recomputation(record):
 
 def slab_strength_inputs(record):
     slab, material = record["slab"], record["materials"]
-    if material.get("reinforcement_specification") != "ASTM A706 Grade 60" or material.get("fy_ksi") != 60:
-        raise ValueError("Slab steel must explicitly be ASTM A706 Grade 60; it cannot be inferred.")
+    # Slab mats are ASTM A706 Grade 60 whatever the frame bars are (SLAB_FY_KSI); records from before 2026-10-17
+    # carry one grade for both, which was Grade 60.
+    slab_fy = material.get("slab_fy_ksi", material.get("fy_ksi"))
+    slab_spec = material.get("slab_reinforcement_specification", material.get("reinforcement_specification"))
+    if slab_fy != 60 or slab_spec != "ASTM A706 Grade 60":
+        raise ValueError("Slab steel must explicitly be ASTM A706 Grade 60 (the frame bars may be Grade 80); it cannot be inferred.")
     return {"thickness_in": slab["thickness_in"], "fc_ksi": slab["concrete_fc_ksi"],
-            "fy_ksi": material["fy_ksi"], "max_aggregate_size_in": material["aggregate_size_in"],
+            "fy_ksi": slab_fy, "max_aggregate_size_in": material["aggregate_size_in"],
             "exposure": material["exposure"], "steel_specification": "ASTM A706",
             "concrete_type": slab["concrete_type"],
             "panel_ids": sorted(panel["panel_id"] for panel in slab["panels"]),

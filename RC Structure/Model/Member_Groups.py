@@ -62,6 +62,7 @@ SYSTEMS = (SYSTEM_SFRS, SYSTEM_GRAVITY)
 # design (the member type aside), so a frame has one perimeter column, one interior column, one perimeter
 # beam and one interior beam, each the same at every story.
 SYSTEM_POLICY_ID = "system_uniform_v1"
+SYSTEM_BANDED_POLICY_ID = "system_three_story_v1"
 SYSTEM_DESIGN_TIES = {
     "sfrs_column": {"member_type": "column", "locations": ("corner", "x_boundary_edge", "y_boundary_edge"), "system": SYSTEM_SFRS},
     "gravity_column": {"member_type": "column", "locations": ("interior",), "system": SYSTEM_GRAVITY},
@@ -99,7 +100,26 @@ def policy_of(policy_id):
 
 def stories_per_band_of(policy_id, num_floor):
     """How many stories one band holds under a policy: pairs under the band policy, the whole height under the system policy."""
-    return num_floor if policy_id == SYSTEM_POLICY_ID else STORIES_PER_BAND
+    return num_floor if policy_id == SYSTEM_POLICY_ID else 3 if policy_id == SYSTEM_BANDED_POLICY_ID else STORIES_PER_BAND
+
+
+def is_system_policy(policy_id):
+    return policy_id in (SYSTEM_POLICY_ID, SYSTEM_BANDED_POLICY_ID)
+
+
+def tie_kind(tie):
+    """System/design family, without the optional three-story band prefix."""
+    return tie.rsplit("__", 1)[-1]
+
+
+def tie_spec(tie):
+    return SYSTEM_DESIGN_TIES[tie_kind(tie)]
+
+
+def bands_of(policy_id, num_floor):
+    if policy_id == SYSTEM_BANDED_POLICY_ID:
+        return [list(range(k, min(k + 3, num_floor + 1))) for k in range(1, num_floor + 1, 3)]
+    return story_bands(num_floor, stories_per_band_of(policy_id, num_floor))
 
 
 def tie_of_location(member_type, location):
@@ -125,7 +145,14 @@ POLICY = {
     "selection": "iterative design; a group prescribes no dimension and no reinforcement",
 }
 
-POLICIES.update({POLICY_ID: POLICY, SYSTEM_POLICY_ID: SYSTEM_POLICY})
+SYSTEM_BANDED_POLICY = {**SYSTEM_POLICY, "id": SYSTEM_BANDED_POLICY_ID, "stories_per_band": 3,
+    "story_bands": "three stories from the base; a shorter final band is retained",
+    "beam_floor": "beam at floor k belongs to its three-story band",
+    "column_story": "column segment from level k-1 to k belongs to its three-story band",
+    "basis": "user decision 2026-10-17: perimeter SMRF and gravity systems, one design per system per three-story band",
+    "vertical_size_rule": "both section dimensions must be nonincreasing upward on every corresponding column/beam line",
+    "vertical_size_rule_enforcement": "installation, evaluation, search proposals and saved-record loading; no acceptance override"}
+POLICIES.update({POLICY_ID: POLICY, SYSTEM_POLICY_ID: SYSTEM_POLICY, SYSTEM_BANDED_POLICY_ID: SYSTEM_BANDED_POLICY})
 
 # The Structure_Parameters names that hold ONE section or cage for every column or every beam.
 UNIFORM_SECTION_KEYS = (
@@ -243,7 +270,7 @@ def member_inventory(nx, ny, nz, policy_id=POLICY_ID):
             raise ValueError(f"{name} must be a positive integer, got {value!r}.")
     policy_of(policy_id)
     per_level = (nx + 1) * (ny + 1)
-    bands = story_bands(nz, stories_per_band_of(policy_id, nz))
+    bands = bands_of(policy_id, nz)
     band_of = {k: band for band in bands for k in band}
 
     def node(k, i, j):
@@ -288,14 +315,15 @@ def build_assignments(nx, ny, nz, policy_id=POLICY_ID):
                                                     "member_tags": []})
         entry["stories_or_floors"].add(row["story_or_floor"])
         entry["member_tags"].append(row["member_tag"])
-        if policy_id == SYSTEM_POLICY_ID:
-            entry["design_tie"] = tie_of_location(row["member_type"], row["location_class"])
+        if is_system_policy(policy_id):
+            family = tie_of_location(row["member_type"], row["location_class"])
+            entry["design_tie"] = f"{row['band']}__{family}" if policy_id == SYSTEM_BANDED_POLICY_ID else family
     group_rows = []
     for gid in sorted(groups):
         entry = groups[gid]
         group_rows.append({**entry, "stories_or_floors": sorted(entry["stories_or_floors"]), "member_count": len(entry["member_tags"])})
     payload = {"schema": SCHEMA, "policy": policy, "counts": {"num_bay_x": nx, "num_bay_y": ny, "num_floor": nz},
-               "story_bands": story_bands(nz, stories_per_band_of(policy_id, nz)), "groups": group_rows, "members": members}
+               "story_bands": bands_of(policy_id, nz), "groups": group_rows, "members": members}
     return {**payload, "sha256": hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()}
 
 
@@ -522,6 +550,10 @@ class GroupedDesign:
     def tie_of(self, group_id):
         return self.groups[group_id].get("design_tie")
 
+    def related_tie(self, tie, family):
+        """Another system tie in the same height band (or the uniform policy's global tie)."""
+        return tie[:-len(tie_kind(tie))] + family
+
     def system_of(self, group_id):
         return self.groups[group_id].get("system")
 
@@ -604,6 +636,7 @@ class GroupedDesign:
             row = saved.get(member.member_tag)
             if row is None or any(row.get(k) != v for k, v in {"group_id": member.group_id, **_design_dict(member.design)}.items()):
                 raise GroupedStateError(f"The saved per-member row of member {member.member_tag} disagrees with its group's design.")
+        require_section_order(state)
         return state
 
     @classmethod
@@ -662,6 +695,39 @@ def is_grouped():
     return _ACTIVE["state"] is not None
 
 
+def section_order_problems(state):
+    """Hard size envelope for the three-story policy, checked independently of the sizing search.
+
+    Compare BOTH dimensions, not area, along corresponding physical member lines. The grouping policy
+    gives one section to each type/location in a band, so adjacent groups represent all those lines.
+    Trial states may be assembled before normalization; installing or importing an invalid state is refused.
+    """
+    if state.policy_id != SYSTEM_BANDED_POLICY_ID:
+        return []
+    from Design.Section_Design import COLUMN_SIZE_CAP_IN
+    problems, lines = [], {}
+    for gid, group in state.groups.items():
+        d = state.designs[gid]
+        if d.is_column and max(d.b_in, d.h_in) > COLUMN_SIZE_CAP_IN + 1e-9:
+            problems.append(f"{gid}: column {d.b_in:g} x {d.h_in:g} exceeds {COLUMN_SIZE_CAP_IN:g}-in cap")
+        lines.setdefault((group['member_type'], group['location_class']), []).append(gid)
+    for gids in lines.values():
+        gids.sort(key=lambda g: min(state.groups[g]['stories_or_floors']))
+        for lower, upper in zip(gids, gids[1:]):
+            a,b = state.designs[lower],state.designs[upper]
+            for dim in ('b_in','h_in'):
+                if getattr(b,dim) > getattr(a,dim) + 1e-9:
+                    problems.append(f"{upper}: {dim} {getattr(b,dim):g} in exceeds the section below "
+                                    f"{lower} ({getattr(a,dim):g} in); upward section growth is forbidden")
+    return problems
+
+
+def require_section_order(state):
+    problems = section_order_problems(state)
+    if problems:
+        raise GroupedStateError("Hard section-size rule: " + "; ".join(problems[:8]))
+
+
 def install(state):
     """Put a grouped design in force. The uniform section and cage values of Structure_Parameters are
     withdrawn (any use raises) until ``clear``; the model counts must be the assignments' counts."""
@@ -670,6 +736,7 @@ def install(state):
     counts = {"num_bay_x": sp.NUM_BAY_X, "num_bay_y": sp.NUM_BAY_Y, "num_floor": sp.NUM_FLOOR}
     if state.counts != counts:
         raise GroupedStateError(f"The grouped design is for counts {state.counts}; the model has {counts}.")
+    require_section_order(state)
     if _ACTIVE["state"] is None:
         _ACTIVE["withdrawn"] = {key: getattr(sp, key) for key in UNIFORM_SECTION_KEYS}
         for key in UNIFORM_SECTION_KEYS:

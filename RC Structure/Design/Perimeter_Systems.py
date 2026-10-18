@@ -70,7 +70,7 @@ MODEL_GRAVITY = "continuous gravity only"
 def two_system(state=None):
     """Whether the installed (or given) grouped design is under the two-system policy."""
     state = mg.active() if state is None else state
-    return state is not None and state.policy_id == mg.SYSTEM_POLICY_ID
+    return state is not None and mg.is_system_policy(state.policy_id)
 
 
 def design_model_for(state=None):

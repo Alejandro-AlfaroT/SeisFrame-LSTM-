@@ -28,6 +28,7 @@ from Design.SMRF_Capacity_Design import build_capacity_design                   
 from Design.SMRF_Common import SectionAxialDomainError                           # noqa: E402
 from Design.SMRF_Demands import strength_load_combinations                       # noqa: E402
 from Model import Member_Groups as mg                                            # noqa: E402
+from Model import Member_Properties as mp, Member_Bar_Layers as bar_layers        # noqa: E402
 
 BOUNDARY = "s01_02__column__interior>s03_04__column__interior"
 
@@ -87,9 +88,25 @@ class UniformEquivalence(unittest.TestCase):
                 self.assertEqual(other["group_id"], mg.resolve(int(tag)).group_id)
         self.assertLess(worst, 1e-9)
 
-    def test_governing_member_dcrs_are_the_uniform_ones(self):
-        for kind in ("column", "beam"):
-            self.assertAlmostEqual(self.strengths["worst"][kind], self.legacy_dcr[kind], places=10)
+    def test_column_dcr_is_uniform_and_beam_dcr_uses_resolved_composite_sections(self):
+        self.assertAlmostEqual(self.strengths["worst"]["column"], self.legacy_dcr["column"], places=10)
+        # The legacy beam check is singly reinforced/web-only. The grouped route now uses the
+        # existing strain-compatible beam/slab kernel, so equality to that old beam number is wrong.
+        expected = 0.0
+        for gid, group in self.state.groups.items():
+            if group["member_type"] == "column":
+                continue
+            design = self.state.designs[gid]
+            rows = checks.beam_demand_rows(group["member_tags"], self.actions)
+            web = checks.beam_group_strength(design, rows, bar_layers.group_rows(gid))
+            expected = max(expected, web["shear"]["dcr"])
+            for tag, _combination, positive, negative, _shear in rows:
+                resolved = mp.beam_strengths(self.state.member(tag))
+                for sign, mu, label in (("positive", positive, "sagging"), ("negative", negative, "hogging")):
+                    self.assertTrue(resolved["family"]["composite"][sign]["tension_controlled"])
+                    capacity = .9 * min(resolved["basis"][f"{label}_{end}_kip_in"] for end in ("i", "j"))
+                    expected = max(expected, mu / capacity)
+        self.assertAlmostEqual(self.strengths["worst"]["beam"], expected, places=10)
         self.assertEqual(set(self.strengths["groups"]), set(self.state.groups))
         # every group names the member and combination that govern it
         for gid, result in self.strengths["groups"].items():

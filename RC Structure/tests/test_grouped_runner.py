@@ -133,8 +133,10 @@ class RunnerFixture(unittest.TestCase):
 
     def test_a_search_without_a_feasible_design_keeps_its_candidates_and_says_how_it_stopped(self):
         target = Path(self.tmp.name) / "attempt_budget_1"
-        # A seed no single trial can make feasible (14 in columns against 12 x 22 beams, at the first grades), yet one that evaluates.
-        proc = run(target, "--seed-column", "14", "14", "6", "--seed-beam", "12", "22", "5", feasibility=1, reduction=0, stages=("design",))
+        # A seed no single trial can make feasible (the fixture's 20 in columns against 14 x 18 beams), yet one that
+        # evaluates. Columns under 20 in stack the crossing cages past mid-depth here (bar_rows, no constraints), so a
+        # lighter column is not the way to an evaluated infeasible seed on this frame (2026-10-17).
+        proc = run(target, "--seed-column", "20", "20", "5", "--seed-beam", "14", "18", "4", feasibility=1, reduction=0, stages=("design",))
         result = load(target / "result.json")
         self.assertEqual(result["status"], "no_feasible_design", proc.stderr[-1500:])
         self.assertEqual(proc.returncode, 0)

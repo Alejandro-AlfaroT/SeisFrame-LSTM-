@@ -70,6 +70,14 @@ class RebarConfig:
         reasons practice stays well below it. Ratios above this are never
         selected automatically.
 
+    rho_beam_practical_max
+        Proportioning preference for the beams (user decision 2026-10-17):
+        the largest flexural steel ratio As / (bw d) a face may carry when a
+        cage is selected, 0.015, below the 0.025 of ACI 318-19 18.6.3.1, for
+        constructability and to hold down the joint shear the beam bars
+        deliver (18.8.4.1). The code checks keep the code limit; a beam that
+        needs more steel takes a larger section or a higher grade instead.
+
     cover_in
         Distance from concrete face to longitudinal bar centroid (in),
         NOT clear cover to the outside of transverse reinforcement.
@@ -139,6 +147,7 @@ class RebarConfig:
     rho_col_min: float = 0.01
     rho_col_max: float = 0.06
     rho_col_practical_max: float = 0.04
+    rho_beam_practical_max: float = 0.015
 
     cover_in: float = field(default_factory=lambda: sp.COVER)
     beam_clear_cover_in: float = field(default_factory=lambda: sp.BEAM_CLEAR_COVER_IN)

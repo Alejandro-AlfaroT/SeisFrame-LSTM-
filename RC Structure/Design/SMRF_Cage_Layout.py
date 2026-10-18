@@ -18,6 +18,13 @@ drawn here):
 * 18.7.5.2(e): hx, the spacing of laterally supported column bars around
   the perimeter, at most 14 in; 18.7.5.2(f): every bar supported and
   hx <= 8 in where Pu > 0.3 Ag f'c or f'c > 10 ksi.
+* Crossties are single-leg ties, each engaging one interior bar, with a
+  135-degree seismic hook at one end and a 90-degree hook at the other,
+  alternated end for end (18.7.5.2(c)). The default is the code-minimal
+  pattern above (user decision 2026-10-17: code-compliant alternating
+  hooks); COLUMN_CROSSTIE_EVERY_BAR = True ties every interior column bar
+  instead (the ACI example figure), and the legs across a face pair are
+  then the bars on that face.
 * 18.7.5.2(b): a crosstie engages a peripheral longitudinal bar, so a face
   with n bars can carry at most n - 2 crossties in the direction across
   it, and the legs across that direction number at most n.
@@ -37,6 +44,9 @@ import math
 
 HX_MAX_IN = 14.0
 HX_MAX_HIGH_AXIAL_IN = 8.0
+# True ties every interior column bar (the ACI example figure); False, the default (user decision 2026-10-17), keeps the
+# 25.7.2.3 minimal pattern with the hooks alternated end for end. Beams always use the minimal pattern.
+COLUMN_CROSSTIE_EVERY_BAR = False
 UNSUPPORTED_CLEAR_MAX_IN = 6.0
 COLUMN_DIRECTIONS = ("across_b_face", "across_h_face")
 _OMITTED = object()      # grid_in left out: the module's grid (Structure_Parameters.MODULE_GRID); None itself is "no grid"
@@ -163,16 +173,20 @@ def column_cage(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, sid
     on the face pair the legs cross) when constructible in both.
     """
     hx_max = HX_MAX_HIGH_AXIAL_IN if high_axial else HX_MAX_IN
+    every_bar = bool(high_axial or COLUMN_CROSSTIE_EVERY_BAR)
     faces = {
         "b_face": face_bar_positions(b_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, grid_in=grid_in),
         "h_face": face_bar_positions(h_in, clear_cover_in, hoop_db_in, bar_db_in, side_bars + 2, grid_in=grid_in),
     }
-    minimal = {name: support_pattern(pos, bar_db_in, hx_max, every_bar=high_axial) for name, pos in faces.items()}
+    minimal = {name: support_pattern(pos, bar_db_in, hx_max, every_bar=every_bar) for name, pos in faces.items()}
     # Legs across the b faces run along h and count 2 + crossties on the b face; and vice versa.
     legs_min = {"across_b_face": 2 + minimal["b_face"]["crossties"], "across_h_face": 2 + minimal["h_face"]["crossties"]}
     legs_max = {"across_b_face": top_bars, "across_h_face": side_bars + 2}
     result = {"faces": faces, "minimal_support": minimal, "legs_min": legs_min, "legs_max": legs_max,
-              "hx_max_in": hx_max, "high_axial": high_axial,
+              "hx_max_in": hx_max, "high_axial": high_axial, "every_bar_supported": every_bar,
+              "support_basis": ("a crosstie on every interior bar, 135/90-degree hooks alternated end for end (18.7.5.2(c); "
+                                "user decision 2026-10-17)" if every_bar else
+                                "25.7.2.3 minimal pattern: corners and alternate bars, 6 in clear, hx per 18.7.5.2(e)"),
               # Per direction, every count from the minimum the support rules
               # need to the bars the face can engage is constructible; the
               # common list is what a single count both ways could use.
@@ -187,7 +201,7 @@ def column_cage(b_in, h_in, clear_cover_in, hoop_db_in, bar_db_in, top_bars, sid
         if feasible:
             # Legs across the b faces are the crossties on the b-face bars (plus the hoop's two).
             crossties = {"b_face": legs["across_b_face"] - 2, "h_face": legs["across_h_face"] - 2}
-            realized = {name: arrangement_with_crossties(pos, bar_db_in, crossties[name], hx_max, every_bar=high_axial)
+            realized = {name: arrangement_with_crossties(pos, bar_db_in, crossties[name], hx_max, every_bar=every_bar)
                         for name, pos in faces.items()}
             result["arrangement"] = realized
             result["hx_in"] = max(r["hx_in"] for r in realized.values())

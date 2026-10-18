@@ -169,7 +169,7 @@ def _select_slab(cfg, minimum_thickness_in=None):
     screening repair item 3, 2026-10-02); the policy saved with the slab records the floor it was chosen from.
     """
     from Design.SMRF_Slab import choose_slab
-    policy = {**asdict(cfg.slab), "fy_ksi": sp.FY_KSI, "concrete_unit_weight_kcf": sp.CONCRETE_UNIT_WEIGHT_KCF}
+    policy = {**asdict(cfg.slab), "fy_ksi": sp.SLAB_FY_KSI, "concrete_unit_weight_kcf": sp.CONCRETE_UNIT_WEIGHT_KCF}
     if minimum_thickness_in is not None:
         policy["minimum_thickness_in"] = float(minimum_thickness_in)
     slab = choose_slab(
@@ -245,6 +245,7 @@ def _slab_strength_inputs_from_state(slab, cfg):
     return slab_strength_inputs({
         "slab": slab,
         "materials": {"fy_ksi": sp.FY_KSI, "aggregate_size_in": sp.AGGREGATE_MAX_SIZE_IN,
+                      "slab_fy_ksi": sp.SLAB_FY_KSI, "slab_reinforcement_specification": sp.SLAB_REINFORCEMENT_SPECIFICATION,
                       "exposure": cfg.materials.exposure,
                       "reinforcement_specification": cfg.materials.reinforcement_specification},
         "geometry": {"num_floor": sp.NUM_FLOOR}})
@@ -465,7 +466,7 @@ def _beam_strength_families():
             "centroid_offset_in": sp.longitudinal_cover_in("beam")}
     offsets = sp.beam_bar_stacking_offsets_in()          # the stacked orthogonal layers, per direction
     rows = sp.beam_bar_layers()                           # and the actual rows each direction's bars occupy
-    slab = {"thickness_in": sp.SLAB_THICKNESS_IN if layout is not None else 0.0}
+    slab = {"thickness_in": sp.SLAB_THICKNESS_IN if layout is not None else 0.0, "fy_ksi": sp.SLAB_FY_KSI}
     geometry = {"bay_x_in": sp.BAY_X, "bay_y_in": sp.BAY_Y, "h_col_in": sp.H_COL, "b_col_in": sp.B_COL}
     return {f"{axis}_{position}": composite_beam_strengths({**beam, "centroid_offset_in": offsets[axis], "layers": rows[axis]},
                                                            slab, layout, geometry, axis, position)
@@ -492,7 +493,7 @@ def _validate_cached_slab(record):
             if record.get(group, {}).get(key) != value:
                 raise ValueError(f"Cached slab {group}.{key} disagrees with its frame design.")
     if (slab["concrete_unit_weight_kcf"] != sp.CONCRETE_UNIT_WEIGHT_KCF
-            or inputs["policy"]["fy_ksi"] != sp.FY_KSI):
+            or inputs["policy"]["fy_ksi"] != sp.SLAB_FY_KSI):
         raise ValueError("Cached slab material assumptions disagree with the current model.")
     return slab
 
@@ -933,7 +934,7 @@ def _capacity_state(cfg, combination_actions):
         "geometry": _slab_geometry(),
         "sections": {"b_col_in": sp.B_COL, "h_col_in": sp.H_COL, "fc_col_ksi": sp.FC_COL_KSI,
                      "b_beam_in": sp.B_BEAM, "h_beam_in": sp.H_BEAM, "fc_beam_ksi": sp.FC_BEAM_KSI},
-        "materials": {"fy_ksi": sp.FY_KSI, "es_ksi": sp.ES_KSI,
+        "materials": {"fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FYT_KSI, "es_ksi": sp.ES_KSI, "slab_fy_ksi": sp.SLAB_FY_KSI,
                       "normalweight": sp.CONCRETE_UNIT_WEIGHT_KCF == 0.150,
                       "aggregate_size_in": sp.AGGREGATE_MAX_SIZE_IN},
         "beam": {"bar_size": sp.BEAM_BAR_SIZE, "top_bars": sp.BEAM_TOP_BARS, "bot_bars": sp.BEAM_BOT_BARS,
@@ -1173,7 +1174,8 @@ def _state_record_core():
             "col_stirrup_diameter_in": sp.rebar_diameter(sp.COL_STIRRUP_BAR_SIZE),
             "beam_stirrup_diameter_in": sp.rebar_diameter(sp.BEAM_STIRRUP_BAR_SIZE),
         },
-        "materials": {"fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FY_KSI,
+        "materials": {"fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FYT_KSI,
+                      "slab_fy_ksi": sp.SLAB_FY_KSI, "slab_reinforcement_specification": sp.SLAB_REINFORCEMENT_SPECIFICATION,
                       "normalweight": sp.CONCRETE_UNIT_WEIGHT_KCF == 0.150,
                       "aggregate_size_in": sp.AGGREGATE_MAX_SIZE_IN, "es_ksi": sp.ES_KSI},
     }
@@ -2339,10 +2341,12 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     # Category, Ie and the drift criterion come from one basis; a policy that names another
     # category, or a stale ASCE_IE, stops the design before anything is analysed.
     sp.seismic_design_basis(risk_category=cfg.demands.risk_category, site_class=cfg.demands.site_class)
-    if (cfg.materials.reinforcement_specification != "ASTM A706 Grade 60"
-            or cfg.materials.exposure != "sheltered_interior" or sp.FY_KSI != 60.0
+    if (cfg.materials.reinforcement_specification != sp.REINFORCEMENT_SPECIFICATION_BY_GRADE.get(sp.FY_KSI)
+            or cfg.materials.exposure != "sheltered_interior" or sp.FY_KSI not in sp.LONGITUDINAL_GRADES_KSI
             or cfg.materials.fy_ksi != sp.FY_KSI or cfg.materials.es_ksi != sp.ES_KSI):
-        raise ValueError("The current research design scope requires sheltered interior A706 Grade 60 reinforcement.")
+        raise ValueError("The current research design scope requires sheltered interior ASTM A706 Grade 60 or Grade 80 "
+                         "longitudinal reinforcement (Grade 80 at story heights of 16 ft and more), with the specification "
+                         "matching the grade.")
     for value in (cfg.rebar.beam_clear_cover_in, cfg.rebar.col_clear_cover_in):
         if isinstance(value, bool) or not math.isfinite(value) or value < 1.5:
             raise ValueError("Frame clear cover must be finite and at least 1.5 in outside hoops.")
@@ -3073,7 +3077,11 @@ def apply_design(record):
         raise ValueError("Cached member cover/bar positions or material metadata are inconsistent.")
     material = record.get("materials", {})
     if material.get("fy_ksi") != sp.FY_KSI or material.get("es_ksi") != sp.ES_KSI:
-        raise ValueError("Cached steel material properties disagree with the current model.")
+        raise ValueError("Cached steel material properties disagree with the current model (the longitudinal grade follows "
+                         "the story height: configure the case before installing its design).")
+    if material.get("fyt_ksi", sp.FYT_KSI) != sp.FYT_KSI:
+        raise ValueError("Cached transverse steel grade disagrees with the current model.")
+    sp.require_a706(material.get("reinforcement_specification"), material.get("fy_ksi"))
     slab = _validate_cached_slab(record)
     aggregate = record.get("materials", {}).get("aggregate_size_in")
     if aggregate is None or not math.isfinite(aggregate) or aggregate <= 0:

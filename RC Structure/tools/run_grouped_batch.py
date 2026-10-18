@@ -2,7 +2,7 @@
 
     python tools/run_grouped_batch.py --manifest pilots/<name>/screening_plan.json --output-root <new directory> \
         --workers 5 --max-feasibility-trials 16 --max-reduction-trials 6 --probe-date 2026-10-17 \
-        [--stages design gravity_modal] [--grouping system_uniform_v1]
+        [--stages design gravity_modal] [--grouping system_three_story_v1]
 
 Each case runs Design/Grouped_Runner.py in its own process and directory (<output-root>/<case_id>); a case directory that
 already exists is left alone and reported as such (a changed input or budget takes a new root). The seed of every case
@@ -83,11 +83,12 @@ def run_case(case, args, root, manifest_path):
 
 
 def _tie_text(systems, tie):
-    item = (systems or {}).get("ties", {}).get(tie)
-    if not item:
+    items = (systems or {}).get("ties", {})
+    matching = [(name,item) for name,item in sorted(items.items()) if name.rsplit('__',1)[-1] == tie]
+    if not matching:
         return "-"
-    b, h, fc = item
-    return f"{b:g}x{h:g}@{fc:g}"
+    return "; ".join((f"{name.rsplit('__',1)[0]}: " if name != tie else "") + f"{item[0]:g}x{item[1]:g}@{item[2]:g}"
+                     for name,item in matching)
 
 
 def summarize(rows, cases, root, manifest_sha):
@@ -140,7 +141,7 @@ def main(argv=None):
     parser.add_argument("--max-reduction-trials", type=int, default=6)
     parser.add_argument("--probe-date", required=True)
     parser.add_argument("--stages", nargs="+", default=["design", "gravity_modal"])
-    parser.add_argument("--grouping", default="system_uniform_v1")
+    parser.add_argument("--grouping", default="system_three_story_v1")
     parser.add_argument("--cases", nargs="*", default=None, help="Case ids to run (default: every case of the manifest).")
     args = parser.parse_args(argv)
     from Design.Screening_Manifest import load_manifest

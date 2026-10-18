@@ -79,7 +79,7 @@ def diaphragm_inputs_from_state(elf, risk_category=None, policy=None):
                      "bay_x_in": float(sp.BAY_X), "bay_y_in": float(sp.BAY_Y), "story_h_in": float(sp.STORY_H)},
         "sections": {"b_beam_in": float(sp.B_BEAM), "h_beam_in": float(sp.H_BEAM),
                      "b_col_in": float(sp.B_COL), "h_col_in": float(sp.H_COL)},
-        "slab": {"thickness_in": float(sp.SLAB_THICKNESS_IN), "fc_ksi": fc, "fy_ksi": float(sp.FY_KSI),
+        "slab": {"thickness_in": float(sp.SLAB_THICKNESS_IN), "fc_ksi": fc, "fy_ksi": float(sp.SLAB_FY_KSI),
                  "max_aggregate_size_in": float(sp.AGGREGATE_MAX_SIZE_IN),
                  "normalweight": sp.CONCRETE_UNIT_WEIGHT_KCF == 0.150, "layers": layers},
         "seismic": {"sds": float(sp.ASCE_SDS), "importance_factor": float(basis["importance_factor"]),

@@ -209,7 +209,8 @@ def evaluate_gravity_beam(location, induced, strengths, section, detailing):
             area = float(section[f"as_{face[:3]}_in2"])
             checks.append(make_check("gravity.beam_minimum_steel", "ACI 318-19 18.6.3.1 / 9.6.1.2 (18.14.3.2(a))", area, as_min, ">=", "in2",
                                      f"{location} {face}".strip()))
-            checks.append(make_check("gravity.beam_maximum_steel_ratio", "ACI 318-19 18.6.3.1", area / (b * d), 0.025, "<=", "ratio",
+            checks.append(make_check("gravity.beam_maximum_steel_ratio", "ACI 318-19 18.6.3.1", area / (b * d),
+                                     0.02 if fy >= 80.0 - 1e-9 else 0.025, "<=", "ratio",
                                      f"{location} {face}".strip()))
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
         checks.append(not_evaluated("gravity.beam_minimum_steel", "ACI 318-19 18.6.3.1", str(exc), location))

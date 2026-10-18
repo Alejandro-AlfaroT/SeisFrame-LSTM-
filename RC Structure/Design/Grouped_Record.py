@@ -30,7 +30,7 @@ import math
 import os
 import types
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import openseespy.opensees as ops
@@ -63,7 +63,7 @@ NOMINAL_BEAM_CAGE = {"bar_size": 8, "top_bars": 3, "bot_bars": 3, "side_bars": 0
 _STATE_KEYS = ("SLAB_THICKNESS_IN", "FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF", "SEISMIC_LIVE_LOAD_FRACTION", "AGGREGATE_MAX_SIZE_IN",
                "REINFORCEMENT_SPECIFICATION", "MATERIAL_EXPOSURE", "FLOOR_TRANSFER", "SLAB_REINFORCEMENT", "SLAB_ACTIONS",
                "BEAM_BAR_STACKING", "BEAM_BAR_MAX_LAYERS", "BEAM_BAR_LAYER_ORDER", "JOINT_SHEAR_CATEGORIES",
-               "BEAM_CLEAR_COVER_IN", "COL_CLEAR_COVER_IN")
+               "BEAM_CLEAR_COVER_IN", "COL_CLEAR_COVER_IN", "FY_KSI")
 LIMITATIONS = (
     "Column transitions follow the declared rules of Design.SMRF_Transitions (" + transition_rules.RULES_ID + "): a limited "
     "supported scope, not a statement that no other detail can be built. They await engineering review; a face step of "
@@ -76,7 +76,7 @@ LIMITATIONS = (
     "for ACI 318-19 18.14); the Chapter 15 joint strength of a joint direction outside the SFRS uses the Table 18.8.4.3 "
     "row of the same joint (at or below the Table 15.4.2.3 value).",
     "One column concrete grade and one beam concrete grade for the whole frame; group-specific grades are not available.",
-    "Square columns; opposite sides of the plan share a group; the two-story band rule is a research policy, not a code rule.",
+    "Square columns; opposite sides of the plan share a group; the recorded story-band rule is a research policy, not a code rule.",
     "The story-strength model is provisional (review item M1); vertical strength regularity is recorded, not established.",
     "Nonlinear model scope: IMK member hinges with rigid centerline joints. Fiber members, scissors joint springs and the "
     "floor compatibility, cut-region, nodal-cut and composite-section diagnostics refuse a grouped design.",
@@ -192,6 +192,7 @@ def grouped_request_identity(cfg=None, seed=None, policy=None, grouping_policy_i
                             "group_count": len(assignments["groups"])},
                "seed": seed,
                "search": {"version": gs.SEARCH_VERSION, **asdict(policy),
+                          "steel_grade_retry_rule": gs.STEEL_GRADE_RETRY_RULE,
                           "max_column_size_step_in": gs.MAX_COLUMN_SIZE_STEP_IN,
                           "max_beam_reduction_options": gs.MAX_BEAM_REDUCTION_OPTIONS},
                "rules": {"evaluation": gd.EVALUATION_VERSION, "reinforcement_selection": selection.RULES_ID,
@@ -211,7 +212,16 @@ def _floor_loads():
 def _materials(cfg, state):
     grades = {kind: sorted({state.designs[g["group_id"]].fc_ksi for g in state.groups.values()
                             if (g["member_type"] == "column") == (kind == "column")}) for kind in ("column", "beam")}
-    return {"fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FY_KSI, "es_ksi": sp.ES_KSI,
+    return {"fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FYT_KSI, "es_ksi": sp.ES_KSI,
+            "transverse_specification": sp.TRANSVERSE_SPECIFICATION,
+            "slab_fy_ksi": sp.SLAB_FY_KSI, "slab_reinforcement_specification": sp.SLAB_REINFORCEMENT_SPECIFICATION,
+            "longitudinal_grade_rule": {"story_height_ft_for_grade_80": sp.LONGITUDINAL_GRADE_STORY_HEIGHT_FT,
+                                        "story_height_in": sp.STORY_H,
+                                        "initial_grade_ksi": sp.longitudinal_grade_for_story(sp.STORY_H),
+                                        "selected_grade_ksi": sp.FY_KSI,
+                                        "basis": "ASTM A706 Grade 80 initially at story heights >=16 ft, Grade 60 below; "
+                                                 "a failed Grade 60 strength/congestion search may retry at Grade 80 "
+                                                 "(2026-10-18). See search.steel_grade_trial for the actual decision."},
             "normalweight": sp.CONCRETE_UNIT_WEIGHT_KCF == 0.150, "aggregate_size_in": sp.AGGREGATE_MAX_SIZE_IN,
             "reinforcement_specification": cfg.materials.reinforcement_specification, "exposure": cfg.materials.exposure,
             "fc_col_ksi": grades["column"][0], "fc_beam_ksi": grades["beam"][0],
@@ -277,7 +287,7 @@ def systems_block(state, evidence, capacity):
     return {
         "policy_id": state.policy_id,
         "lateral_design_model": systems.design_model_for(state),
-        "ties": {tie: {"system": mg.SYSTEM_DESIGN_TIES[tie]["system"], "member_type": mg.SYSTEM_DESIGN_TIES[tie]["member_type"],
+        "ties": {tie: {"system": mg.tie_spec(tie)["system"], "member_type": mg.tie_spec(tie)["member_type"],
                        "groups": list(gids), "members": sum(len(state.groups[g]["member_tags"]) for g in gids),
                        "design": {key: getattr(designs[tie], key) for key in fields}}
                  for tie, gids in state.ties().items()},
@@ -375,6 +385,7 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
         "search": {"version": search["version"], "policy": search["policy"], "seed": seed,
                    "stop_reason": (search["stop"] or {}).get("reason"), "stop_detail": (search["stop"] or {}).get("detail"),
                    "counts": search["counts"], "elapsed_seconds": search["elapsed_seconds"],
+                   "steel_grade_trial": search.get("steel_grade_trial"),
                    "candidates": search["log"], "tradeoffs": search["tradeoffs"],
                    "interpretation": search["interpretation"]},
         "legacy_uniform_summary": _legacy_summary(state),
@@ -419,12 +430,46 @@ def _validated_slab(record):
     passed = {c["id"] for c in evaluate_slab(slab) if c["status"] == "pass"}
     if passed != {"slab_thickness_evidence", "slab_thickness_screen"}:
         raise ValueError("The grouped record lacks reproducible slab thickness evidence.")
-    if (slab["concrete_unit_weight_kcf"] != sp.CONCRETE_UNIT_WEIGHT_KCF or slab["inputs"]["policy"]["fy_ksi"] != sp.FY_KSI):
+    if (slab["concrete_unit_weight_kcf"] != sp.CONCRETE_UNIT_WEIGHT_KCF or slab["inputs"]["policy"]["fy_ksi"] != sp.SLAB_FY_KSI):
         raise ValueError("The grouped record's slab material assumptions disagree with the current model.")
     for key, value in slab["inputs"]["geometry"].items():
         if record["geometry"].get(key) != value:
             raise ValueError(f"The grouped record's slab geometry.{key} disagrees with its frame.")
     return slab
+
+
+def _validated_record_grade(record):
+    """A saved retry may restore Grade 80 after case geometry initially selects Grade 60.
+
+    A material edit alone is insufficient: the declared policy, trigger and
+    selected attempt must agree with the recorded Grade 60 failure evidence.
+    Remaining record signatures and capacities are checked by qualification.
+    """
+    material, search = record.get("materials") or {}, record.get("search") or {}
+    grade = material.get("fy_ksi")
+    trial = search.get("steel_grade_trial")
+    if trial:
+        if (trial.get("rule") != gs.STEEL_GRADE_RETRY_RULE or trial.get("selected_grade_ksi") != grade
+                or trial.get("initial_grade_ksi") != sp.longitudinal_grade_for_story(sp.STORY_H)):
+            raise ValueError("The recorded longitudinal steel grade decision is inconsistent.")
+        if trial.get("attempted"):
+            entries = search.get("candidates") or []
+            trigger = next((e for e in entries if e.get("index") == trial.get("trigger_candidate_index")), None)
+            if (grade != 80.0 or trial.get("initial_grade_ksi") != 60.0
+                    or (search.get("policy") or {}).get("grade80_retry_on_limits") is not True
+                    or not trigger or trigger.get("longitudinal_grade_ksi") != 60.0
+                    or not trial.get("triggers")
+                    or trial["triggers"] != gs.grade80_retry_reasons(trigger.get("evaluation") or {})
+                    or not any(e.get("longitudinal_grade_ksi") == 80.0 and e.get("decision") == "feasible"
+                               for e in entries)):
+                raise ValueError("Grade 80 retry lacks reproducible Grade 60 limit and feasible Grade 80 evidence.")
+        elif grade != trial.get("initial_grade_ksi"):
+            raise ValueError("An unattempted steel grade retry cannot change the selected grade.")
+    if grade != sp.FY_KSI:
+        if not (trial and trial.get("attempted") and sp.FY_KSI == trial.get("initial_grade_ksi") and grade == 80.):
+            raise ValueError("The grouped record's steel properties disagree with the current model; configure the case "
+                             "or supply its recorded Grade 80 retry evidence.")
+    return grade
 
 
 def apply_grouped_design(record):
@@ -441,8 +486,12 @@ def apply_grouped_design(record):
     if any(record.get("geometry", {}).get(key) != value for key, value in driver._slab_geometry().items()):
         raise ValueError("The grouped record's geometry disagrees with the current model.")
     material = record.get("materials") or {}
-    if material.get("fy_ksi") != sp.FY_KSI or material.get("es_ksi") != sp.ES_KSI:
-        raise ValueError("The grouped record's steel properties disagree with the current model.")
+    selected_grade = _validated_record_grade(record)
+    if material.get("es_ksi") != sp.ES_KSI:
+        raise ValueError("The grouped record's steel elastic modulus disagrees with the current model.")
+    if material.get("fyt_ksi", sp.FYT_KSI) != sp.FYT_KSI:
+        raise ValueError("The grouped record's transverse steel grade disagrees with the current model.")
+    sp.require_a706(material.get("reinforcement_specification"), material.get("fy_ksi"))
     aggregate = material.get("aggregate_size_in")
     if isinstance(aggregate, bool) or not isinstance(aggregate, (int, float)) or not math.isfinite(aggregate) or aggregate <= 0:
         raise ValueError("The grouped record lacks a valid aggregate size.")
@@ -455,6 +504,7 @@ def apply_grouped_design(record):
     previous = mg.active()
     saved = {key: getattr(sp, key, None) for key in _STATE_KEYS}
     try:
+        sp.apply_reinforcement_grade(fy_ksi=selected_grade)
         slab = _validated_slab(record)
         mg.install(state)
         gd._require_common_grades(state)
@@ -529,10 +579,6 @@ def _cfg_view(record):
                                  dcr=types.SimpleNamespace(**(policy.get("dcr") or {})))
 
 
-def _rows_max(rows):
-    return max(rows["per_layer"]) if rows.get("per_layer") else None
-
-
 def group_detailing_checks(record, state, capacity):
     """ACI 318-19 18.6 / 18.7 dimensional and bar rules, one group at a time, and the pairs each beam actually meets.
 
@@ -579,14 +625,10 @@ def group_detailing_checks(record, state, capacity):
             core = mp.joint_core_column(member.story_or_floor, member.grid_i, member.grid_j)
             own = inputs_of(design, gid)
             rows = arrangement[gid]
-            # The widest row is what has to fit across the width (bars beyond the lanes go to a second layer).
-            own["n_top"], own["n_bottom"] = _rows_max(rows["top"]) or design.top_bars, _rows_max(rows["bottom"]) or design.bot_bars
-            strengths = group_checks.beam_flexural_strengths(design, rows)
-            positive, negative = strengths["positive"]["phi_mn_kip_in"], strengths["negative"]["phi_mn_kip_in"]
-            own.update({"mn_positive_left_kipin": positive, "mn_negative_left_kipin": negative,
-                        "mn_positive_right_kipin": positive, "mn_negative_right_kipin": negative,
-                        "mn_positive_min_along_kipin": positive, "mn_negative_min_along_kipin": negative,
-                        "continuous_top_bars": design.top_bars, "continuous_bottom_bars": design.bot_bars})
+            # Keep total face counts for steel area; individual rows govern width fit and effective depth.
+            own["bar_rows"] = {face: rows[face] for face in ("top", "bottom")}
+            own.update(group_checks.beam_detailing_strengths(member, rows))
+            own.update({"continuous_top_bars": design.top_bars, "continuous_bottom_bars": design.bot_bars})
             result = evaluate_detailing({"material": scope, "geometry": geometry, "beam": own,
                                          "column": inputs_of(core.design, core.group_id)})
             prefix = "beam."
@@ -602,6 +644,15 @@ def group_detailing_checks(record, state, capacity):
             location = check.get("location") or ""
             checks.append({**check, "location": f"{gid}/{location}" if location else gid})
         if not design.is_column:
+            # A group may include interior spans and exterior ends with different mat anchorage.
+            # Price every distinct context; the first member's section cannot certify all of them.
+            for tag in group_checks.beam_group_representatives(state, gid)[1:]:
+                other = state.member(tag)
+                other_inputs = {**own, **group_checks.beam_detailing_strengths(other, rows)}
+                for check in evaluate_detailing({"material": scope, "geometry": geometry, "beam": other_inputs,
+                                                "column": inputs_of(core.design, core.group_id)}):
+                    if check["id"] in ("beam.reversal_balance", "beam.span_strength"):
+                        checks.append({**check, "location": f"{gid}/member:{tag}/{check.get('location', '')}"})
             # The members of the group at their own joints.
             d = design.h_in - mp.longitudinal_cover_in(design)
             worst_span, worst_projection = None, None
@@ -750,6 +801,11 @@ def _qualification_checks(record, state):
     checks.append(next(c for c in reinforcement_consistency_checks({"materials": record["materials"]})
                        if c["id"] == "reinforcement.declared_material_scope"))
 
+    if state.policy_id == mg.SYSTEM_BANDED_POLICY_ID:
+        size_problems = mg.section_order_problems(state)
+        checks.append(make_check("grouped.vertical_section_size_order", "User design basis 2026-10-17: no upward section growth",
+                                 int(not size_problems), 1, "==", details={"problems":size_problems,
+                                 "dimensions_checked":["b_in","h_in"],"grouping_policy":state.policy_id}))
     # 1. Solved actions: bound to this frame, canonical in id and factors.
     actions, expected_ids, transfers = None, None, None
     try:
@@ -936,9 +992,76 @@ def require_accepted_grouped_design(record):
 
 
 # ---- design and cache ------------------------------------------------------------------------------------------
+def _search_with_grade_retry(cfg, seed_state, policy, log_path, verbose):
+    """At most two complete searches, each with its own bounded budget and fresh caches.
+
+    Grade 60 is retained when feasible. Only its terminal strength/congestion
+    failure permits a Grade 80 search from the same original section seed.
+    Failed/error retry state is restored; no Grade 60 response is relabelled.
+    """
+    policy = policy or gs.SearchPolicy()
+    initial = float(sp.FY_KSI)
+    if cfg.materials.fy_ksi != initial:
+        raise ValueError("Search configuration and model longitudinal grades must agree.")
+    sp.require_a706(cfg.materials.reinforcement_specification, initial)
+    primary = gs.search(seed_state, cfg, policy, log_path=log_path, verbose=verbose)
+    terminal = next((e for e in reversed(primary["log"]) if e.get("phase") == "feasibility"), {})
+    triggers = gs.grade80_retry_reasons(terminal.get("evaluation") or {})
+    attempt = lambda search, grade, path: {
+        "grade_ksi": grade, "candidate_log": None if path is None else Path(path).name,
+        "found_candidate": search.get("final") is not None, "stop": search["stop"], "counts": search["counts"]}
+    decision = {"rule": gs.STEEL_GRADE_RETRY_RULE, "initial_grade_ksi": initial, "selected_grade_ksi": initial,
+                "attempted": False, "budget_basis": "max_feasibility_trials and max_reduction_trials apply per grade",
+                "scope": "one common beam/column longitudinal grade; hoops and slab mats remain Grade 60",
+                "attempts": [attempt(primary, initial, log_path)]}
+    primary["steel_grade_trial"] = decision
+    if primary["final"] is not None or initial != 60. or not policy.grade80_retry_on_limits or not triggers:
+        return primary, cfg
+    retry_path = None if log_path is None else Path(log_path).with_name(Path(log_path).stem + "_grade80.jsonl")
+    decision.update(attempted=True, trigger_candidate_index=terminal["index"], triggers=triggers, status="running")
+    audit_path = None if log_path is None else Path(log_path).with_name("grouped_steel_grade_trial.json")
+    if audit_path:
+        audit_path.write_text(json.dumps(decision, indent=2), encoding="utf-8")
+    if verbose:
+        print("[grouped] Grade 60 search ended at strength/congestion limits; full Grade 80 retry from original seed "
+              "with unchanged section cap and per-grade budgets", flush=True)
+    try:
+        with scratch_state():
+            sp.apply_reinforcement_grade(fy_ksi=80.)
+            retry_cfg = replace(cfg, materials=replace(cfg.materials, fy_ksi=80.,
+                                                       reinforcement_specification=sp.REINFORCEMENT_SPECIFICATION))
+            mg.clear()
+            sp.FLOOR_TRANSFER = sp.SLAB_REINFORCEMENT = sp.SLAB_ACTIONS = None
+            retry = gs.search(seed_state, retry_cfg, policy, log_path=retry_path, verbose=verbose)
+    except Exception as exc:
+        decision.update(status="error", error=f"{type(exc).__name__}: {exc}")
+        if audit_path:
+            audit_path.write_text(json.dumps(decision, indent=2), encoding="utf-8")
+        raise
+    selected = retry["final"] is not None
+    decision.update(status="candidate_found" if selected else "no_feasible_candidate",
+                    selected_grade_ksi=80. if selected else initial)
+    decision["attempts"].append(attempt(retry, 80., retry_path))
+    if audit_path:
+        audit_path.write_text(json.dumps(decision, indent=2), encoding="utf-8")
+    offset = len(primary["log"])
+    combined = {**retry, "steel_grade_trial": decision,
+                "log": [{**e, "longitudinal_grade_ksi": initial} for e in primary["log"]] +
+                       [{**e, "attempt_index": e["index"], "index": e["index"] + offset,
+                         "longitudinal_grade_ksi": 80.} for e in retry["log"]],
+                "counts": {key: value + primary["counts"][key] for key, value in retry["counts"].items()},
+                "elapsed_seconds": primary["elapsed_seconds"] + retry["elapsed_seconds"],
+                "tradeoffs": [{**t, "candidate_index": t["candidate_index"] + offset} for t in retry["tradeoffs"]]}
+    if selected:
+        sp.apply_reinforcement_grade(fy_ksi=80.)
+        gd.install_evaluation(retry["final"])
+        return combined, retry_cfg
+    return combined, cfg
+
+
 def design_grouped_structure(cfg, seed_state, seed, policy=None, log_path=None, identity=None, verbose=True):
     """Run the grouped search from a seed and return its record. Raises GroupedDesignNotFound with the search."""
-    search = gs.search(seed_state, cfg, policy, log_path=log_path, verbose=verbose)
+    search, cfg = _search_with_grade_retry(cfg, seed_state, policy, log_path, verbose)
     return build_record(search, cfg, seed, identity=identity, verbose=verbose)
 
 

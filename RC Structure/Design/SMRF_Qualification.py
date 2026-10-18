@@ -73,13 +73,17 @@ def reinforcement_consistency_checks(record):
             checks.append(not_evaluated(f"reinforcement.{prefix}_model_consistency",
                                         "Saved bar database / actual clear-cover geometry", str(exc)))
     aggregate = material.get("aggregate_size_in")
-    supported = (material.get("reinforcement_specification") == "ASTM A706 Grade 60"
+    import Structure_Parameters as _sp
+    grade = material.get("fy_ksi")
+    supported = (isinstance(grade, (float, int)) and not isinstance(grade, bool)
+                 and material.get("reinforcement_specification") == _sp.REINFORCEMENT_SPECIFICATION_BY_GRADE.get(float(grade))
                  and material.get("exposure") == "sheltered_interior"
-                 and material.get("fy_ksi") == material.get("fyt_ksi") == 60
+                 and material.get("fyt_ksi", 60) == 60
                  and isinstance(aggregate, (float, int)) and not isinstance(aggregate, bool)
                  and math.isfinite(aggregate) and aggregate > 0)
     checks.append(make_check("reinforcement.declared_material_scope",
-                             "Approved sheltered interior A706 Grade 60 research scope", int(supported), 1, "=="))
+                             "Approved sheltered interior research scope: ASTM A706 Grade 60 or 80 longitudinal bars "
+                             "(Grade 80 at story heights of 16 ft and more), A706 Grade 60 transverse steel", int(supported), 1, "=="))
     return checks
 
 

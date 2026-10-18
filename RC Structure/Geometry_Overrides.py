@@ -128,6 +128,9 @@ def apply_geometry_overrides(overrides, variant_name=None, emit=True):
 
     # Derived parameters that depend directly on geometry.
     sp.NUM_MODES = sp.NUM_FLOOR + 2
+    # The longitudinal bar grade follows the story height (user decision 2026-10-17): ASTM A706 Grade 80 at 16 ft and
+    # more, Grade 60 below; the specification is locked to the grade (Structure_Parameters.apply_reinforcement_grade).
+    sp.apply_reinforcement_grade(story_h_in=sp.STORY_H)
 
     name = geometry_name_from_overrides(overrides, explicit_name=variant_name)
     sp.GEOMETRY_VARIANT_NAME = name or "baseline"
@@ -136,6 +139,8 @@ def apply_geometry_overrides(overrides, variant_name=None, emit=True):
         summary = current_geometry_summary()
         print("\nApplied geometry variant:")
         print(f"  Name: {summary['geometry_variant']}")
+        print(f"  Longitudinal bars: {sp.REINFORCEMENT_SPECIFICATION} (fy {sp.FY_KSI:g} ksi; Grade 80 at story heights of "
+              f"{sp.LONGITUDINAL_GRADE_STORY_HEIGHT_FT:g} ft and more); transverse {sp.TRANSVERSE_SPECIFICATION}")
         print(
             f"  Plan: {summary['num_bay_x']} x {summary['num_bay_y']} bays "
             f"@ {summary['bay_x_in']:g} in x {summary['bay_y_in']:g} in"

@@ -459,10 +459,11 @@ def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
             "centroid_offset_in": {face: rows[face]["centroid_in"] for face in ("top", "bottom")}, "layers": rows}
     thickness = sp.SLAB_THICKNESS_IN if slab_thickness_in is None else slab_thickness_in
     flange = effective_flange(member, thickness)
-    family = composite_beam_strengths(beam, {"thickness_in": thickness}, layout, None, axis, position, flange=flange)
+    family = composite_beam_strengths(beam, {"thickness_in": thickness, "fy_ksi": fy_factor * sp.SLAB_FY_KSI},
+                                      layout, None, axis, position, flange=flange)
     edge = perimeter_beam(member)
     anchorage = perimeter_slab_bar_anchorage(layout, axis, edge.design.b_in, sp.BEAM_CLEAR_COVER_IN,
-                                             sp.rebar_diameter(edge.design.stirrup_bar_size), edge.design.fc_ksi, sp.FY_KSI)
+                                             sp.rebar_diameter(edge.design.stirrup_bar_size), edge.design.fc_ksi, sp.SLAB_FY_KSI)
     if anchorage is not None:
         anchorage = {**anchorage, "perimeter_beam_group": edge.group_id}
     hogging, sagging = family["mn_negative_kip_in"], family["mn_positive_kip_in"]

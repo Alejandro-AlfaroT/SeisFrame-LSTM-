@@ -54,10 +54,11 @@ from Design.Verification_Integrity import exclusive_lease, file_sha256          
 
 STAGES = ("design", "gravity_modal")
 # Grouping policies (Model.Member_Groups): the two-system policy of 2026-10-16 (perimeter special moment frames and an
-# interior gravity system, one design per tie) is the default; the story-band policy of 2026-10-02 stays available.
+# interior gravity system). Default: three-story system bands, user decision 2026-10-17.
 SYSTEM_GROUPING = "system_uniform_v1"
+DEFAULT_GROUPING = "system_three_story_v1"
 BAND_GROUPING = "story_pairs_from_base_orphan_merged__location_class_v1"
-GROUPINGS = (SYSTEM_GROUPING, BAND_GROUPING)
+GROUPINGS = (DEFAULT_GROUPING, SYSTEM_GROUPING, BAND_GROUPING)
 SUMMARY_NAME = "grouped_summary.md"
 FAILED_NAME = "grouped_search_failed.json"
 
@@ -88,7 +89,7 @@ def _find_case(manifest, case_id):
 
 def _seed(args):
     from Design import Grouped_Record as gr
-    grouping = getattr(args, "grouping", SYSTEM_GROUPING)
+    grouping = getattr(args, "grouping", DEFAULT_GROUPING)
     if args.seed_design:
         if args.seed_column or args.seed_beam:
             raise SystemExit("Give --seed-design or --seed-column/--seed-beam, not both.")
@@ -218,7 +219,8 @@ def run(args):
                                       "analysis_profile_id": sp.ANALYSIS_PROFILE_ID}
         cfg = probe_config(args.probe_date) if args.probe_assertions else DesignConfig.from_structure_parameters()
         seed_state, seed = _seed(args)
-        policy = gs.SearchPolicy(max_feasibility_trials=args.max_feasibility_trials, max_reduction_trials=args.max_reduction_trials)
+        policy = gs.SearchPolicy(max_feasibility_trials=args.max_feasibility_trials, max_reduction_trials=args.max_reduction_trials,
+                                 grade80_retry_on_limits=not getattr(args, "no_grade80_retry", False))
         identity = gr.grouped_request_identity(cfg, seed, policy, grouping_policy_id=seed_state.policy_id)
         result.update({"seed": seed, "search_policy": identity["search"], "request_sha256": identity["sha256"],
                        "group_count": identity["grouping"]["group_count"], "grouping_policy": seed_state.policy_id})
@@ -241,6 +243,7 @@ def run(args):
                     {key: value for key, value in search.items() if key != "final"}, indent=1, default=str), encoding="utf-8")
                 result.update({
                     "status": "no_feasible_design", "search_stop": search["stop"], "search_counts": search["counts"],
+                    "steel_grade_trial": search.get("steel_grade_trial"),
                     "numerical_completion": {"design": "completed_without_a_feasible_design",
                                              "design_search_stop_reason": search["stop"]["reason"],
                                              "design_search_budget_exhausted": search["stop"]["reason"] == "feasibility_budget_exhausted",
@@ -253,6 +256,8 @@ def run(args):
             write_summary(record, out_dir / SUMMARY_NAME)
             result.update({
                 "status": "designed", "created": created, "design_elapsed_s": time.perf_counter() - started,
+                "longitudinal_grade_ksi": record["materials"]["fy_ksi"],
+                "steel_grade_trial": record["search"].get("steel_grade_trial"),
                 "design_json_bytes": (out_dir / gr.ARTIFACT_NAME).stat().st_size,
                 "design_sha256": file_sha256(out_dir / gr.ARTIFACT_NAME),
                 "schema_version": record["schema_version"], "member_groups_sha256": record["member_groups"]["sha256"],
@@ -313,13 +318,16 @@ def build_parser():
     parser.add_argument("--seed-beam", nargs=3, type=float, metavar=("B", "H", "FC"), default=None,
                         help="Seed beam section for every beam group: b h fc (in, in, ksi).")
     parser.add_argument("--seed-design", default=None, help="A saved uniform design.json of the same case, expanded into its groups.")
-    parser.add_argument("--grouping", default=SYSTEM_GROUPING, choices=GROUPINGS,
+    parser.add_argument("--grouping", default=DEFAULT_GROUPING, choices=GROUPINGS,
                         help="Grouping policy: the two-system policy (perimeter special moment frames and an interior gravity "
-                             "system, one design per tie; default) or the story-band policy.")
+                             "system, one design per tie), three-story system bands (default), or the legacy story-band policy.")
     parser.add_argument("--max-feasibility-trials", type=int, required=True,
                         help="Complete candidate evaluations the feasibility phase may spend (part of the request identity).")
     parser.add_argument("--max-reduction-trials", type=int, required=True,
                         help="Complete candidate evaluations the reduction phase may spend (part of the request identity).")
+    parser.add_argument("--no-grade80-retry", action="store_true",
+                        help="Disable the default Grade 80 fallback after a failed Grade 60 strength/congestion search. "
+                             "Budgets apply separately to each grade; the story-height initial grade rule is unchanged.")
     parser.add_argument("--probe-assertions", action="store_true",
                         help="Fill the assertion blocks with labelled PROBE values; exercises the pipeline, verifies nothing.")
     parser.add_argument("--probe-date", default=None, help="YYYY-MM-DD assertion date; required with --probe-assertions.")

@@ -56,7 +56,7 @@ JOINT_RULE_CLAUSE = {JOINT_RULE_SFRS: "ACI 318-19 18.8.4",
 def joint_rule(entry, axis, state=None):
     """Which joint shear rule a joint direction follows: 18.8 for the SFRS, Chapter 15 outside it."""
     state = state or mg.active()
-    if state is None or state.policy_id != mg.SYSTEM_POLICY_ID:
+    if state is None or not mg.is_system_policy(state.policy_id):
         return JOINT_RULE_SFRS
     directions = mg.column_sfrs_directions(entry["grid_i"], entry["grid_j"], sp.NUM_BAY_X, sp.NUM_BAY_Y)
     return JOINT_RULE_SFRS if axis in directions else JOINT_RULE_GRAVITY
@@ -162,7 +162,7 @@ def beam_group_capacity(gid, state, transfers, sds):
             worst_ve = max(worst_ve, data["governing_ve_kip"])
             worst_mechanism = max(worst_mechanism, envelope["mechanism_shear_positive_kip"], envelope["mechanism_shear_negative_kip"])
     result = {"group_id": gid, "members": members, "effective_depth_in": d,
-              **cd.select_beam_hoops(design.b_in, d, design.fc_ksi, sp.FY_KSI, design.bar_size, sp.BEAM_CLEAR_COVER_IN,
+              **cd.select_beam_hoops(design.b_in, d, design.fc_ksi, sp.FYT_KSI, design.bar_size, sp.BEAM_CLEAR_COVER_IN,
                                      design.top_bars, design.bot_bars, worst_ve, worst_mechanism)}
     selected = result["hoops"]
     for data in members:
@@ -209,7 +209,7 @@ def column_group_capacity(gid, state, actions, cfg):
     local = {
         "geometry": {"story_h_in": sp.STORY_H, "num_floor": sp.NUM_FLOOR},
         "sections": {"b_col_in": design.b_in, "h_col_in": design.h_in, "fc_col_ksi": design.fc_ksi},
-        "materials": {"fy_ksi": sp.FY_KSI, "es_ksi": sp.ES_KSI},
+        "materials": {"fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FYT_KSI, "es_ksi": sp.ES_KSI, "slab_fy_ksi": sp.SLAB_FY_KSI},
         "column": {"bar_size": design.bar_size, "top_bars": design.top_bars, "bot_bars": design.bot_bars,
                    "side_bars": design.side_bars, "centroid_offset_in": mp.longitudinal_cover_in(design),
                    "clear_cover_in": sp.COL_CLEAR_COVER_IN, "stirrup_bar_size": design.stirrup_bar_size,
@@ -386,7 +386,7 @@ def joint_anchorage(entry, axis, column_hoop_bar):
     through = len(beams) == 2
     # embedment to the inside of the far hoop as built (the column bars in the hoop corners on the grid)
     available = depth - (mp.longitudinal_cover_in(core) - 0.5 * sp.rebar_diameter(core.bar_size))
-    required_through = max(20.0 * db, max(b.design.h_in for b in beams) / 2.0)
+    required_through = max(sp.through_joint_bar_depth_factor() * db, max(b.design.h_in for b in beams) / 2.0)   # 18.8.2.3
     return {"type_id": entry["type_id"], "axis": axis, "through_bars_present": through,
             "ldh_required_in": ldh, "embedment_available_in": available, "passes": through or ldh <= available,
             "hook": "standard 90-degree hook into the confined core, 18.8.5.1",
@@ -409,22 +409,8 @@ def joint_threading(entry, axis):
 
 def slab_mat_clashes(entry):
     """Crossing slab mats against the top bar layers of the beams at one joint (Design.SMRF_Cage_Geometry rule)."""
-    from Design.SMRF_Cage_Geometry import INTERLAYER_CLEAR_MIN_IN, bar_diameter
-    layout = (_layout() or {}).get("layers") or {}
-    mats, placed = [], bool(layout)
-    for name, layer in layout.items():
-        if not name.endswith("top") and not name.endswith("bottom"):
-            continue
-        if any(key not in layer for key in ("bar_size", "clear_cover_outer_mat_in", "layer", "axis")):
-            placed = False
-            continue
-        mat_db = bar_diameter(layer["bar_size"])
-        if name.endswith("top"):
-            depth = layer["clear_cover_outer_mat_in"] + mat_db / 2.0 + (0.0 if layer["layer"] == "outer" else mat_db)
-        else:
-            depth = (sp.SLAB_THICKNESS_IN - layer["clear_cover_outer_mat_in"] - mat_db / 2.0
-                     - (0.0 if layer["layer"] == "outer" else mat_db))
-        mats.append({"mat": name, "db_in": mat_db, "centroid_from_top_in": depth, "runs_along": layer["axis"]})
+    from Design.SMRF_Cage_Geometry import INTERLAYER_CLEAR_MIN_IN
+    mats, placed = bar_layers.slab_mats()
     clashes, tight = [], []
     for axis in ("x", "y"):
         if not entry["beams"][axis]:
@@ -677,7 +663,7 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
     checks.append(make_check("detailing.splices_designed", "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.2.7 / 25.5", 1, 1, "==",
                              details={"groups": splices}))
     gravity = None
-    if state.policy_id == mg.SYSTEM_POLICY_ID:
+    if mg.is_system_policy(state.policy_id):
         # Members not designated as part of the SFRS (ACI 318-19 18.14): branch per gravity group from the induced
         # actions of the compatibility run, and the detailing that branch asks of the hoops selected above.
         from Design.Perimeter_Systems import gravity_frame_evidence
@@ -730,7 +716,12 @@ def group_splices(state):
             fits = permitted and lap <= clear / 2.0
             result[gid] = {"class_b_lap_in": lap, "center_half_clear_height_in": clear / 2.0,
                            "lap_splice_permitted_25.5.1.1": permitted, "lap_splice_feasible": fits,
-                           "splice_type": "class_B_lap_center_half" if fits else "type_2_mechanical_18.2.7"}
+                           "splice_type": "class_B_lap_center_half" if fits else "type_2_mechanical_18.2.7",
+                           "longitudinal_grade_ksi": sp.FY_KSI,
+                           "splice_rule": ("Class B lap in the centre half of the clear height (18.7.4.4)" if fits else
+                                           "Type 2 mechanical splice (ACI 318-19 18.2.7; Class S in 318-25): "
+                                           + ("lap splices are not permitted for bars larger than No. 11 (25.5.1.1)" if not permitted
+                                              else "the Class B lap does not fit the centre half of the clear height"))}
         else:
             rows = bar_layers.group_rows(gid)
             clear = min(mp.beam_clear_span_in(state.member(tag)) for tag in group["member_tags"])
@@ -738,10 +729,17 @@ def group_splices(state):
                                                            top_bar=design.h_in - rows["top"]["offsets_in"][0] > 12.0)
             lap_bot = 1.3 * cd.straight_development_length(design.bar_size, design.fc_ksi, sp.FY_KSI, top_bar=False)
             available = clear - 4.0 * design.h_in
-            fits = max(lap_top, lap_bot) <= available
+            permitted = int(design.bar_size) <= 11                                   # 25.5.1.1
+            fits = permitted and max(lap_top, lap_bot) <= available
             result[gid] = {"class_b_lap_top_in": lap_top, "class_b_lap_bottom_in": lap_bot,
-                           "available_between_hinge_zones_in": available, "lap_splice_feasible": fits,
-                           "splice_type": "class_B_lap_outside_hinge_zones" if fits else "type_2_mechanical_18.2.7"}
+                           "available_between_hinge_zones_in": available,
+                           "lap_splice_permitted_25.5.1.1": permitted, "lap_splice_feasible": fits,
+                           "splice_type": "class_B_lap_outside_hinge_zones" if fits else "type_2_mechanical_18.2.7",
+                           "longitudinal_grade_ksi": sp.FY_KSI,
+                           "splice_rule": ("Class B lap outside 2h of the joint faces with hoops over the lap (18.6.3.3)" if fits else
+                                           "Type 2 mechanical splice (ACI 318-19 18.2.7; Class S in 318-25): "
+                                           + ("lap splices are not permitted for bars larger than No. 11 (25.5.1.1)" if not permitted
+                                              else "the Class B lap does not fit between the hinge zones"))}
     return result
 
 

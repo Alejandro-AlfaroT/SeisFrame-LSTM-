@@ -454,7 +454,7 @@ def _col_candidates(Ast_lo, Ast_hi, cfg=None, threading=False):
                 # a 3-bar face can carry runs out before the spacing floor.
                 # Such a layout is never detailable, so it is not offered.
                 if sp.SLAB_THICKNESS_IN is not None and not column_layout_confinable(
-                        sp.B_COL, sp.H_COL, sp.FC_COL_KSI, sp.FY_KSI, sp.COL_CLEAR_COVER_IN, n_top, n_side_pf):
+                        sp.B_COL, sp.H_COL, sp.FC_COL_KSI, sp.FYT_KSI, sp.COL_CLEAR_COVER_IN, n_top, n_side_pf):
                     continue
                 if not (Ast_lo <= Ast <= Ast_hi):
                     continue
@@ -505,7 +505,7 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
     for bar_size in cfg.rebar.bar_sizes_beam:
         Ab = sp.rebar_area(bar_size)
         db = sp.rebar_diameter(bar_size)
-        if through_depth is not None and 20.0 * db > through_depth:
+        if through_depth is not None and sp.through_joint_bar_depth_factor() * db > through_depth:      # 18.8.2.3 by grade
             continue
         # Lateral cover to the bar centre for the spacing across the width; the depth uses the worst
         # face offset once the orthogonal cages stack at the joints and the lanes force a second
@@ -542,7 +542,8 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
                 # against 1.25 on the nominal depth).
                 code_min = max(code_min, _beam_As_min(sp.FC_BEAM_KSI, sp.FY_KSI, sp.B_BEAM,
                                                       sp.H_BEAM - sp.longitudinal_cover_in("beam", bar_size)))
-            if d <= 0 or As_top > 0.025 * sp.B_BEAM * d:
+            rho_cap = min(sp.beam_rho_max_code(), getattr(cfg.rebar, "rho_beam_practical_max", 0.025))   # 18.6.3.1 by grade; 0.015 ceiling
+            if d <= 0 or As_top > rho_cap * sp.B_BEAM * d:
                 continue
             if not (max(As_top_lo, code_min) <= As_top <= As_top_hi):
                 continue
@@ -550,7 +551,7 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
                 if cfg.rebar.beam_symmetric and n_bot != n_top:
                     continue
                 As_bot = n_bot * Ab
-                if n_bot < 2 or As_bot > 0.025 * sp.B_BEAM * d:
+                if n_bot < 2 or As_bot > rho_cap * sp.B_BEAM * d:
                     continue
                 if sp.SLAB_THICKNESS_IN is not None and threading:
                     fit_bot = min(sp.beam_bars_per_layer(bar_size, n_bot).values())

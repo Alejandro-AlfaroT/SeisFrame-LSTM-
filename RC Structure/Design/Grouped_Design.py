@@ -69,7 +69,7 @@ class CandidateInfeasible(Exception):
 
 # ---- slab and floors --------------------------------------------------------------------------------------
 def _slab_policy(cfg, minimum_thickness_in=None):
-    policy = {**asdict(cfg.slab), "fy_ksi": sp.FY_KSI, "concrete_unit_weight_kcf": sp.CONCRETE_UNIT_WEIGHT_KCF}
+    policy = {**asdict(cfg.slab), "fy_ksi": sp.SLAB_FY_KSI, "concrete_unit_weight_kcf": sp.CONCRETE_UNIT_WEIGHT_KCF}
     if minimum_thickness_in is not None:
         policy["minimum_thickness_in"] = minimum_thickness_in
     return policy

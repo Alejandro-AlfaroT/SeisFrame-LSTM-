@@ -127,16 +127,18 @@ def _beta1(fc_ksi):
     return max(0.65, min(0.85, 0.85 - 0.05 * (fc_ksi - 4.0)))
 
 
-def _phi_PM(eps_t):
+def _phi_PM(eps_t, fy_ksi=None):
     """
-    ACI 318-19 Table 21.2.2 – tied column φ factor.
-    Transitions from 0.65 (compression-controlled) to 0.90 (tension-controlled).
+    ACI 318-19 Table 21.2.2 (21.2.2.1): tied column φ factor, 0.65 at or below eps_ty = fy / Es
+    (compression-controlled) and 0.90 at or above eps_ty + 0.003 (tension-controlled); the
+    limits follow the longitudinal grade.
     """
-    if eps_t <= 0.002:
+    eps_ty = sp.steel_yield_strain(fy_ksi)
+    if eps_t <= eps_ty:
         return 0.65
-    elif eps_t >= 0.005:
+    elif eps_t >= eps_ty + 0.003:
         return 0.90
-    return 0.65 + (eps_t - 0.002) / 0.003 * 0.25
+    return 0.65 + (eps_t - eps_ty) / 0.003 * 0.25
 
 
 PHI_FLEX  = 0.90
@@ -234,7 +236,7 @@ def build_column_PM_diagram(n_pts=120):
             Mn    += F_i * (hc - d_i)
 
         eps_t = ecu * (dt - c) / c
-        phi   = _phi_PM(eps_t)
+        phi   = _phi_PM(eps_t, fy)
         diagram.append((phi * Pn, phi * abs(Mn)))
 
     return diagram
@@ -333,7 +335,7 @@ def check_shear(Vu, Nu, bw, d, fc, Av, s, lambda_=1.0, h=None):
     Vc     = max(0.0, (2.0 * lambda_ * math.sqrt(fc_psi) + nu_psi) * bw * d / 1000.0)
     Vc     = min(Vc, 5.0 * lambda_ * math.sqrt(fc_psi) * bw * d / 1000.0)
 
-    Vs     = min(Av * sp.FY_KSI * d / s, 8.0 * math.sqrt(fc_psi) * bw * d / 1000.0)
+    Vs     = min(Av * sp.FYT_KSI * d / s, 8.0 * math.sqrt(fc_psi) * bw * d / 1000.0)   # hoops: A706 Grade 60
     phi_Vn = PHI_SHEAR * (Vc + Vs)
 
     dcr = Vu / phi_Vn if phi_Vn > 1e-6 else 999.0

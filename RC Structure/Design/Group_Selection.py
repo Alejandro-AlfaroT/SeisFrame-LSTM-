@@ -59,7 +59,7 @@ def _scwb_axes(state, member):
     """The directions in which 18.7.3.2 applies at this column's joints: both under the band policy (every frame is
     part of the SFRS); under the system policy the perimeter-frame directions of the column
     (Model.Member_Groups.column_sfrs_directions), none for an interior column."""
-    if state.policy_id != mg.SYSTEM_POLICY_ID:
+    if not mg.is_system_policy(state.policy_id):
         return ("x", "y")
     directions = mg.column_sfrs_directions(member.grid_i, member.grid_j, sp.NUM_BAY_X, sp.NUM_BAY_Y)
     return tuple(axis for axis in ("x", "y") if axis in directions)
@@ -70,7 +70,7 @@ def _beam_units(state):
     the system policy."""
     ties = state.ties()
     if ties:
-        return [(tie, tuple(gids)) for tie, gids in sorted(ties.items()) if mg.SYSTEM_DESIGN_TIES[tie]["member_type"] == "beam"]
+        return [(tie, tuple(gids)) for tie, gids in sorted(ties.items()) if mg.tie_spec(tie)["member_type"] == "beam"]
     return [(gid, (gid,)) for gid in sorted(g for g, group in state.groups.items() if group["member_type"] != "column")]
 
 
@@ -79,7 +79,7 @@ def _column_units(state):
     locations of each column tie under the system policy."""
     if state.ties():
         return [(tie, tuple(spec["locations"])) for tie, spec in mg.SYSTEM_DESIGN_TIES.items()
-                if spec["member_type"] == "column" and tie in state.ties()]
+                if spec["member_type"] == "column" and any(mg.tie_kind(t) == tie for t in state.ties())]
     return [(location, (location,)) for location in mg.COLUMN_LOCATIONS]
 
 
@@ -123,7 +123,7 @@ def column_cage_candidates(design, cfg, rho_max=None):
                     continue
                 if max(n_top, n_side + 2) > COLUMN_MAX_TIED_FACE_BARS:
                     continue
-                if not column_layout_confinable(b, h, design.fc_ksi, sp.FY_KSI, sp.COL_CLEAR_COVER_IN, n_top, n_side):
+                if not column_layout_confinable(b, h, design.fc_ksi, sp.FYT_KSI, sp.COL_CLEAR_COVER_IN, n_top, n_side):
                     continue
                 result.append(replace(design, bar_size=bar_size, top_bars=n_top, bot_bars=n_top, side_bars=n_side))
     return result
@@ -133,8 +133,8 @@ def beam_cage_candidates(design, cfg, through_depth_in=None):
     """Beam cages of the declared domain for one section (bar size and counts; hoops unchanged)."""
     result = []
     for bar_size in cfg.rebar.bar_sizes_beam:
-        if through_depth_in is not None and 20.0 * sp.rebar_diameter(bar_size) > through_depth_in:
-            continue                                                    # 18.8.2.3: through-bar joint depth
+        if through_depth_in is not None and sp.through_joint_bar_depth_factor() * sp.rebar_diameter(bar_size) > through_depth_in:
+            continue                                                    # 18.8.2.3: 20 db (Grade 60) or 26 db (Grade 80)
         for n_top in cfg.rebar.beam_n_iter():
             for n_bot in ((n_top,) if cfg.rebar.grouped_beam_symmetric else cfg.rebar.beam_n_iter()):
                 if n_top < 2 or n_bot < 2:
@@ -160,7 +160,7 @@ def _beam_through_depth(state, gid):
     return min(depths) if depths else None
 
 
-def evaluate_beam_candidate(state, gid, candidate, demand, cfg):
+def evaluate_beam_candidate(state, gid, candidate, demand, cfg, representatives=None):
     """Price one beam cage in its place: rows from the layering, code limits, governing flexural DCR.
 
     ``demand`` = (largest sagging, largest hogging moment over the group's members and combinations).
@@ -192,12 +192,21 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg):
     except ValueError as exc:
         return {"admissible": False, "reason": str(exc)}
     strengths = checks.beam_flexural_strengths(design, rows)
+    with mg.installed(trial):
+        tags = representatives if representatives is not None else checks.beam_group_representatives(trial, gid)
+        resolved = [checks.resolved_beam_flexural_strengths(trial.member(tag), rows) for tag in tags]
+    if any(not value[sign].get("tension_controlled", True) for value in resolved for sign in ("positive", "negative")):
+        return {"admissible": False, "reason": "composite beam is not tension controlled (9.3.3.1)"}
+    for sign in ("positive", "negative"):
+        strengths[sign]["phi_mn_kip_in"] = min(value[sign]["phi_mn_kip_in"] for value in resolved)
     d = min(strengths["positive"]["d_in"], strengths["negative"]["d_in"])
     ab = sp.rebar_area(design.bar_size)
     as_top, as_bot = design.top_bars * ab, design.bot_bars * ab
     as_min = max(strengths["positive"]["as_min_in2"], strengths["negative"]["as_min_in2"])
-    if d <= 0 or max(as_top, as_bot) > 0.025 * design.b_in * d:
-        return {"admissible": False, "reason": "steel ratio above 0.025 (18.6.3.1)"}
+    rho_cap = min(sp.beam_rho_max_code(), getattr(cfg.rebar, "rho_beam_practical_max", 0.025))
+    if d <= 0 or max(as_top, as_bot) > rho_cap * design.b_in * d:
+        return {"admissible": False, "reason": f"steel ratio above {rho_cap:g} (18.6.3.1 at {sp.beam_rho_max_code():g} for "
+                                               f"Grade {sp.FY_KSI:g}; the selection ceiling of 2026-10-17)"}
     if min(as_top, as_bot) < as_min:
         return {"admissible": False, "reason": "below minimum steel (9.6.1.2)"}
 
@@ -205,13 +214,19 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg):
         a = area * sp.FY_KSI / (0.85 * design.fc_ksi * design.b_in)
         return area * sp.FY_KSI * (d - a / 2.0)
 
-    mn_pos, mn_neg = nominal(as_bot), nominal(as_top)
-    if min(mn_pos, mn_neg) <= 0 or mn_pos < 0.5 * mn_neg or min(mn_pos, mn_neg) < 0.25 * max(mn_pos, mn_neg):
-        return {"admissible": False, "reason": "end reversal or along-span strength balance (18.6.3.2)"}
+    for value in resolved:
+        sections = value.get("nominal_sections") or {end: {"positive": nominal(as_bot), "negative": nominal(as_top)}
+                                                    for end in ("i", "j", "span")}
+        maximum = max(moment for end, section in sections.items() if end != "span" for moment in section.values())
+        if (any(section["positive"] < 0.5 * section["negative"] for end, section in sections.items() if end != "span")
+                or min(moment for section in sections.values() for moment in section.values()) <= 0
+                or min(moment for section in sections.values() for moment in section.values()) < 0.25 * maximum):
+            return {"admissible": False, "reason": "end reversal or along-span strength balance (18.6.3.2)"}
     mu_pos, mu_neg = demand
     dcr = max(mu_pos / strengths["positive"]["phi_mn_kip_in"], mu_neg / strengths["negative"]["phi_mn_kip_in"])
     return {"admissible": True, "threads": threads, "layers": max(rows["top"]["layers"], rows["bottom"]["layers"]),
-            "dcr": dcr, "steel_in2": as_top + as_bot, "reason": None}
+            "dcr": dcr, "steel_in2": as_top + as_bot, "reason": None,
+            "strength_basis": checks.BEAM_STRENGTH_BASIS if sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
 
 
 def select_beam_group(state, gid, actions, cfg):
@@ -238,15 +253,18 @@ def select_beam_groups(state, gids, actions, cfg):
     priced = []
     with mg.installed(state):
         depths = [_beam_through_depth(state, gid) for gid in gids]
+        representatives = {gid: checks.beam_group_representatives(state, gid) for gid in gids}
     through = min((d for d in depths if d is not None), default=None)
     for candidate in beam_cage_candidates(current, cfg, through):
-        results = [evaluate_beam_candidate(state, gid, replace(candidate, member_type=state.groups[gid]["member_type"]), demand, cfg)
+        results = [evaluate_beam_candidate(state, gid, replace(candidate, member_type=state.groups[gid]["member_type"]), demand, cfg,
+                                           representatives[gid])
                    for gid in gids]
         if all(r["admissible"] for r in results):
             priced.append((candidate, _merge_beam_results(results)))
     report = {"group_id": gids[0] if len(gids) == 1 else None, "groups": list(gids),
               "demand_mu_positive_kip_in": demand[0], "demand_mu_negative_kip_in": demand[1],
-              "candidates_admissible": len(priced), "through_bar_depth_in": through}
+              "candidates_admissible": len(priced), "through_bar_depth_in": through,
+              "strength_basis": checks.BEAM_STRENGTH_BASIS if sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
     if not priced:
         return current, {**report, "status": "no_admissible_cage", "exhausted": True,
                          "detail": "no cage of the declared domain satisfies the code limits in this section"}

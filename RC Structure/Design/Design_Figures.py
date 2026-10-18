@@ -407,7 +407,9 @@ def _figure_joint(record, out, label, notes):
         ax.plot([X2 - Lb, X2 + hc + Lb], [zb, zb], color="black", lw=1.6)
     ax.annotate("", (X2, hb / 2 + 4), (X2 + hc, hb / 2 + 4), arrowprops=dict(arrowstyle="<->", lw=0.9))
     through = anch.get("through_bar_depth_required_in")
-    ax.text(X2 + hc / 2, hb / 2 + 5.5, f"h = {hc:g} in" + (f"\n(20db = {through:g} in needed)" if through else ""), ha="center", va="bottom", fontsize=7.5)
+    import Structure_Parameters as _sp
+    factor = through / _sp.rebar_diameter(int(r["beam_bar_size"])) if through else None       # 20 (Grade 60) or 26 (Grade 80)
+    ax.text(X2 + hc / 2, hb / 2 + 5.5, f"h = {hc:g} in" + (f"\n({factor:.0f}db = {through:g} in needed)" if through else ""), ha="center", va="bottom", fontsize=7.5)
     ax.text(X2 + hc / 2, -hb / 2 - Lc - 3, "Interior joint: beam bars continuous through the joint\n"
             "(18.8.2.3); one bar family per direction", ha="center", va="top", fontsize=8)
     ax.set_xlim(X1 - 4, X2 + hc + Lb + 4); ax.set_ylim(-hb / 2 - Lc - 14, hb / 2 + Lc + 2)

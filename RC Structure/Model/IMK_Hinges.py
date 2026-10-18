@@ -124,11 +124,11 @@ def beam_yield_moments(member_type, n_i, n_j):
     # .beam_slab_strengths), and the elastic spine already carries the T/L
     # section; a hinge priced on thickness 0 was weaker in sagging than the
     # design assumed (2026-09-21).
-    slab = {"thickness_in": sp.SLAB_THICKNESS_IN}
+    slab = {"thickness_in": sp.SLAB_THICKNESS_IN, "fy_ksi": sp.SLAB_FY_KSI}
     geometry = {"bay_x_in": sp.BAY_X, "bay_y_in": sp.BAY_Y, "h_col_in": sp.H_COL, "b_col_in": sp.B_COL}
     family = composite_beam_strengths(beam, slab, layout, geometry, axis, position)
     anchorage = perimeter_slab_bar_anchorage(layout, axis, sp.B_BEAM, sp.BEAM_CLEAR_COVER_IN,
-                                             sp.rebar_diameter(sp.BEAM_STIRRUP_BAR_SIZE), sp.FC_BEAM_KSI, sp.FY_KSI)
+                                             sp.rebar_diameter(sp.BEAM_STIRRUP_BAR_SIZE), sp.FC_BEAM_KSI, sp.SLAB_FY_KSI)
     hogging, sagging = family["mn_negative_kip_in"], family["mn_positive_kip_in"]
     undeveloped = layout is not None and anchorage is not None and not anchorage["developed"]
     # An exterior end whose slab bars are not developed at the perimeter

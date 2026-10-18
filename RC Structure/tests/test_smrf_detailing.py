@@ -101,7 +101,9 @@ class DetailingTests(unittest.TestCase):
                        {"spacing_step_in": True}, {"minimum_spacing_in": math.inf}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 select_transverse_geometry(example(), **kwargs)
-        for field, value in (("fy_ksi", 80), ("normalweight", False)):
+        # Grade 80 joined the scope on 2026-10-17 (A706 Grade 80 at story heights of 16 ft and more); Grade 100 and
+        # odd grades stay outside it.
+        for field, value in (("fy_ksi", 100), ("fy_ksi", 75), ("normalweight", False)):
             data = example()
             data["material"][field] = value
             with self.assertRaises(ValueError):

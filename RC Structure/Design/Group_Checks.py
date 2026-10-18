@@ -10,8 +10,9 @@ action is assembled from unrelated extrema.
 The formulas are the uniform ones with the section passed in:
   columns  phi P-M about each axis from ACI_Checks.pm_diagram_for (the sweep build_pm_diagram uses), the
            axial cap, and the load-contour interaction; analysis shear with ACI_Checks.check_shear;
-  beams    phi Mn = 0.9 As fy (d - a/2) per face with d from the group's own bar rows
-           (Model.Member_Bar_Layers), analysis shear with check_shear on the smaller depth.
+  beams    member-resolved T/L section strengths, actual bar rows and developed slab mats;
+           undeveloped exterior mats are excluded and the weakest end/span section is used
+           against the full-span envelope; analysis shear uses check_shear on the smaller depth.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ import openseespy.opensees as ops
 import Structure_Parameters as sp
 from Design.ACI_Checks import (DOMAIN_FAILURE_DCR, PHI_FLEX, _interpolate_pm_capacity, axial_demand_ratio, axial_limits,
                                check_shear, pm_diagram_for)
+from Design.SMRF_Beam_Steel import beam_face_steel_limits
 from Model import Member_Bar_Layers as bar_layers
 from Model import Member_Groups as mg
 from Model import Member_Properties as mp
@@ -204,7 +206,7 @@ def column_group_strength(design, rows, alpha=1.5):
             best_pm = {**pm, "member_tag": tag, "combination": combination, "axial_kip": p, "my_kip_in": my, "mz_kip_in": mz}
         vu = math.hypot(vy, vz)
         shear = check_shear(vu, p, bw=design.b_in, d=design.h_in - cover, fc_ksi=design.fc_ksi, Av=av,
-                            s=design.stirrup_spacing_in, fy_ksi=sp.FY_KSI, h=design.h_in)
+                            s=design.stirrup_spacing_in, fy_ksi=sp.FYT_KSI, h=design.h_in)
         if best_shear is None or shear.dcr > best_shear["dcr"]:
             best_shear = {"dcr": shear.dcr, "vu_kip": vu, "phi_vn_kip": shear.capacity, "member_tag": tag,
                           "combination": combination, "axial_kip": p}
@@ -229,39 +231,136 @@ def beam_demand_rows(tags, actions):
 
 
 def beam_flexural_strengths(design, rows):
-    """phi Mn (sagging, hogging) and the effective depths of one beam design on its bar rows."""
+    """Web-only reference and web-steel minimums; production slab-aware checks use the resolved helper below."""
     ab, fy, fc, b = sp.rebar_area(design.bar_size), sp.FY_KSI, design.fc_ksi, design.b_in
     result = {}
     for face, count, name in (("bottom", design.bot_bars, "positive"), ("top", design.top_bars, "negative")):
-        d = design.h_in - rows[face]["centroid_in"]
-        steel = count * ab
+        limits = beam_face_steel_limits(b_in=b, h_in=design.h_in, fc_ksi=fc, fy_ksi=fy,
+                                       bar_area_in2=ab, count=count, rows=rows[face])
+        d, steel, as_min = limits["d_in"], limits["as_in2"], limits["as_min_in2"]
         a = steel * fy / (0.85 * fc * b)
-        fc_psi, fy_psi = fc * 1000.0, fy * 1000.0
-        as_min = max(3.0 * math.sqrt(fc_psi) / fy_psi, 200.0 / fy_psi) * b * d
         result[name] = {"phi_mn_kip_in": max(PHI_FLEX * steel * fy * (d - a / 2.0), 1e-9), "d_in": d, "as_in2": steel,
                         "as_min_in2": as_min, "min_controlled": steel <= as_min * 1.01}
     return result
 
 
-def beam_group_strength(design, rows, bar_rows):
+BEAM_STRENGTH_BASIS = "member_composite_t_l_actual_rows_developed_mats_v1"
+
+
+def beam_section_context(member):
+    """Geometry/anchorage equivalence key within an installed group's fixed cage and slab layout.
+
+    Used only in local call caches, never across changed designs or slab layouts. Member tags are
+    deliberately absent: an exterior end, a different adjacent web, or a different joint core changes
+    the key even where the members belong to the same design group.
+    """
+    if sp.SLAB_THICKNESS_IN is None:
+        return ("no_slab",)
+    flange = mp.effective_flange(member)
+    edge = mp.perimeter_beam(member).design
+    return (flange["flange_width_in"], flange["clear_span_in"], flange["slab_sides"],
+            tuple((o["overhang_in"], o["clear_to_adjacent_web_in"]) for o in flange["overhangs"]),
+            tuple(mp.exterior_ends(member).items()), edge.b_in, edge.fc_ksi, edge.stirrup_bar_size)
+
+
+def beam_group_representatives(state, gid):
+    """One member tag per distinct flange/anchorage context, for pricing candidate cages efficiently."""
+    representatives = {}
+    for tag in state.groups[gid]["member_tags"]:
+        representatives.setdefault(beam_section_context(state.member(tag)), tag)
+    return tuple(representatives.values())
+
+
+def resolved_beam_flexural_strengths(member, rows):
+    """Design strength of the same section used by capacity design, at each end and within the span.
+
+    The available action record contains full-span maxima, not moments paired with their x coordinate.
+    Applying the weakest available section to that envelope is conservative; exterior anchorage is
+    never inferred from an interior section. Web minimum/maximum-steel rules remain on the web bars.
+    """
+    design = member.design
+    result = beam_flexural_strengths(design, rows)
+    if sp.SLAB_THICKNESS_IN is None:
+        return result
+    section = mp.beam_strengths(member)
+    family = section["family"]
+    anchorage = section["basis"]["exterior_anchorage"]
+    exterior = mp.exterior_ends(member)
+    nominal_sections = {}
+    for where in ("i", "j", "span"):
+        undeveloped = where != "span" and exterior[where] and anchorage is not None and not anchorage["developed"]
+        nominal_sections[where] = family["undeveloped" if undeveloped else "composite"]
+    for sign in ("positive", "negative"):
+        choices = []
+        for where, sections in nominal_sections.items():
+            value = sections[sign]
+            # Table 21.2.2, nonprestressed tied section: do not grant the tension-controlled
+            # phi to a composite section solely because its web-only steel ratio was small.
+            strain = value["tension_strain"]
+            transition = min(1.0, max(0.0, (strain - sp.FY_KSI / sp.ES_KSI) / 0.003))
+            phi = 0.65 + (PHI_FLEX - 0.65) * transition
+            choices.append({"section": where, "phi": phi, "mn_kip_in": value["mn_kip_in"],
+                            "phi_mn_kip_in": phi * value["mn_kip_in"], "tension_strain": strain,
+                            "tension_controlled": value["tension_controlled"]})
+        governing = min(choices, key=lambda c: c["phi_mn_kip_in"])
+        result[sign].update({**governing, "basis": BEAM_STRENGTH_BASIS,
+                             "tension_controlled": all(c["tension_controlled"] for c in choices),
+                             "effective_flange_width_in": family["effective_flange_width_in"],
+                             "slab_sides": family["slab_sides"], "section_capacities": choices})
+    result["nominal_sections"] = {where: {sign: values[sign]["mn_kip_in"] for sign in ("positive", "negative")}
+                                  for where, values in nominal_sections.items()}
+    result["basis"] = section["basis"]
+    return result
+
+
+def beam_group_strength(design, rows, bar_rows, state=None):
     """Governing flexure (each sign) and analysis-shear DCR of one beam design over its group's demand rows."""
     strengths = beam_flexural_strengths(design, bar_rows)
-    d = min(strengths["positive"]["d_in"], strengths["negative"]["d_in"])
+    cache, by_member = {}, {}
     av = design.stirrup_legs * sp.rebar_area(design.stirrup_bar_size)
     best = {"positive": None, "negative": None, "shear": None}
     for tag, combination, mu_pos, mu_neg, vu in rows:
+        if state is not None and tag not in by_member:
+            member = state.member(tag)
+            key = beam_section_context(member)
+            if key not in cache:
+                cache[key] = resolved_beam_flexural_strengths(member, bar_rows)
+            by_member[tag] = cache[key]
+        current = by_member[tag] if state is not None else strengths
+        d = min(current["positive"]["d_in"], current["negative"]["d_in"])
         for sign, mu in (("positive", mu_pos), ("negative", mu_neg)):
-            dcr = mu / strengths[sign]["phi_mn_kip_in"] if mu > 0.0 else 0.0
+            dcr = mu / current[sign]["phi_mn_kip_in"] if mu > 0.0 else 0.0
+            if not current[sign].get("tension_controlled", True):
+                # The zero-axial-force beam section must satisfy 9.3.3.1. Reducing phi alone
+                # cannot make a non-tension-controlled composite beam an accepted design.
+                dcr = max(dcr, DOMAIN_FAILURE_DCR)
             if best[sign] is None or dcr > best[sign]["dcr"]:
-                best[sign] = {"dcr": dcr, "mu_kip_in": mu, "phi_mn_kip_in": strengths[sign]["phi_mn_kip_in"],
-                              "member_tag": tag, "combination": combination}
+                best[sign] = {"dcr": dcr, "mu_kip_in": mu, "phi_mn_kip_in": current[sign]["phi_mn_kip_in"],
+                              "member_tag": tag, "combination": combination,
+                              "strength_basis": current[sign].get("basis", "rectangular_no_slab"),
+                              "tension_controlled": current[sign].get("tension_controlled", True),
+                              "section": current[sign].get("section")}
         shear = check_shear(vu, 0.0, bw=design.b_in, d=d, fc_ksi=design.fc_ksi, Av=av, s=design.stirrup_spacing_in,
-                            fy_ksi=sp.FY_KSI)
+                            fy_ksi=sp.FYT_KSI)
         if best["shear"] is None or shear.dcr > best["shear"]["dcr"]:
             best["shear"] = {"dcr": shear.dcr, "vu_kip": vu, "phi_vn_kip": shear.capacity, "member_tag": tag,
                              "combination": combination}
     return {"flexure_positive": best["positive"], "flexure_negative": best["negative"], "shear": best["shear"],
-            "strengths": strengths, "observations": len(rows)}
+            "strengths": ({sign: by_member[best[sign]["member_tag"]][sign] for sign in ("positive", "negative")}
+                          if by_member else strengths), "observations": len(rows),
+            "strength_basis": BEAM_STRENGTH_BASIS if state is not None and sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
+
+
+def beam_detailing_strengths(member, rows):
+    """Nominal (not phi-reduced) end/span strengths for the 18.6.3.2 detailing checks."""
+    values = resolved_beam_flexural_strengths(member, rows)
+    sections = values.get("nominal_sections") or {
+        end: {sign: values[sign]["phi_mn_kip_in"] / PHI_FLEX for sign in ("positive", "negative")}
+        for end in ("i", "j", "span")}
+    return {**{f"mn_{sign}_{label}_kipin": sections[end][sign]
+               for end, label in (("i", "left"), ("j", "right")) for sign in ("positive", "negative")},
+            **{f"mn_{sign}_min_along_kipin": min(s[sign] for s in sections.values())
+               for sign in ("positive", "negative")}}
 
 
 # ---- every group of the installed design ----------------------------------------------------------------------
@@ -289,7 +388,7 @@ def strength_checks(actions, cfg, state=None):
             worst["column"] = max(worst["column"], result["pm"]["dcr"], result["shear"]["dcr"])
             groups[gid] = {"member_type": "column", **result}
         else:
-            result = beam_group_strength(design, beam_demand_rows(tags, actions), arrangement[gid])
+            result = beam_group_strength(design, beam_demand_rows(tags, actions), arrangement[gid], state)
             worst["beam"] = max(worst["beam"], result["flexure_positive"]["dcr"], result["flexure_negative"]["dcr"],
                                 result["shear"]["dcr"])
             groups[gid] = {"member_type": design.member_type, **result}

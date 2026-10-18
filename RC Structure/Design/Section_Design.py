@@ -46,7 +46,8 @@ import math
 # Capped at 32 in (user decision 2026-10-16, with the perimeter-frame basis): the tallest structure of the
 # population is 162 ft and the lever order is concrete strength, then reinforcement, then section size, so a
 # column is never offered beyond 32 in for now: 1 in from 14 to 24, then 2 in from 24 to 32.
-COLUMN_SIZE_CAP_IN = 32.0
+# User decision 2026-10-17: raise the cap to 40 in while allowing three-story system bands.
+COLUMN_SIZE_CAP_IN = 40.0
 COLUMN_SIZES_IN = tuple(float(size) for size in (*range(14, 25), *range(26, int(COLUMN_SIZE_CAP_IN) + 1, 2)))
 
 # ACI 318-19 18.6.2.1(b) uses min(0.3h, 10 in). The ladder's
