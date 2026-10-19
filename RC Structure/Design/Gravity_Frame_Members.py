@@ -116,8 +116,16 @@ def hoop_spacing_limit_in(smallest_bar_db_in):
                HOOP_SPACING_ABSOLUTE_MAX_IN)
 
 
-def beam_requirements(branch, d_in, smallest_bar_db_in, pu_kip=0.0, ag_in2=None, fc_ksi=None):
-    """What 18.14.3 asks of a gravity beam in ``branch``: transverse kind and spacing, the provisions that apply."""
+STIRRUP_SPACING_ABSOLUTE_MAX_IN = 24.0        # Table 9.7.6.2.2: d/2 and 24 in with Vs <= 4 sqrt(f'c) bw d
+STIRRUP_SPACING_HIGH_SHEAR_MAX_IN = 12.0      # Table 9.7.6.2.2: d/4 and 12 in above it
+
+
+def beam_requirements(branch, d_in, smallest_bar_db_in, pu_kip=0.0, ag_in2=None, fc_ksi=None,
+                      vs_required_kip=None, vs_four_root_fc_kip=None):
+    """What 18.14.3 asks of a gravity beam in ``branch``: transverse kind and spacing, the provisions that apply.
+
+    ``vs_required_kip`` and ``vs_four_root_fc_kip`` (4 sqrt(f'c) bw d) select the Table 9.7.6.2.2 row: d/2 and
+    24 in, or d/4 and 12 in where the required Vs exceeds 4 sqrt(f'c) bw d; without them the 18.14.3.2(a) d/2 holds."""
     if branch not in BRANCHES:
         raise ValueError(f"branch must be one of {BRANCHES}, got {branch!r}.")
     d = _number(d_in, "d_in", positive=True)
@@ -129,9 +137,15 @@ def beam_requirements(branch, d_in, smallest_bar_db_in, pu_kip=0.0, ag_in2=None,
     if axial_hoops:
         transverse = {"kind": "hoops per 18.7.5.2", "spacing_max_in": hoop_spacing_limit_in(smallest_bar_db_in),
                       "basis": "18.14.3.2(a): Pu above Ag f'c / 10"}
+    elif (vs_required_kip is not None and vs_four_root_fc_kip is not None
+          and _number(vs_required_kip, "vs_required_kip") > _number(vs_four_root_fc_kip, "vs_four_root_fc_kip")):
+        transverse = {"kind": "closed stirrups per 25.7.1 throughout the length",
+                      "spacing_max_in": min(d / 4.0, STIRRUP_SPACING_HIGH_SHEAR_MAX_IN),
+                      "basis": "18.14.3.2(a) throughout the length; Table 9.7.6.2.2 d/4 and 12 in with Vs above 4 sqrt(f'c) bw d"}
     else:
-        transverse = {"kind": "stirrups or hoops per 25.7", "spacing_max_in": d / 2.0,
-                      "basis": "18.14.3.2(a): throughout the length at not more than d/2"}
+        transverse = {"kind": "closed stirrups per 25.7.1 throughout the length",
+                      "spacing_max_in": min(d / 2.0, STIRRUP_SPACING_ABSOLUTE_MAX_IN),
+                      "basis": "18.14.3.2(a): throughout the length at not more than d/2 (Table 9.7.6.2.2: and 24 in)"}
     provisions = ["18.6.3.1 longitudinal limits", "transverse reinforcement throughout (18.14.3.2(a))"]
     if branch == BRANCH_YIELDING:
         provisions += ["18.6.5 design shear from the probable moments (18.14.3.3(b))",
@@ -189,7 +203,8 @@ def evaluate_gravity_beam(location, induced, strengths, section, detailing):
     try:
         branch = induced_branch(induced, strengths)
         need = beam_requirements(branch["branch"], section["d_in"], detailing["smallest_bar_db_in"],
-                                 pu_kip=section.get("pu_kip", 0.0), ag_in2=section.get("ag_in2"), fc_ksi=section.get("fc_ksi"))
+                                 pu_kip=section.get("pu_kip", 0.0), ag_in2=section.get("ag_in2"), fc_ksi=section.get("fc_ksi"),
+                                 vs_required_kip=strengths.get("vs_required_kip"), vs_four_root_fc_kip=strengths.get("vs_four_root_fc_kip"))
     except (KeyError, TypeError, ValueError) as exc:
         return [not_evaluated("gravity.beam_compatibility_branch", "ACI 318-19 18.14.3.1", str(exc), location)]
     checks.append(make_check("gravity.beam_compatibility_branch", "ACI 318-19 18.14.3.1 / 18.14.2.1", 1, 1, "==", location=location,

@@ -193,6 +193,36 @@ class AnchorageAndJointShearTests(unittest.TestCase):
         self.assertEqual(result["demand"], 170)
         self.assertEqual(result["status"], "not_evaluated")
 
+    def test_gravity_joint_uses_075_not_smrf_phi(self):
+        data = {"rule": "chapter_15", "steel_stress_factor": 1.0, "beam_moment_basis": "nominal (fy)",
+                "probable_face_forces_complete": True, "column_shear_consistent_with_mpr": True,
+                "beam_face_forces_kip": [120, 100], "column_shear_kip": 70, "nominal_vn_kip": 200,
+                "capacity_basis": "ACI318-19_Table15.4.2.3 (Table 18.8.4.3 row, conservative)",
+                "capacity_topology_and_confinement_checked": True, "evidence_complete": True,
+                "unevaluated_evidence": []}
+        before = copy.deepcopy(data)
+        check = joint_shear_check(data)
+        self.assertEqual(data, before)
+        self.assertEqual(check["status"], "pass")
+        self.assertEqual(check["capacity"], 150)
+        self.assertEqual(check["details"]["phi"], 0.75)
+        self.assertIn("15.4.1.1(b)", check["clause"])
+        # 160 kip would pass at .85; it must fail at the Chapter 15 value.
+        data["column_shear_kip"] = 60
+        self.assertEqual(joint_shear_check(data)["status"], "fail")
+        for change in ({"rule": "18.8"}, {"rule": "unknown"}, {"rule": []},
+                       {"steel_stress_factor": 1.25}, {"beam_moment_basis": None},
+                       {"capacity_topology_and_confinement_checked": False},
+                       {"evidence_complete": False}, {"unevaluated_evidence": ["column continuity"]},
+                       {"probable_face_forces_complete": False}, {"column_shear_consistent_with_mpr": False},
+                       {"nominal_vn_kip": float("nan")}, {"capacity_basis": "unsupported"}):
+            with self.subTest(change=change):
+                result = joint_shear_check({**before, **change})
+                self.assertEqual(result["status"], "not_evaluated")
+                json.dumps(result, allow_nan=False)
+        missing_rule = {k: v for k, v in before.items() if k != "rule"}
+        self.assertEqual(joint_shear_check(missing_rule)["status"], "not_evaluated")
+
     def test_missing_groups_do_not_make_empty_passing_checklist(self):
         checks = evaluate_joints({})
         self.assertEqual(len(checks), 4)

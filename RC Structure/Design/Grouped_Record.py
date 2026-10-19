@@ -72,9 +72,11 @@ LIMITATIONS = (
     "Concrete grades step up before any section grows (strength, then reinforcement, then size; Design.Grouped_Search) "
     "and are not stepped back down after a size grows: no size is shown to be a minimum, and no geometry infeasible, "
     "over the full material domain.",
-    "Under the system policy the gravity members keep the special-frame hoops the capacity design selects (conservative "
-    "for ACI 318-19 18.14); the Chapter 15 joint strength of a joint direction outside the SFRS uses the Table 18.8.4.3 "
-    "row of the same joint (at or below the Table 15.4.2.3 value).",
+    "Under the system policy the gravity beams carry closed stirrups throughout the length at not more than d/2 "
+    "(ACI 318-19 18.14.3.2(a), Table 9.7.6.2.2) sized for the 18.6.5 shear, and the gravity columns keep 18.7.5 in full "
+    "(18.14.3.3(c)); the 18.6.4 hinge-zone and 18.6.3.2 strength-balance rules are not applied to gravity beams; the "
+    "Chapter 15 joint strength of a joint direction outside the SFRS uses the Table 18.8.4.3 row of the same joint (at or "
+    "below the Table 15.4.2.3 value).",
     "One column concrete grade and one beam concrete grade for the whole frame; group-specific grades are not available.",
     "Square columns; opposite sides of the plan share a group; the recorded story-band rule is a research policy, not a code rule.",
     "The story-strength model is provisional (review item M1); vertical strength regularity is recorded, not established.",
@@ -244,6 +246,11 @@ def group_detailing(state, capacity):
             groups[gid] = {"hoop_spacing_in": design.stirrup_spacing_in, "clear_height_in": clear,
                            "end_zone_length_in": max(design.b_in, design.h_in, clear / 6.0, 18.0),
                            "hx_in": confinement.get("hx_in"), "zone_origin": "joint_face"}
+        elif capacity_design.is_gravity_beam_group(state, gid):
+            groups[gid] = {"hoop_spacing_in": design.stirrup_spacing_in, "end_zone_length_in": 2.0 * design.h_in,
+                           "first_hoop_distance_in": 2.0, "zone_origin": "joint_face",
+                           "transverse_basis": "closed stirrups throughout the length at <= d/2 (18.14.3.2(a)); "
+                                               "the end-zone geometry is recorded, not a hinge-zone rule"}
         else:
             groups[gid] = {"hoop_spacing_in": design.stirrup_spacing_in, "end_zone_length_in": 2.0 * design.h_in,
                            "first_hoop_distance_in": 2.0, "zone_origin": "joint_face"}
@@ -386,6 +393,7 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
                    "stop_reason": (search["stop"] or {}).get("reason"), "stop_detail": (search["stop"] or {}).get("detail"),
                    "counts": search["counts"], "elapsed_seconds": search["elapsed_seconds"],
                    "steel_grade_trial": search.get("steel_grade_trial"),
+                   "sfrs_layout_trial": search.get("sfrs_layout_trial"),
                    "candidates": search["log"], "tradeoffs": search["tradeoffs"],
                    "interpretation": search["interpretation"]},
         "legacy_uniform_summary": _legacy_summary(state),
@@ -595,6 +603,11 @@ def group_detailing_checks(record, state, capacity):
     PAIR_IDS = {"beam.clear_span", "beam.column_projection"}
     OPEN_IDS = {"column.confinement_area_and_support", "beam.hoop_layout_and_axial_applicability",
                 "detailing.anchorage_splices_and_cover"}
+    # A beam outside the seismic force-resisting system (ACI 318-19 18.14.3.2(a), 2026-10-18) answers to 18.6.3.1 and
+    # the bar-fit rules, not to the 18.6.4 hinge-zone hoops or the 18.6.3.2 strength balance; its transverse steel is
+    # checked by Gravity_Frame_Members (gravity.beam_transverse_spacing).
+    SFRS_ONLY_BEAM_IDS = {"beam.end_hoop_spacing", "beam.end_zone_length", "beam.first_hoop", "beam.reversal_balance",
+                          "beam.span_strength", "beam.continuity_and_strength_balance"}
 
     def inputs_of(design, gid):
         values = {"b_in": design.b_in, "h_in": design.h_in, "fc_ksi": design.fc_ksi,
@@ -632,8 +645,11 @@ def group_detailing_checks(record, state, capacity):
             result = evaluate_detailing({"material": scope, "geometry": geometry, "beam": own,
                                          "column": inputs_of(core.design, core.group_id)})
             prefix = "beam."
+        gravity_beam = capacity_design.is_gravity_beam_group(state, gid)
         for check in result:
             name = check["id"]
+            if gravity_beam and name in SFRS_ONLY_BEAM_IDS:
+                continue
             if name == "detailing.material_scope":
                 if not scope_done:
                     checks.append(check)
@@ -643,7 +659,7 @@ def group_detailing_checks(record, state, capacity):
                 continue
             location = check.get("location") or ""
             checks.append({**check, "location": f"{gid}/{location}" if location else gid})
-        if not design.is_column:
+        if not design.is_column and not gravity_beam:
             # A group may include interior spans and exterior ends with different mat anchorage.
             # Price every distinct context; the first member's section cannot certify all of them.
             for tag in group_checks.beam_group_representatives(state, gid)[1:]:
@@ -801,7 +817,7 @@ def _qualification_checks(record, state):
     checks.append(next(c for c in reinforcement_consistency_checks({"materials": record["materials"]})
                        if c["id"] == "reinforcement.declared_material_scope"))
 
-    if state.policy_id == mg.SYSTEM_BANDED_POLICY_ID:
+    if mg.is_banded_policy(state.policy_id):
         size_problems = mg.section_order_problems(state)
         checks.append(make_check("grouped.vertical_section_size_order", "User design basis 2026-10-17: no upward section growth",
                                  int(not size_problems), 1, "==", details={"problems":size_problems,
@@ -1059,9 +1075,121 @@ def _search_with_grade_retry(cfg, seed_state, policy, log_path, verbose):
     return combined, cfg
 
 
+def _search_with_layout_ladder(cfg, seed_state, seed, policy, log_path, verbose, search=None):
+    """The grade-retry search under the seed's layout and, when it finds no design, under each next layout of the
+    ladder (perimeter, core ring, core lines; user direction 2026-10-18), the same sections re-seeded under the next
+    policy, each attempt with its own budget, grade retry and candidate log. Only an explicit-section seed of a system
+    policy on a frame of at least 3 bays per direction climbs; the decision is recorded as search["sfrs_layout_trial"].
+    ``search`` is the per-layout search (tests inject one)."""
+    search = search or _search_with_grade_retry
+    policy = policy or gs.SearchPolicy()
+
+    def attempt(result, policy_id, path):
+        from Design.Section_Design import column_size_cap_in
+        cap = column_size_cap_in(mg.layout_of(policy_id))
+        terminal = next((e for e in reversed(result.get("log") or []) if e.get("phase") == "feasibility"), {})
+        sections = ((terminal.get("evaluation") or {}).get("sections") or {})
+        at_cap = sorted(gid for gid, s in sections.items() if "__column__" in gid and max(s["b_in"], s["h_in"]) >= cap - 1e-9)
+        return {"grouping_policy": policy_id, "sfrs_layout": mg.layout_of(policy_id), "column_size_cap_in": cap,
+                "columns_at_cap_in_last_candidate": at_cap,
+                "candidate_log": None if path is None else Path(path).name,
+                "found_candidate": result.get("final") is not None, "stop": result["stop"], "counts": result["counts"],
+                "error": result.get("error")}
+
+    def failed_attempt(exc):
+        """A search that raised: no candidate, the error recorded, so the ladder can go on to the next layout."""
+        return {"version": gs.SEARCH_VERSION, "final": None, "log": [], "counts": {}, "elapsed_seconds": 0.0, "tradeoffs": [],
+                "stop": {"reason": "attempt_error", "detail": f"{type(exc).__name__}: {exc}"}, "error": f"{type(exc).__name__}: {exc}"}
+
+    def run(state, path):
+        try:
+            return search(cfg, state, policy, path, verbose)
+        except Exception as exc:                                             # noqa: BLE001 - recorded, not hidden
+            if verbose:
+                print(f"[grouped] the {mg.layout_of(state.policy_id)} attempt raised {type(exc).__name__}: {exc}", flush=True)
+            return failed_attempt(exc), cfg
+
+    result, cfg_out = run(seed_state, log_path)
+    decision = {"rule": gs.SFRS_LAYOUT_LADDER_RULE, "initial_policy": seed_state.policy_id,
+                "selected_policy": seed_state.policy_id, "attempted": False, "ladder": list(mg.SFRS_LAYOUT_LADDER),
+                "budget_basis": "max_feasibility_trials and max_reduction_trials apply per layout (and per grade within it)",
+                "restart_basis": ("each next layout is re-seeded from the original seed sections, never from the sections the "
+                                  "failed layout grew to: with more frames the members start small again, the feasibility "
+                                  "phase grows only what the new system needs and the reduction phase then steps the groups "
+                                  "down (user direction 2026-10-18)"),
+                "trigger_basis": ("the perimeter-only layout stops at 32 in columns (Section_Design.PERIMETER_COLUMN_SIZE_CAP_IN); "
+                                  "at the cap the concrete grades (lever order) and the column reinforcement up to the 18.7.4.1 "
+                                  "limit are exhausted first; a search that still finds no design climbs the ladder"),
+                "attempts": [attempt(result, seed_state.policy_id, log_path)]}
+    logs = [[{**e, "grouping_policy": seed_state.policy_id} for e in result["log"]]]
+    elapsed = [float(result.get("elapsed_seconds") or 0.0)]
+    state = seed_state
+    while result.get("final") is None:
+        if not policy.sfrs_layout_ladder_on_no_design:
+            decision["stop"] = "ladder disabled by the search policy"
+            break
+        if (seed or {}).get("kind") != "explicit_uniform_sections":
+            decision["stop"] = "the ladder needs an explicit-section seed"
+            break
+        nxt = mg.layout_ladder_next(state.policy_id)
+        if nxt is None:
+            decision["stop"] = "top of the layout ladder, or a policy outside it"
+            break
+        if sp.NUM_BAY_X < 3 or sp.NUM_BAY_Y < 3:
+            decision["stop"] = "the core layouts need at least 3 bays in each direction"
+            break
+        decision.update(attempted=True, status="running")
+        retry_path = None if log_path is None else Path(log_path).with_name(f"{Path(log_path).stem}_{mg.layout_of(nxt)}.jsonl")
+        if verbose:
+            print(f"[grouped] no design under {state.policy_id}; the original seed sections {seed['column']} / {seed['beam']} "
+                  f"are searched again under {nxt} ({mg.layout_of(nxt)}) with its own budget; the grown sections of the "
+                  "failed layout are discarded", flush=True)
+        with scratch_state():
+            mg.clear()
+            sp.FLOOR_TRANSFER = sp.SLAB_REINFORCEMENT = sp.SLAB_ACTIONS = None
+            state, _description = seed_from_sections(seed["column"], seed["beam"], policy_id=nxt)
+            result, cfg_out = run(state, retry_path)
+        decision["attempts"].append(attempt(result, nxt, retry_path))
+        logs.append([{**e, "grouping_policy": nxt} for e in result["log"]])
+        elapsed.append(float(result.get("elapsed_seconds") or 0.0))
+    found = result.get("final") is not None
+    errors = [a for a in decision["attempts"] if a.get("error")]
+    decision.update(selected_policy=state.policy_id if found else seed_state.policy_id,
+                    status="candidate_found" if found else "no_feasible_candidate",
+                    attempt_errors=[{"grouping_policy": a["grouping_policy"], "error": a["error"]} for a in errors])
+    if not found and errors and len(errors) == len(decision["attempts"]):
+        raise RuntimeError("every layout attempt raised: " + "; ".join(f"{a['grouping_policy']}: {a['error']}" for a in errors))
+    if len(logs) > 1:
+        combined, offset = [], 0
+        for entries in logs:
+            combined.extend({**e, "attempt_index": e["index"], "index": e["index"] + offset} for e in entries)
+            offset += len(entries)
+        counts = {}
+        for a in decision["attempts"]:
+            for key, value in a["counts"].items():
+                counts[key] = counts.get(key, 0) + value
+        selected_offset = offset - len(logs[-1])
+        result = {**result, "log": combined, "counts": counts, "elapsed_seconds": sum(elapsed),
+                  "tradeoffs": [{**t, "candidate_index": t["candidate_index"] + selected_offset} for t in result["tradeoffs"]]}
+        # The selected layout's Grade 60 trigger now lives in the combined log.
+        # Keep the per-layout decision/log objects in their original index space.
+        grade_trial = result.get("steel_grade_trial")
+        if grade_trial and "trigger_candidate_index" in grade_trial:
+            result["steel_grade_trial"] = {**grade_trial,
+                "trigger_candidate_index": grade_trial["trigger_candidate_index"] + selected_offset}
+        if found and cfg_out is not None and isinstance(result["final"], dict) and "evidence" in result["final"]:
+            # scratch_state restored the preceding attempt, including its grade and
+            # slab. Record construction needs the winning evaluation's full state.
+            # (An injected test search returns a bare final without evidence or cfg; nothing to install then.)
+            sp.apply_reinforcement_grade(fy_ksi=cfg_out.materials.fy_ksi)
+            gd.install_evaluation(result["final"])
+    result["sfrs_layout_trial"] = decision
+    return result, cfg_out
+
+
 def design_grouped_structure(cfg, seed_state, seed, policy=None, log_path=None, identity=None, verbose=True):
     """Run the grouped search from a seed and return its record. Raises GroupedDesignNotFound with the search."""
-    search, cfg = _search_with_grade_retry(cfg, seed_state, policy, log_path, verbose)
+    search, cfg = _search_with_layout_ladder(cfg, seed_state, seed, policy, log_path, verbose)
     return build_record(search, cfg, seed, identity=identity, verbose=verbose)
 
 

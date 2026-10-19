@@ -236,8 +236,56 @@ def graded_face_levels_between(bay_length_in, left_width_in, right_width_in, lev
     return [coarse, base, fine, finest][:levels]
 
 
+def graded_mixed_face_levels(length, widths, levels=RECIPE_LEVELS, recipe=GRADED_FACE_V1):
+    """One nested interior pattern with explicit anchors for every physical face.
+
+    A tensor grid needs all widths on a mixed line, but does not need a second
+    clear-span recipe for each width. Grade from the centerline to the innermost
+    face, retain every intervening face, then grade once from the outermost
+    face to midspan. The fine level bisects every cell; the finest level also
+    bisects the band covering all faces. No face is averaged, snapped or lost.
+    Single-width inputs retain the original recipe exactly.
+    """
+    distinct = sorted(set(widths))
+    if not distinct:
+        raise ValueError("Mixed face recipe requires at least one beam width")
+    # Reuse the original domain checks, including the level and quarter-bay limits.
+    for width in distinct:
+        graded_face_levels(length, width, levels, recipe)
+    if len(distinct) == 1:
+        return graded_face_levels(length, distinct[0], levels, recipe)
+    faces = [w / 2.0 for w in distinct]
+    inner, outer = faces[0], faces[-1]
+    half_span = length / 2.0
+    near = [inner * f for f in recipe["near_face_fractions_of_face"]]
+    beyond = [outer + u * ((half_span - outer) / recipe["beyond_face_units_of_113"][-1])
+              for u in recipe["beyond_face_units_of_113"]]
+    beyond[-1] = half_span
+    half = [0.0] + near + faces + beyond
+    # Original half indices: 0=centerline, 1/2=near, 3=face, 4 onward=clear span.
+    coarse_half = [0.0] + faces + [beyond[i - 4] for i in recipe["coarse_half_indices"] if i >= 4]
+    mirror = lambda row: sorted(set(row) | {length - x for x in row})
+    coarse, base = mirror(coarse_half), mirror(half)
+    fine = sorted(set(base) | {(a + b) / 2.0 for a, b in zip(base, base[1:])})
+    lo_index, hi_index = recipe["fine_band_half_indices"]
+    inner_half = [0.0] + near + [inner] + beyond
+    outer_half = [0.0] + near + [outer] + beyond
+    lo, hi = inner_half[lo_index], outer_half[hi_index]
+    finest = sorted(set(fine) | {(a + b) / 2.0 for a, b in zip(fine, fine[1:])
+                                if lo <= (a + b) / 2.0 <= hi
+                                or length - hi <= (a + b) / 2.0 <= length - lo})
+    # Fail explicitly for physically indistinguishable faces; never merge real faces.
+    return [_offsets(row, length, "mixed face recipe") for row in (coarse, base, fine, finest)][:levels]
+
+
 def _by_bay_levels(length, widths, levels, recipe):
     """Per level, the offsets of every bay along one axis; ``widths`` are the beams at the bay boundaries."""
+    if any(isinstance(w, list) for w in widths):
+        # Repeat a single interior pattern with all physical face anchors. Keeping
+        # equal cell counts preserves tensor indexing without unioning whole recipes.
+        distinct = sorted({v for w in widths for v in (w if isinstance(w, list) else [w])})
+        plan = graded_mixed_face_levels(length, distinct, levels, recipe)
+        return [[list(row) for _ in range(len(widths) - 1)] for row in plan]
     bays = [graded_face_levels_between(length, widths[k], widths[k + 1], levels, recipe) for k in range(len(widths) - 1)]
     return [[bay[level] for bay in bays] for level in range(len(bays[0]))]
 
@@ -301,9 +349,13 @@ def _resolve_recipe_plan_by_line(geometry, sections, policy):
     else:
         from Design.SMRF_Floor_Sections import face_widths
         widths = face_widths(sections, nx, ny)
-    widths = {axis: [float(w) for w in widths[axis]] for axis in ("x", "y")}
+    widths = {axis: [[float(v) for v in w] if isinstance(w, list) else float(w) for w in widths[axis]]
+              for axis in ("x", "y")}
     if len(widths["x"]) != nx + 1 or len(widths["y"]) != ny + 1:
         raise ValueError("Recipe face widths need one beam width for every beam line")
+    if any(isinstance(w, list) and len(w) != (ny if axis == "x" else nx)
+           for axis in ("x", "y") for w in widths[axis]):
+        raise ValueError("Recipe mixed face widths need one width per transverse span")
     xs = _by_bay_levels(lx, widths["x"], policy["levels"], RECIPES[name])
     ys = _by_bay_levels(ly, widths["y"], policy["levels"], RECIPES[name])
     resolved, dropped = [], []
@@ -362,20 +414,29 @@ def witness_face_band_extension(geometry, recipe_inputs, coarse_actions, fine_ac
         widths = recipe_inputs.get("face_widths_in")
         if widths is None:
             widths = {a: [recipe_inputs["beam_width_in"]] * (bays[a] + 1) for a in ("x", "y")}
-        widths = {a: [float(w) for w in widths[a]] for a in ("x", "y")}
+        widths = {a: [[float(v) for v in w] if isinstance(w, list) else float(w) for w in widths[a]] for a in ("x", "y")}
+        def values(width):
+            return width if isinstance(width, list) else [width]
+        def at_panel(axis, line, panel):
+            width = widths[axis][line]
+            return width[panel["y" if axis == "x" else "x"]] if isinstance(width, list) else width
         bands = {}
         for axis in ("x", "y"):
             length = lengths[axis]
             if (len(widths[axis]) != bays[axis] + 1 or not math.isfinite(length) or length <= 0
-                    or any(not math.isfinite(w) or not 0 < w < length / 2 for w in widths[axis])):
+                    or any(not math.isfinite(w) or not 0 < w < length / 2 for entry in widths[axis] for w in values(entry))):
                 raise ValueError("Local face refinement requires finite, supported bay and beam-face geometry")
             bands[axis] = []
             for left, right in zip(widths[axis], widths[axis][1:]):
                 def near(width):
                     face = width / 2.0
                     return (face * (4.0 / 7.0), face + 8.0 * ((length / 2.0 - face) / 113.0))
-                left_band, right_band = near(left), near(right)
-                bands[axis].append((left_band, (length - right_band[1], length - right_band[0])))
+                bands[axis].append(tuple(near(w) for w in values(left)) +
+                                   tuple((length - near(w)[1], length - near(w)[0]) for w in values(right)))
+            if any(isinstance(w, list) for w in widths[axis]):
+                # Same shared face grid in each bay: identical bands retain tensor indexing.
+                union = tuple(sorted({band for row in bands[axis] for band in row}))
+                bands[axis] = [union] * bays[axis]
         failed = [row for row in comparison["comparisons"] if row["within_tolerance"] is not True]
         if not failed or comparison["all_within_tolerance"] is True:
             raise ValueError("An extension needs a completed failed comparison")
@@ -415,9 +476,10 @@ def witness_face_band_extension(geometry, recipe_inputs, coarse_actions, fine_ac
                     near_bands = bands[axis][k]
                     if not any(lo - 1e-8 <= pos <= hi + 1e-8 for lo, hi in near_bands):
                         continue
-                    faces = (widths[axis][k] / 2.0, length - widths[axis][k + 1] / 2.0)
+                    pair = [at_panel(axis, k, panel), at_panel(axis, k + 1, panel)]
+                    faces = (pair[0] / 2.0, length - pair[1] / 2.0)
                     score = min(abs(pos - face) / (length / 2.0 - width / 2.0)
-                                for face, width in zip(faces, widths[axis][k:k + 2]))
+                                for face, width in zip(faces, pair))
                     candidates.append({"axis": axis, "score": score, "rank_score": round(score, 12),
                                        "panel_id": row["panel_id"], "strip_axis": row["axis"],
                                        "face": row["face"], "metric": row["metric"], "side": side,

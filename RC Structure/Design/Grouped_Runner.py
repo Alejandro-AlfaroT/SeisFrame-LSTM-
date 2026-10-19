@@ -58,7 +58,16 @@ STAGES = ("design", "gravity_modal")
 SYSTEM_GROUPING = "system_uniform_v1"
 DEFAULT_GROUPING = "system_three_story_v1"
 BAND_GROUPING = "story_pairs_from_base_orphan_merged__location_class_v1"
-GROUPINGS = (DEFAULT_GROUPING, SYSTEM_GROUPING, BAND_GROUPING)
+# Perimeter + centered core SMRF (user proposal 2026-10-18): every case starts on the perimeter three-story policy
+# ("auto" resolves to it, Member_Groups.default_system_policy); the layout ladder of the search adds the core ring and
+# then the full core lines only when the perimeter frames find no design.
+CORE_GROUPING = "system_perimeter_core_v1"
+CORE_BANDED_GROUPING = "system_perimeter_core_three_story_v1"
+CORE_LINES_GROUPING = "system_perimeter_core_lines_v1"
+CORE_LINES_BANDED_GROUPING = "system_perimeter_core_lines_three_story_v1"
+AUTO_GROUPING = "auto"
+GROUPINGS = (DEFAULT_GROUPING, SYSTEM_GROUPING, BAND_GROUPING, CORE_BANDED_GROUPING, CORE_GROUPING,
+             CORE_LINES_BANDED_GROUPING, CORE_LINES_GROUPING, AUTO_GROUPING)
 SUMMARY_NAME = "grouped_summary.md"
 FAILED_NAME = "grouped_search_failed.json"
 
@@ -218,6 +227,10 @@ def run(args):
                                       "joint_model": sp.JOINT_MODEL, "member_material": sp.IMK_MATERIAL_TYPE,
                                       "analysis_profile_id": sp.ANALYSIS_PROFILE_ID}
         cfg = probe_config(args.probe_date) if args.probe_assertions else DesignConfig.from_structure_parameters()
+        if getattr(args, "grouping", None) == AUTO_GROUPING:
+            from Model import Member_Groups as _mg
+            args.grouping = _mg.default_system_policy(case.get("seismic_site"))
+            print(f"Grouping auto: {args.grouping} for site {case.get('seismic_site')}")
         seed_state, seed = _seed(args)
         policy = gs.SearchPolicy(max_feasibility_trials=args.max_feasibility_trials, max_reduction_trials=args.max_reduction_trials,
                                  grade80_retry_on_limits=not getattr(args, "no_grade80_retry", False))
@@ -244,6 +257,7 @@ def run(args):
                 result.update({
                     "status": "no_feasible_design", "search_stop": search["stop"], "search_counts": search["counts"],
                     "steel_grade_trial": search.get("steel_grade_trial"),
+                    "sfrs_layout_trial": search.get("sfrs_layout_trial"),
                     "numerical_completion": {"design": "completed_without_a_feasible_design",
                                              "design_search_stop_reason": search["stop"]["reason"],
                                              "design_search_budget_exhausted": search["stop"]["reason"] == "feasibility_budget_exhausted",
@@ -258,6 +272,8 @@ def run(args):
                 "status": "designed", "created": created, "design_elapsed_s": time.perf_counter() - started,
                 "longitudinal_grade_ksi": record["materials"]["fy_ksi"],
                 "steel_grade_trial": record["search"].get("steel_grade_trial"),
+                "sfrs_layout_trial": record["search"].get("sfrs_layout_trial"),
+                "grouping_policy_selected": record["member_groups"]["policy"]["id"],
                 "design_json_bytes": (out_dir / gr.ARTIFACT_NAME).stat().st_size,
                 "design_sha256": file_sha256(out_dir / gr.ARTIFACT_NAME),
                 "schema_version": record["schema_version"], "member_groups_sha256": record["member_groups"]["sha256"],

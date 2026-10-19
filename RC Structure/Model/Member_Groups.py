@@ -63,12 +63,79 @@ SYSTEMS = (SYSTEM_SFRS, SYSTEM_GRAVITY)
 # beam and one interior beam, each the same at every story.
 SYSTEM_POLICY_ID = "system_uniform_v1"
 SYSTEM_BANDED_POLICY_ID = "system_three_story_v1"
+# The seismic force-resisting layout of a system policy (user proposal 2026-10-18): the four perimeter frames alone, or
+# the perimeter frames plus a centered core ring, the frames around the middle bay (odd bay count) or the two middle
+# bays (even bay count) in each direction. The core ring's beams and the columns at its nodes join the SFRS; a column
+# on a core side resists the direction of that side, a core corner both. The lines inside the ring stay gravity.
+SFRS_LAYOUT_PERIMETER = "perimeter"
+SFRS_LAYOUT_PERIMETER_CORE = "perimeter_core"
+SYSTEM_CORE_POLICY_ID = "system_perimeter_core_v1"
+SYSTEM_CORE_BANDED_POLICY_ID = "system_perimeter_core_three_story_v1"
+# The third layout (user direction 2026-10-18, "more walls if needed, around the core"): the frames on the core's
+# bounding grid lines run the full width of the building, so two more frames per direction join the perimeter and
+# no beam of one group meets a beam of another in line.
+SFRS_LAYOUT_PERIMETER_CORE_LINES = "perimeter_core_lines"
+SYSTEM_CORE_LINES_POLICY_ID = "system_perimeter_core_lines_v1"
+SYSTEM_CORE_LINES_BANDED_POLICY_ID = "system_perimeter_core_lines_three_story_v1"
+SFRS_LAYOUT_LADDER = (SFRS_LAYOUT_PERIMETER, SFRS_LAYOUT_PERIMETER_CORE, SFRS_LAYOUT_PERIMETER_CORE_LINES)
+_LAYOUT_POLICIES = {False: {SFRS_LAYOUT_PERIMETER: SYSTEM_POLICY_ID, SFRS_LAYOUT_PERIMETER_CORE: SYSTEM_CORE_POLICY_ID,
+                            SFRS_LAYOUT_PERIMETER_CORE_LINES: SYSTEM_CORE_LINES_POLICY_ID},
+                    True: {SFRS_LAYOUT_PERIMETER: SYSTEM_BANDED_POLICY_ID, SFRS_LAYOUT_PERIMETER_CORE: SYSTEM_CORE_BANDED_POLICY_ID,
+                           SFRS_LAYOUT_PERIMETER_CORE_LINES: SYSTEM_CORE_LINES_BANDED_POLICY_ID}}
 SYSTEM_DESIGN_TIES = {
-    "sfrs_column": {"member_type": "column", "locations": ("corner", "x_boundary_edge", "y_boundary_edge"), "system": SYSTEM_SFRS},
+    "sfrs_column": {"member_type": "column", "locations": ("corner", "x_boundary_edge", "y_boundary_edge", "core_corner", "core_edge"),
+                    "system": SYSTEM_SFRS},
     "gravity_column": {"member_type": "column", "locations": ("interior",), "system": SYSTEM_GRAVITY},
-    "sfrs_beam": {"member_type": "beam", "locations": ("edge",), "system": SYSTEM_SFRS},
+    "sfrs_beam": {"member_type": "beam", "locations": ("edge", "core"), "system": SYSTEM_SFRS},
     "gravity_beam": {"member_type": "beam", "locations": ("interior",), "system": SYSTEM_GRAVITY},
 }
+
+
+def core_lines(bays):
+    """The two grid lines bounding the centered core in one direction: the middle bay for an odd bay count, the two
+    middle bays for an even count (the figure of 2026-10-18). Needs at least 3 bays, else the ring would lie on the
+    perimeter."""
+    if type(bays) is not int or bays < 3:
+        raise ValueError(f"The perimeter-core layout needs at least 3 bays in each direction, got {bays!r}.")
+    return ((bays - 1) // 2, (bays + 1) // 2) if bays % 2 else (bays // 2 - 1, bays // 2 + 1)
+
+
+def layout_of(policy_id):
+    """The SFRS layout of a grouping policy: the core ring, the core lines, or (every other policy) the perimeter."""
+    if policy_id in (SYSTEM_CORE_POLICY_ID, SYSTEM_CORE_BANDED_POLICY_ID):
+        return SFRS_LAYOUT_PERIMETER_CORE
+    if policy_id in (SYSTEM_CORE_LINES_POLICY_ID, SYSTEM_CORE_LINES_BANDED_POLICY_ID):
+        return SFRS_LAYOUT_PERIMETER_CORE_LINES
+    return SFRS_LAYOUT_PERIMETER
+
+
+def is_banded_policy(policy_id):
+    """A system policy with three-story bands (user decision 2026-10-17) and the no-upward-growth rule."""
+    return policy_id in (SYSTEM_BANDED_POLICY_ID, SYSTEM_CORE_BANDED_POLICY_ID, SYSTEM_CORE_LINES_BANDED_POLICY_ID)
+
+
+def layout_policy(layout, banded):
+    """The system policy id of a layout, with or without three-story bands."""
+    return _LAYOUT_POLICIES[bool(banded)][layout]
+
+
+def layout_ladder_next(policy_id):
+    """The next system policy of the layout ladder (perimeter, core ring, core lines) with the same banding, or None
+    at the top of the ladder or for a policy outside it."""
+    if not is_system_policy(policy_id):
+        return None
+    layout = layout_of(policy_id)
+    index = SFRS_LAYOUT_LADDER.index(layout)
+    if index + 1 >= len(SFRS_LAYOUT_LADDER):
+        return None
+    return layout_policy(SFRS_LAYOUT_LADDER[index + 1], is_banded_policy(policy_id))
+
+
+def default_system_policy(site_label=None):
+    """The grouping a batch starts from (user decision 2026-10-18): the perimeter three-story policy for every site; the
+    core ring and then the core lines come in through the layout ladder of the search only when the perimeter frames
+    find no design. The site label is accepted for the call sites and no longer changes the answer."""
+    return SYSTEM_BANDED_POLICY_ID
 SYSTEM_POLICY = {
     "id": SYSTEM_POLICY_ID,
     "stories_per_band": "all",
@@ -83,6 +150,7 @@ SYSTEM_POLICY = {
                        "interior": "every other line (the gravity system)"},
     "systems": {SYSTEM_SFRS: "the four perimeter special moment frames (ACI 318-19 18.6-18.8)",
                 SYSTEM_GRAVITY: "every interior beam and column: members not designated as part of the SFRS (ACI 318-19 18.14)"},
+    "sfrs_layout": SFRS_LAYOUT_PERIMETER,
     "design_ties": {name: {"member_type": tie["member_type"], "locations": list(tie["locations"]), "system": tie["system"]}
                     for name, tie in SYSTEM_DESIGN_TIES.items()},
     "symmetry": "mirrored positions share a group; earthquake signs and load patterns are still enveloped over its members",
@@ -99,12 +167,22 @@ def policy_of(policy_id):
 
 
 def stories_per_band_of(policy_id, num_floor):
-    """How many stories one band holds under a policy: pairs under the band policy, the whole height under the system policy."""
-    return num_floor if policy_id == SYSTEM_POLICY_ID else 3 if policy_id == SYSTEM_BANDED_POLICY_ID else STORIES_PER_BAND
+    """How many stories one band holds under a policy: pairs under the band policy, three under the three-story system
+    policies, the whole height under the uniform system policies."""
+    if is_banded_policy(policy_id):
+        return 3
+    return num_floor if policy_id in (SYSTEM_POLICY_ID, SYSTEM_CORE_POLICY_ID, SYSTEM_CORE_LINES_POLICY_ID) else STORIES_PER_BAND
 
 
 def is_system_policy(policy_id):
-    return policy_id in (SYSTEM_POLICY_ID, SYSTEM_BANDED_POLICY_ID)
+    return policy_id in (SYSTEM_POLICY_ID, SYSTEM_BANDED_POLICY_ID, SYSTEM_CORE_POLICY_ID, SYSTEM_CORE_BANDED_POLICY_ID,
+                         SYSTEM_CORE_LINES_POLICY_ID, SYSTEM_CORE_LINES_BANDED_POLICY_ID)
+
+
+def active_layout():
+    """The SFRS layout of the installed grouped design, the perimeter when none is installed."""
+    state = active()
+    return layout_of(state.policy_id) if state is not None else SFRS_LAYOUT_PERIMETER
 
 
 def tie_kind(tie):
@@ -117,7 +195,7 @@ def tie_spec(tie):
 
 
 def bands_of(policy_id, num_floor):
-    if policy_id == SYSTEM_BANDED_POLICY_ID:
+    if is_banded_policy(policy_id):
         return [list(range(k, min(k + 3, num_floor + 1))) for k in range(1, num_floor + 1, 3)]
     return story_bands(num_floor, stories_per_band_of(policy_id, num_floor))
 
@@ -152,7 +230,47 @@ SYSTEM_BANDED_POLICY = {**SYSTEM_POLICY, "id": SYSTEM_BANDED_POLICY_ID, "stories
     "basis": "user decision 2026-10-17: perimeter SMRF and gravity systems, one design per system per three-story band",
     "vertical_size_rule": "both section dimensions must be nonincreasing upward on every corresponding column/beam line",
     "vertical_size_rule_enforcement": "installation, evaluation, search proposals and saved-record loading; no acceptance override"}
-POLICIES.update({POLICY_ID: POLICY, SYSTEM_POLICY_ID: SYSTEM_POLICY, SYSTEM_BANDED_POLICY_ID: SYSTEM_BANDED_POLICY})
+_CORE_POLICY_TEXT = {
+    "sfrs_layout": SFRS_LAYOUT_PERIMETER_CORE,
+    "core_rule": ("centered core: the frames around the middle bay (odd bay count) or the two middle bays (even bay count) in "
+                  "each direction; at least 3 bays per direction"),
+    "column_locations": {"corner": "i on an X boundary and j on a Y boundary (a perimeter frame in x and in y)",
+                         "x_boundary_edge": "i = 0 or i = nx, with j strictly interior (a perimeter frame in y)",
+                         "y_boundary_edge": "j = 0 or j = ny, with i strictly interior (a perimeter frame in x)",
+                         "core_corner": "a corner of the core ring (a core frame in x and in y)",
+                         "core_edge": "on one side of the core ring between its corners (a core frame in that side's direction)",
+                         "interior": "every other column (the gravity system)"},
+    "beam_locations": {"edge": "beam_x on j = 0 or j = ny; beam_y on i = 0 or i = nx (the perimeter frames)",
+                       "core": "a beam on the core ring: beam_x on a core y-line between the core x-lines, beam_y likewise",
+                       "interior": "every other line (the gravity system)"},
+    "systems": {SYSTEM_SFRS: "the four perimeter special moment frames and the core ring frames (ACI 318-19 18.6-18.8)",
+                SYSTEM_GRAVITY: "every other beam and column: members not designated as part of the SFRS (ACI 318-19 18.14)"},
+}
+SYSTEM_CORE_POLICY = {**SYSTEM_POLICY, **_CORE_POLICY_TEXT, "id": SYSTEM_CORE_POLICY_ID,
+    "basis": "user proposal 2026-10-18: perimeter SMRF plus a centered core ring of SMRF for the high-hazard sites, one design per system"}
+SYSTEM_CORE_BANDED_POLICY = {**SYSTEM_BANDED_POLICY, **_CORE_POLICY_TEXT, "id": SYSTEM_CORE_BANDED_POLICY_ID,
+    "basis": "user proposal 2026-10-18: perimeter SMRF plus a centered core ring of SMRF, one design per system per three-story band"}
+_CORE_LINES_POLICY_TEXT = {
+    **_CORE_POLICY_TEXT,
+    "sfrs_layout": SFRS_LAYOUT_PERIMETER_CORE_LINES,
+    "core_rule": ("core lines: the grid lines bounding the centered core (the middle bay for an odd bay count, the two middle "
+                  "bays for an even count) carry full-length special moment frames; at least 3 bays per direction"),
+    "column_locations": {**_CORE_POLICY_TEXT["column_locations"],
+                         "core_corner": "an interior column at the crossing of a core x-line and a core y-line (a core frame in x and in y)",
+                         "core_edge": "an interior column on one core line (a core frame in that line's direction)"},
+    "beam_locations": {"edge": "beam_x on j = 0 or j = ny; beam_y on i = 0 or i = nx (the perimeter frames)",
+                       "core": "every beam_x on a core y-line and every beam_y on a core x-line (the core frames, full length)",
+                       "interior": "every other line (the gravity system)"},
+    "systems": {SYSTEM_SFRS: "the four perimeter frames and the full-length frames on the core lines (ACI 318-19 18.6-18.8)",
+                SYSTEM_GRAVITY: "every other beam and column: members not designated as part of the SFRS (ACI 318-19 18.14)"},
+}
+SYSTEM_CORE_LINES_POLICY = {**SYSTEM_POLICY, **_CORE_LINES_POLICY_TEXT, "id": SYSTEM_CORE_LINES_POLICY_ID,
+    "basis": "user direction 2026-10-18: more frames around the core when the ring is not enough; one design per system"}
+SYSTEM_CORE_LINES_BANDED_POLICY = {**SYSTEM_BANDED_POLICY, **_CORE_LINES_POLICY_TEXT, "id": SYSTEM_CORE_LINES_BANDED_POLICY_ID,
+    "basis": "user direction 2026-10-18: more frames around the core when the ring is not enough; one design per system per three-story band"}
+POLICIES.update({POLICY_ID: POLICY, SYSTEM_POLICY_ID: SYSTEM_POLICY, SYSTEM_BANDED_POLICY_ID: SYSTEM_BANDED_POLICY,
+                 SYSTEM_CORE_POLICY_ID: SYSTEM_CORE_POLICY, SYSTEM_CORE_BANDED_POLICY_ID: SYSTEM_CORE_BANDED_POLICY,
+                 SYSTEM_CORE_LINES_POLICY_ID: SYSTEM_CORE_LINES_POLICY, SYSTEM_CORE_LINES_BANDED_POLICY_ID: SYSTEM_CORE_LINES_BANDED_POLICY})
 
 # The Structure_Parameters names that hold ONE section or cage for every column or every beam.
 UNIFORM_SECTION_KEYS = (
@@ -207,55 +325,102 @@ def band_label(band):
     return f"s{band[0]:02d}_{band[-1]:02d}"
 
 
-def column_location(i, j, nx, ny):
+def _on_core_ring(i, j, nx, ny):
+    """(on an x-running side, on a y-running side) of the core ring for a node at (i, j)."""
+    (xlo, xhi), (ylo, yhi) = core_lines(nx), core_lines(ny)
+    on_x_side = j in (ylo, yhi) and xlo <= i <= xhi
+    on_y_side = i in (xlo, xhi) and ylo <= j <= yhi
+    return on_x_side, on_y_side
+
+
+def _on_core_lines(i, j, nx, ny):
+    """(on an x-running core line, on a y-running core line) for a node at (i, j) under the core-lines layout."""
+    return j in core_lines(ny), i in core_lines(nx)
+
+
+def _core_sides(i, j, nx, ny, layout):
+    if layout == SFRS_LAYOUT_PERIMETER_CORE:
+        return _on_core_ring(i, j, nx, ny)
+    if layout == SFRS_LAYOUT_PERIMETER_CORE_LINES:
+        return _on_core_lines(i, j, nx, ny)
+    return False, False
+
+
+def column_location(i, j, nx, ny, layout=SFRS_LAYOUT_PERIMETER):
     on_x, on_y = i in (0, nx), j in (0, ny)
-    return "corner" if on_x and on_y else "x_boundary_edge" if on_x else "y_boundary_edge" if on_y else "interior"
+    if on_x or on_y:
+        return "corner" if on_x and on_y else "x_boundary_edge" if on_x else "y_boundary_edge"
+    side_x, side_y = _core_sides(i, j, nx, ny, layout)
+    if side_x and side_y:
+        return "core_corner"
+    if side_x or side_y:
+        return "core_edge"
+    return "interior"
 
 
-def beam_location(member_type, i, j, nx, ny):
-    if member_type == "beam_x":
-        return "edge" if j in (0, ny) else "interior"
-    if member_type == "beam_y":
-        return "edge" if i in (0, nx) else "interior"
-    raise ValueError(f"{member_type!r} is not a beam type.")
+def beam_location(member_type, i, j, nx, ny, layout=SFRS_LAYOUT_PERIMETER):
+    if member_type not in ("beam_x", "beam_y"):
+        raise ValueError(f"{member_type!r} is not a beam type.")
+    if member_type == "beam_x" and j in (0, ny):
+        return "edge"
+    if member_type == "beam_y" and i in (0, nx):
+        return "edge"
+    if layout == SFRS_LAYOUT_PERIMETER_CORE:
+        (xlo, xhi), (ylo, yhi) = core_lines(nx), core_lines(ny)
+        if member_type == "beam_x" and j in (ylo, yhi) and xlo <= i < xhi:          # the span i -> i + 1 inside the ring
+            return "core"
+        if member_type == "beam_y" and i in (xlo, xhi) and ylo <= j < yhi:
+            return "core"
+    elif layout == SFRS_LAYOUT_PERIMETER_CORE_LINES:
+        if member_type == "beam_x" and j in core_lines(ny):
+            return "core"
+        if member_type == "beam_y" and i in core_lines(nx):
+            return "core"
+    return "interior"
 
 
 def group_id(band, member_type, location):
     return f"{band_label(band)}__{member_type}__{location}"
 
 
-def column_sfrs_directions(i, j, nx, ny):
-    """The directions in which a column at grid (i, j) is part of a perimeter frame: a column on an x-boundary
-    line (i = 0 or nx) sits in a frame running along y and resists the y direction; one on a y-boundary line
-    resists x; a corner resists both; an interior column none."""
+def column_sfrs_directions(i, j, nx, ny, layout=SFRS_LAYOUT_PERIMETER):
+    """The directions in which a column at grid (i, j) is part of a seismic force-resisting frame: a column on an
+    x-boundary line (i = 0 or nx) sits in a frame running along y and resists the y direction; one on a y-boundary
+    line resists x; a corner resists both; under the perimeter-core layout a column on a core side resists that
+    side's direction and a core corner both; any other column none."""
     directions = set()
     if i in (0, nx):
         directions.add("y")
     if j in (0, ny):
         directions.add("x")
+    side_x, side_y = _core_sides(i, j, nx, ny, layout)
+    if side_x:
+        directions.add("x")
+    if side_y:
+        directions.add("y")
     return frozenset(directions)
 
 
-def member_system(member_type, i, j, nx, ny):
-    """Which system a member belongs to under the perimeter-frame basis: SYSTEM_SFRS for every column on the
-    building perimeter (corner or boundary edge) and every perimeter beam, SYSTEM_GRAVITY for the rest."""
+def member_system(member_type, i, j, nx, ny, layout=SFRS_LAYOUT_PERIMETER):
+    """Which system a member belongs to: SYSTEM_SFRS for every column and beam of a seismic force-resisting frame
+    (the perimeter frames; the core ring too under the perimeter-core layout), SYSTEM_GRAVITY for the rest."""
     if member_type == "column":
-        return SYSTEM_SFRS if column_sfrs_directions(i, j, nx, ny) else SYSTEM_GRAVITY
-    return SYSTEM_SFRS if beam_location(member_type, i, j, nx, ny) == "edge" else SYSTEM_GRAVITY
+        return SYSTEM_SFRS if column_sfrs_directions(i, j, nx, ny, layout) else SYSTEM_GRAVITY
+    return SYSTEM_SFRS if beam_location(member_type, i, j, nx, ny, layout) in ("edge", "core") else SYSTEM_GRAVITY
 
 
-def system_inventory(nx, ny):
-    """Member counts per system for one story: how many columns and beams the perimeter and the interior hold."""
+def system_inventory(nx, ny, layout=SFRS_LAYOUT_PERIMETER):
+    """Member counts per system for one story: how many columns and beams the SFRS and the gravity system hold."""
     counts = {SYSTEM_SFRS: {"column": 0, "beam_x": 0, "beam_y": 0}, SYSTEM_GRAVITY: {"column": 0, "beam_x": 0, "beam_y": 0}}
     for j in range(ny + 1):
         for i in range(nx + 1):
-            counts[member_system("column", i, j, nx, ny)]["column"] += 1
+            counts[member_system("column", i, j, nx, ny, layout)]["column"] += 1
     for j in range(ny + 1):
         for i in range(nx):
-            counts[member_system("beam_x", i, j, nx, ny)]["beam_x"] += 1
+            counts[member_system("beam_x", i, j, nx, ny, layout)]["beam_x"] += 1
     for j in range(ny):
         for i in range(nx + 1):
-            counts[member_system("beam_y", i, j, nx, ny)]["beam_y"] += 1
+            counts[member_system("beam_y", i, j, nx, ny, layout)]["beam_y"] += 1
     return counts
 
 
@@ -269,6 +434,9 @@ def member_inventory(nx, ny, nz, policy_id=POLICY_ID):
         if type(value) is not int or value < 1:
             raise ValueError(f"{name} must be a positive integer, got {value!r}.")
     policy_of(policy_id)
+    layout = layout_of(policy_id)
+    if layout in (SFRS_LAYOUT_PERIMETER_CORE, SFRS_LAYOUT_PERIMETER_CORE_LINES):
+        core_lines(nx), core_lines(ny)                       # at least 3 bays per direction, else refused
     per_level = (nx + 1) * (ny + 1)
     bands = bands_of(policy_id, nz)
     band_of = {k: band for band in bands for k in band}
@@ -282,20 +450,20 @@ def member_inventory(nx, ny, nz, policy_id=POLICY_ID):
         rows.append({"member_tag": len(rows) + 1, "member_type": member_type, "story_or_floor": k, "grid_i": i, "grid_j": j,
                      "node_i": node_i, "node_j": node_j, "group_id": group_id(band_of[k], member_type, location),
                      "location_class": location, "band": band_label(band_of[k]),
-                     "system": member_system(member_type, i, j, nx, ny)})
+                     "system": member_system(member_type, i, j, nx, ny, layout)})
 
     for k in range(1, nz + 1):
         for j in range(ny + 1):
             for i in range(nx + 1):
-                add(k, i, j, "column", node(k - 1, i, j), node(k, i, j), column_location(i, j, nx, ny))
+                add(k, i, j, "column", node(k - 1, i, j), node(k, i, j), column_location(i, j, nx, ny, layout))
     for k in range(1, nz + 1):
         for j in range(ny + 1):
             for i in range(nx):
-                add(k, i, j, "beam_x", node(k, i, j), node(k, i + 1, j), beam_location("beam_x", i, j, nx, ny))
+                add(k, i, j, "beam_x", node(k, i, j), node(k, i + 1, j), beam_location("beam_x", i, j, nx, ny, layout))
     for k in range(1, nz + 1):
         for j in range(ny):
             for i in range(nx + 1):
-                add(k, i, j, "beam_y", node(k, i, j), node(k, i, j + 1), beam_location("beam_y", i, j, nx, ny))
+                add(k, i, j, "beam_y", node(k, i, j), node(k, i, j + 1), beam_location("beam_y", i, j, nx, ny, layout))
     return rows
 
 
@@ -317,7 +485,7 @@ def build_assignments(nx, ny, nz, policy_id=POLICY_ID):
         entry["member_tags"].append(row["member_tag"])
         if is_system_policy(policy_id):
             family = tie_of_location(row["member_type"], row["location_class"])
-            entry["design_tie"] = f"{row['band']}__{family}" if policy_id == SYSTEM_BANDED_POLICY_ID else family
+            entry["design_tie"] = f"{row['band']}__{family}" if is_banded_policy(policy_id) else family
     group_rows = []
     for gid in sorted(groups):
         entry = groups[gid]
@@ -696,20 +864,22 @@ def is_grouped():
 
 
 def section_order_problems(state):
-    """Hard size envelope for the three-story policy, checked independently of the sizing search.
+    """Hard size envelope for every system layout, independent of the sizing search.
 
-    Compare BOTH dimensions, not area, along corresponding physical member lines. The grouping policy
-    gives one section to each type/location in a band, so adjacent groups represent all those lines.
+    Apply the layout's column cap, and compare BOTH dimensions, not area, along corresponding physical
+    member lines in the banded policies. A uniform system policy has only one band and no vertical pairs.
+    The grouping policy gives one section to each type/location in a band, so adjacent groups represent all those lines.
     Trial states may be assembled before normalization; installing or importing an invalid state is refused.
     """
-    if state.policy_id != SYSTEM_BANDED_POLICY_ID:
+    if not is_system_policy(state.policy_id):
         return []
-    from Design.Section_Design import COLUMN_SIZE_CAP_IN
+    from Design.Section_Design import column_size_cap_in
+    cap = column_size_cap_in(layout_of(state.policy_id))
     problems, lines = [], {}
     for gid, group in state.groups.items():
         d = state.designs[gid]
-        if d.is_column and max(d.b_in, d.h_in) > COLUMN_SIZE_CAP_IN + 1e-9:
-            problems.append(f"{gid}: column {d.b_in:g} x {d.h_in:g} exceeds {COLUMN_SIZE_CAP_IN:g}-in cap")
+        if d.is_column and max(d.b_in, d.h_in) > cap + 1e-9:
+            problems.append(f"{gid}: column {d.b_in:g} x {d.h_in:g} exceeds {cap:g}-in cap")
         lines.setdefault((group['member_type'], group['location_class']), []).append(gid)
     for gids in lines.values():
         gids.sort(key=lambda g: min(state.groups[g]['stories_or_floors']))

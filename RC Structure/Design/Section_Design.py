@@ -49,6 +49,23 @@ import math
 # User decision 2026-10-17: raise the cap to 40 in while allowing three-story system bands.
 COLUMN_SIZE_CAP_IN = 40.0
 COLUMN_SIZES_IN = tuple(float(size) for size in (*range(14, 25), *range(26, int(COLUMN_SIZE_CAP_IN) + 1, 2)))
+# The perimeter-only layout stops at 32 in columns (user direction 2026-10-18): a frame whose perimeter columns would
+# pass 32 in takes the core frames instead (the layout ladder of the grouped search). The core layouts keep the cap above.
+PERIMETER_COLUMN_SIZE_CAP_IN = 32.0
+COLUMN_SIZE_CAP_BY_LAYOUT = {"perimeter": PERIMETER_COLUMN_SIZE_CAP_IN, "perimeter_core": COLUMN_SIZE_CAP_IN,
+                             "perimeter_core_lines": COLUMN_SIZE_CAP_IN}
+
+
+def column_size_cap_in(layout=None):
+    """The column size cap of an SFRS layout (Model.Member_Groups.layout_of): 32 in for the perimeter-only layout, the
+    general cap for the core layouts and for anything else (the band policy, the uniform route)."""
+    return COLUMN_SIZE_CAP_BY_LAYOUT.get(layout, COLUMN_SIZE_CAP_IN)
+
+
+def column_sizes_in(layout=None):
+    """The column size ladder of a layout: the sizes up to its cap."""
+    cap = column_size_cap_in(layout)
+    return tuple(size for size in COLUMN_SIZES_IN if size <= cap + 1e-9)
 
 # ACI 318-19 18.6.2.1(b) uses min(0.3h, 10 in). The ladder's
 # max(0.3h, 10 in) is a stricter PRACTICAL sizing preference, not that rule.

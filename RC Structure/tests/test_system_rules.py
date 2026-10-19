@@ -93,6 +93,15 @@ class SystemRules(unittest.TestCase):
             self.assertEqual(by_core["s01_04__column__y_boundary_edge"], {(("x", "18.8"), ("y", "chapter_15"))})
             for kind in capacity["joint_types"].values():
                 for item in kind["shear"].values():
+                    from Design.SMRF_Joints import joint_shear_check
+                    phi = 0.75 if item["rule"] == "chapter_15" else 0.85
+                    self.assertAlmostEqual(item["phi_vn_kip"], phi * item["nominal_vn_kip"])
+                    qualified = joint_shear_check(item)
+                    if item["capacity_topology_and_confinement_checked"]:
+                        self.assertIn(qualified["status"], ("pass", "fail"))
+                        self.assertAlmostEqual(qualified["capacity"], item["phi_vn_kip"])
+                        self.assertAlmostEqual(qualified["demand"], item["vj_kip"])
+                        self.assertEqual(qualified["status"] == "pass", item["passes"])
                     if item["rule"] == "chapter_15":
                         self.assertEqual(item["steel_stress_factor"], 1.0)
                         self.assertIn("15.4.2", item["clause"])

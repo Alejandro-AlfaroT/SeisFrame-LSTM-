@@ -85,28 +85,34 @@ def joint_types():
     Each entry: {"column": ResolvedMember, "x": ResolvedMember | None, "y": ResolvedMember | None,
     "joints": [(level, i, j), ...]}. The two X beams (or Y beams) at an interior joint belong to one
     group by the grouping policy; a joint where they do not is refused, because bars of two cages would
-    then meet inside the joint without a declared transition.
+    then meet inside the joint without a declared transition. The one declared transition is the core
+    corner of the perimeter-core layout (2026-10-18): a core-ring beam and a gravity beam meet there, the
+    bars of both terminate in the joint with standard hooks (18.8.2.2), and every cage pair of that joint
+    is stacked, so each group's rows clear the crossing cages it actually meets.
     """
     from Model import Member_Properties as mp
+    mixed_allowed = mg.active_layout() == mg.SFRS_LAYOUT_PERIMETER_CORE
     types = {}
     for level in range(1, sp.NUM_FLOOR + 1):
         for j in range(sp.NUM_BAY_Y + 1):
             for i in range(sp.NUM_BAY_X + 1):
                 joint = mg.joint_members(level, i, j)
-                beams = {}
+                candidates = {}
                 for axis in ("x", "y"):
                     sides = [joint[f"beam_{axis}_{side}"] for side in ("minus", "plus") if joint[f"beam_{axis}_{side}"] is not None]
-                    if len({m.group_id for m in sides}) > 1 or len({m.design for m in sides}) > 1:
+                    distinct = list({m.group_id: m for m in sides}.values())
+                    if (len(distinct) > 1 or len({m.design for m in sides}) > 1) and not mixed_allowed:
                         raise mg.GroupedStateError(
                             f"Joint (level {level}, {i}, {j}): the two {axis.upper()} beams belong to different groups "
                             f"({sorted({m.group_id for m in sides})}); their bars cannot be taken as continuous through the "
                             "joint without a declared transition.")
-                    beams[axis] = sides[0] if sides else None
+                    candidates[axis] = distinct or [None]
                 column = mp.joint_core_column(level, i, j)
-                key = (column.group_id, None if beams["x"] is None else beams["x"].group_id,
-                       None if beams["y"] is None else beams["y"].group_id)
-                entry = types.setdefault(key, {"column": column, "x": beams["x"], "y": beams["y"], "joints": []})
-                entry["joints"].append((level, i, j))
+                for bx in candidates["x"]:
+                    for by in candidates["y"]:
+                        key = (column.group_id, None if bx is None else bx.group_id, None if by is None else by.group_id)
+                        entry = types.setdefault(key, {"column": column, "x": bx, "y": by, "joints": []})
+                        entry["joints"].append((level, i, j))
     return list(types.values())
 
 

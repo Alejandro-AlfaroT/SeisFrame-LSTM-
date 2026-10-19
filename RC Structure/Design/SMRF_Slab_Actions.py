@@ -137,9 +137,12 @@ def build_slab_action_evidence(slab_record, geometry, sections, live_load_ksf, s
     nx, ny = geometry["num_bay_x"], geometry["num_bay_y"]
     lx, ly = geometry["bay_x_in"], geometry["bay_y_in"]
     # Half width of the beam on every X line (at y = j ly) and every Y line (at x = i lx).
-    half_x_lines = [floor_sections.beam_width(sections, "x", j) / 2.0 for j in range(ny + 1)]
-    half_y_lines = [floor_sections.beam_width(sections, "y", i) / 2.0 for i in range(nx + 1)]
+    half_x_spans = [[floor_sections.beam_width(sections, "x", j, i) / 2.0 for i in range(nx)] for j in range(ny + 1)]
+    half_y_spans = [[floor_sections.beam_width(sections, "y", i, j) / 2.0 for j in range(ny)] for i in range(nx + 1)]
+    half_x_lines, half_y_lines = [row[0] for row in half_x_spans], [row[0] for row in half_y_spans]
     half_beam = ({"x_lines": half_x_lines, "y_lines": half_y_lines} if by_line else sections["b_beam_in"] / 2.0)
+    if floor_sections.is_by_span(sections):
+        half_beam = {"x_spans": half_x_spans, "y_spans": half_y_spans}
     dead_ksf = (slab_record["concrete_unit_weight_kcf"] * slab_record["thickness_in"] / 12.0
                 + slab_record["superimposed_dead_load_ksf"])
     mesh = (4 if mesh_spec is not None else transfer_mesh_per_bay(nx, ny)) if mesh_per_bay is None else mesh_per_bay
@@ -172,8 +175,8 @@ def build_slab_action_evidence(slab_record, geometry, sections, live_load_ksf, s
             # Moments: Wood-Armer envelope over the points outside the beam widths.
             for point in points:
                 x, y = point["x_in"], point["y_in"]
-                if (any(abs(y - j * ly) < half_x_lines[j] for j in range(ny + 1))
-                        or any(abs(x - i * lx) < half_y_lines[i] for i in range(nx + 1))):
+                if (any(abs(y - j * ly) < half_x_spans[j][panel["i"]] for j in (panel["j"], panel["j"] + 1))
+                        or any(abs(x - i * lx) < half_y_spans[i][panel["j"]] for i in (panel["i"], panel["i"] + 1))):
                     continue        # over a beam; not a slab strip section
                 bx, by, tx, ty = wood_armer(point["mx"], point["my"], point["mxy_raw"])
                 for (axis, face), moment in ((("x", "bottom"), bx), (("y", "bottom"), by),

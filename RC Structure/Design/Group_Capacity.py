@@ -31,7 +31,8 @@ import Structure_Parameters as sp
 from Design import SMRF_Capacity_Design as cd
 from Design.SMRF_Common import SectionAxialDomainError, make_check, not_evaluated
 from Design.SMRF_Joint_Adapter import nominal_rectangular_capacity
-from Design.SMRF_Joints import MPR_BASIS, beam_capacity_shear_envelope, rectangular_joint_area
+from Design.SMRF_Joints import (MPR_BASIS, JOINT_SHEAR_BASES, JOINT_SHEAR_PHI,
+                                beam_capacity_shear_envelope, rectangular_joint_area)
 from Design.SMRF_Transitions import column_transition
 from Model import Member_Bar_Layers as bar_layers
 from Model import Member_Groups as mg
@@ -50,7 +51,7 @@ GRAVITY_FAMILIES = (("seismic_high_gravity", lambda sds: 1.2 + 0.2 * sds, 1.0),
 JOINT_RULE_SFRS = "18.8"
 JOINT_RULE_GRAVITY = "chapter_15"
 JOINT_RULE_CLAUSE = {JOINT_RULE_SFRS: "ACI 318-19 18.8.4",
-                     JOINT_RULE_GRAVITY: "ACI 318-19 15.4.2 (15.4.2.1(b) nominal beam strengths; Table 15.4.2.3)"}
+                     JOINT_RULE_GRAVITY: "ACI 318-19 15.4.2 (15.4.1.1(b) nominal beam strengths; Table 15.4.2.3; Table 21.2.1(b))"}
 
 
 def joint_rule(entry, axis, state=None):
@@ -58,7 +59,8 @@ def joint_rule(entry, axis, state=None):
     state = state or mg.active()
     if state is None or not mg.is_system_policy(state.policy_id):
         return JOINT_RULE_SFRS
-    directions = mg.column_sfrs_directions(entry["grid_i"], entry["grid_j"], sp.NUM_BAY_X, sp.NUM_BAY_Y)
+    directions = mg.column_sfrs_directions(entry["grid_i"], entry["grid_j"], sp.NUM_BAY_X, sp.NUM_BAY_Y,
+                                           layout=mg.layout_of(state.policy_id))
     return JOINT_RULE_SFRS if axis in directions else JOINT_RULE_GRAVITY
 
 
@@ -135,8 +137,17 @@ def member_face_reactions(transfer, member, factor_dead, factor_live):
             f"{len([n for n in cases if n != 'dead'])} unit case(s) of its own floor's transfer; plus its own drop weight")
 
 
+def is_gravity_beam_group(state, gid):
+    """A beam group outside the seismic force-resisting system: only under a system policy (the band policy keeps
+    every member in the frame whatever its plan location says)."""
+    return (mg.is_system_policy(state.policy_id) and not state.designs[gid].is_column
+            and state.system_of(gid) == mg.SYSTEM_GRAVITY)
+
+
 def beam_group_capacity(gid, state, transfers, sds):
-    """Capacity shear of every member of one beam group and the group's hinge-zone hoops."""
+    """Capacity shear of every member of one beam group and the group's transverse steel: hinge-zone hoops for a
+    perimeter-frame group, stirrups throughout at <= d/2 for a gravity-system group (18.14.3.2(a), 2026-10-18)."""
+    transverse_rule = cd.BEAM_TRANSVERSE_GRAVITY if is_gravity_beam_group(state, gid) else cd.BEAM_TRANSVERSE_SFRS
     design = state.designs[gid]
     rows = bar_layers.group_rows(gid)
     d = design.h_in - max(rows["top"]["centroid_in"], rows["bottom"]["centroid_in"])
@@ -163,7 +174,7 @@ def beam_group_capacity(gid, state, transfers, sds):
             worst_mechanism = max(worst_mechanism, envelope["mechanism_shear_positive_kip"], envelope["mechanism_shear_negative_kip"])
     result = {"group_id": gid, "members": members, "effective_depth_in": d,
               **cd.select_beam_hoops(design.b_in, d, design.fc_ksi, sp.FYT_KSI, design.bar_size, sp.BEAM_CLEAR_COVER_IN,
-                                     design.top_bars, design.bot_bars, worst_ve, worst_mechanism)}
+                                     design.top_bars, design.bot_bars, worst_ve, worst_mechanism, transverse_rule=transverse_rule)}
     selected = result["hoops"]
     for data in members:
         data["phi_vn_left_kip"] = selected["phi_vn_kip"] if selected else 0.0
@@ -258,17 +269,22 @@ def joint_inventory(state=None):
                 joint = mg.joint_members(level, i, j)
                 core, above = mp.joint_core_column(level, i, j), joint["column_above"]
                 beams = {axis: _beams(joint, axis) for axis in ("x", "y")}
+                mixed = {}
                 for axis in ("x", "y"):
-                    if len({b.group_id for b in beams[axis]}) > 1:
+                    groups = sorted({b.group_id for b in beams[axis]})
+                    mixed[axis] = len(groups) > 1
+                    if mixed[axis] and mg.layout_of(state.policy_id) != mg.SFRS_LAYOUT_PERIMETER_CORE:
                         raise mg.GroupedStateError(f"Joint (level {level}, {i}, {j}): the two {axis.upper()} beams belong to "
                                                    "different groups; no along-line reinforcement transition is declared.")
+                # A core corner of the perimeter-core layout is the one declared along-line transition: the beams of
+                # both groups terminate in the joint with standard hooks (18.8.2.2); the type keys both groups.
                 key = (core.group_id, None if above is None else above.group_id,
-                       beams["x"][0].group_id if beams["x"] else None, len(beams["x"]),
-                       beams["y"][0].group_id if beams["y"] else None, len(beams["y"]))
+                       tuple(sorted({b.group_id for b in beams["x"]})) if beams["x"] else None, len(beams["x"]),
+                       tuple(sorted({b.group_id for b in beams["y"]})) if beams["y"] else None, len(beams["y"]))
                 node = level * (sp.NUM_BAY_X + 1) * (sp.NUM_BAY_Y + 1) + j * (sp.NUM_BAY_X + 1) + i + 1
                 entry = {"id": f"joint_{node}", "node_tag": node, "level": level, "grid_i": i, "grid_j": j,
                          "is_roof": above is None, "core": core, "above": above, "below": joint["column_below"],
-                         "beams": beams, "joint": joint}
+                         "beams": beams, "joint": joint, "mixed": mixed}
                 kind = types.setdefault(key, {"type_id": f"joint_{node}", "key": key, "representative": entry, "joints": []})
                 kind["joints"].append(entry["id"])
                 entry["type_id"] = kind["type_id"]
@@ -293,10 +309,12 @@ def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_
 
     ``rule`` JOINT_RULE_SFRS: 18.8.4, beam steel at 1.25 fy and the column shear from the probable moments.
     JOINT_RULE_GRAVITY (a joint direction outside the seismic force-resisting system under the perimeter-frame
-    basis): Chapter 15, 15.4.2.1(b), beam steel at fy and the column shear from the nominal moments; the
+    basis): Chapter 15, 15.4.1.1(b), beam steel at fy and the column shear from the nominal moments; the
     strength row is the Table 18.8.4.3 classification of the same joint, at or below the Table 15.4.2.3 value
-    in every row, so the Chapter 15 check is conservative.
+    in every row, so the Chapter 15 nominal strength is conservative. The strength reduction factor is
+    0.75 for Chapter 15 (15.4.2.2 / Table 21.2.1(b)), 0.85 for SMRF joints (21.2.4.4).
     """
+    phi = JOINT_SHEAR_PHI[rule]  # Reject unknown rules instead of treating them as gravity directions.
     core, beams = entry["core"].design, entry["beams"][axis]
     other = "y" if axis == "x" else "x"
     transverse = entry["beams"][other]
@@ -329,17 +347,22 @@ def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_
         forces = [max(tension(beam, "hogging"), tension(beam, "sagging"))]
         vcol = max(mpr(beam, "hogging"), mpr(beam, "sagging")) / sp.STORY_H * multiplier
         vj, hogging_beam = abs(sum(forces) - vcol), beam.member_tag if sign == "hogging" else None
-    bw = beams[0].design.b_in
+    mixed = bool((entry.get("mixed") or {}).get(axis))
+    bw = min(b.design.b_in for b in beams)                       # the lesser web at a mixed joint (conservative aj)
     beam_depth = max([b.design.h_in for b in beams] + [b.design.h_in for b in transverse])
     clear = min(mp.beam_clear_span_in(b) for b in beams)
     transverse_clear = min((mp.beam_clear_span_in(b) for b in transverse), default=0.0)
     above = entry["above"]
     column_clear = column_clear_heights(above)["physical"] if above is not None else 0.0
-    continuity = {"beam_reinforcement_continuous_through_interior_joints": True,
+    continuity = {"beam_reinforcement_continuous_through_interior_joints": not mixed,
                   "column_reinforcement_continuous_through_floor_joints":
                       (None if transition is None else bool(transition["column_reinforcement_continuous"])),
-                  "basis": ("both beams of a direction at a joint belong to one group (same bars, run through, spliced "
-                            "outside the hinge zones); column continuity from the declared transition at this joint "
+                  "basis": (("a core corner of the perimeter-core layout: the beams of two groups terminate in the joint with "
+                             "standard hooks from opposite faces (18.8.2.2), so the Table 18.8.4.3 beam input takes the 'Other' "
+                             "row; " if mixed else
+                             "both beams of a direction at a joint belong to one group (same bars, run through, spliced "
+                             "outside the hinge zones); ")
+                            + "column continuity from the declared transition at this joint "
                             f"({'roof' if transition is None else transition['kind']})")}
     transverse_design = transverse[0].design if transverse else None
     hoops = None if transverse_design is None else beam_hoops.get(transverse[0].group_id)
@@ -356,12 +379,12 @@ def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_
     vn = gamma * math.sqrt(core.fc_ksi * 1000.0) * aj / 1000.0
     return {"id": f"joint_shear/{entry['type_id']}/{axis}", "type_id": entry["type_id"], "level": level, "axis": axis,
             "core_group": entry["core"].group_id, "column_above_group": None if above is None else above.group_id,
-            "beam_group": beams[0].group_id, "transverse_beam_group": transverse[0].group_id if transverse else None,
+            "beam_group": beams[0].group_id, "beam_groups": sorted({b.group_id for b in beams}), "mixed_groups": mixed,
+            "transverse_beam_group": transverse[0].group_id if transverse else None,
             "beams_in_direction": len(beams), "beams_perpendicular": len(transverse),
             "beam_face_forces_kip": forces, "column_shear_kip": vcol, "hogging_beam_tag": hogging_beam,
             "probable_face_forces_complete": True, "column_shear_consistent_with_mpr": True,
-            "nominal_vn_kip": vn, "capacity_basis": ("ACI318-19_Table18.8.4.3" if rule == JOINT_RULE_SFRS else
-                                                     "ACI318-19_Table15.4.2.3 (Table 18.8.4.3 row, conservative)"),
+            "nominal_vn_kip": vn, "capacity_basis": JOINT_SHEAR_BASES[rule],
             "rule": rule, "clause": JOINT_RULE_CLAUSE[rule], "steel_stress_factor": steel_factor,
             "beam_moment_basis": "probable (1.25 fy)" if rule == JOINT_RULE_SFRS else "nominal (fy)",
             "capacity_topology_and_confinement_checked": False,
@@ -372,39 +395,47 @@ def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_
             "evidence_complete": classification["evidence_complete"],
             "unevaluated_evidence": classification["unevaluated_evidence"],
             "confined_faces": parallel + perpendicular, "joint_core_in": {"depth": depth, "width": width, "fc_ksi": core.fc_ksi},
-            "aj_in2": aj, "vj_kip": vj, "phi_vn_kip": cd.PHI_JOINT * vn, "passes": vj <= cd.PHI_JOINT * vn,
+            "aj_in2": aj, "vj_kip": vj, "phi": phi, "phi_vn_kip": phi * vn, "passes": vj <= phi * vn,
             "slab_steel_in_tension_included": True}
 
 
 def joint_anchorage(entry, axis, column_hoop_bar):
     """Hooked anchorage of terminating beam bars (18.8.5.1) and through-bar depth (18.8.2.3) at one joint."""
     core, beams = entry["core"].design, entry["beams"][axis]
+    mixed = bool((entry.get("mixed") or {}).get(axis))
     depth = core.h_in if axis == "x" else core.b_in
-    db = sp.rebar_diameter(beams[0].design.bar_size)
+    # a mixed joint (core corner): the larger bar of the two groups governs the hook, and both terminate
+    governing = max(beams, key=lambda b: sp.rebar_diameter(b.design.bar_size))
+    db = sp.rebar_diameter(governing.design.bar_size)
     hoop_db = sp.rebar_diameter(column_hoop_bar if column_hoop_bar is not None else core.stirrup_bar_size)
     ldh = max(sp.FY_KSI * 1000.0 * db / (65.0 * math.sqrt(core.fc_ksi * 1000.0)), 8.0 * db, 6.0)
-    through = len(beams) == 2
+    through = len(beams) == 2 and not mixed
     # embedment to the inside of the far hoop as built (the column bars in the hoop corners on the grid)
     available = depth - (mp.longitudinal_cover_in(core) - 0.5 * sp.rebar_diameter(core.bar_size))
     required_through = max(sp.through_joint_bar_depth_factor() * db, max(b.design.h_in for b in beams) / 2.0)   # 18.8.2.3
     return {"type_id": entry["type_id"], "axis": axis, "through_bars_present": through,
             "ldh_required_in": ldh, "embedment_available_in": available, "passes": through or ldh <= available,
-            "hook": "standard 90-degree hook into the confined core, 18.8.5.1",
+            "hook": ("standard 90-degree hooks of both beams into the confined core from opposite faces (18.8.2.2, 18.8.5.1): "
+                     "the along-line transition at a core corner" if mixed else "standard 90-degree hook into the confined core, 18.8.5.1"),
             "through_bar_depth_required_in": required_through, "through_bar_depth_available_in": depth,
             "through_bar_passes": (required_through <= depth) if through else True,
-            "beam_bar_diameter_in": db, "core_group": entry["core"].group_id, "beam_group": beams[0].group_id}
+            "beam_bar_diameter_in": db, "core_group": entry["core"].group_id, "beam_group": governing.group_id,
+            "beam_groups": sorted({b.group_id for b in beams}), "mixed_groups": mixed}
 
 
 def joint_threading(entry, axis):
     """Do the beam bars of one direction pass the joint core's column bars within the layer limit?"""
-    beam = entry["beams"][axis][0]
-    fit = bar_layers.bars_per_layer(entry["core"].design, beam.design, axis)
-    n = max(beam.design.top_bars, beam.design.bot_bars)
-    needed = math.ceil(n / fit) if fit and fit > 0 else None
     limit = sp.BEAM_BAR_MAX_LAYERS
-    return {"type_id": entry["type_id"], "axis": axis, "bars_per_layer_that_fit": fit, "bars_per_face": n,
-            "layers_needed": needed, "max_layers": limit, "passes": needed is not None and needed <= limit,
-            "core_group": entry["core"].group_id, "beam_group": beam.group_id}
+    results = []
+    for beam in {b.group_id: b for b in entry["beams"][axis]}.values():        # one per group (two at a core corner)
+        fit = bar_layers.bars_per_layer(entry["core"].design, beam.design, axis)
+        n = max(beam.design.top_bars, beam.design.bot_bars)
+        needed = math.ceil(n / fit) if fit and fit > 0 else None
+        results.append({"type_id": entry["type_id"], "axis": axis, "bars_per_layer_that_fit": fit, "bars_per_face": n,
+                        "layers_needed": needed, "max_layers": limit, "passes": needed is not None and needed <= limit,
+                        "core_group": entry["core"].group_id, "beam_group": beam.group_id})
+    worst = min(results, key=lambda r: (r["passes"], -(r["layers_needed"] or 10 ** 6)))
+    return {**worst, "beam_groups": [r["beam_group"] for r in results]} if len(results) > 1 else worst
 
 
 def slab_mat_clashes(entry):
@@ -415,18 +446,18 @@ def slab_mat_clashes(entry):
     for axis in ("x", "y"):
         if not entry["beams"][axis]:
             continue
-        beam = entry["beams"][axis][0]
-        db = sp.rebar_diameter(beam.design.bar_size)
-        for k, offset in enumerate(bar_layers.group_rows(beam.group_id)["top"]["offsets_in"]):
-            for mat in mats:
-                if mat["runs_along"] == axis:
-                    continue
-                gap = abs(mat["centroid_from_top_in"] - offset) - (mat["db_in"] + db) / 2.0
-                label = [mat["mat"], f"{axis} beam top bars layer {k + 1} ({beam.group_id})"]
-                if gap < 0.0:
-                    clashes.append({"between": label, "overlap_in": -gap})
-                elif gap < INTERLAYER_CLEAR_MIN_IN:
-                    tight.append({"between": label, "clear_in": gap})
+        for beam in {b.group_id: b for b in entry["beams"][axis]}.values():        # both groups at a core corner
+            db = sp.rebar_diameter(beam.design.bar_size)
+            for k, offset in enumerate(bar_layers.group_rows(beam.group_id)["top"]["offsets_in"]):
+                for mat in mats:
+                    if mat["runs_along"] == axis:
+                        continue
+                    gap = abs(mat["centroid_from_top_in"] - offset) - (mat["db_in"] + db) / 2.0
+                    label = [mat["mat"], f"{axis} beam top bars layer {k + 1} ({beam.group_id})"]
+                    if gap < 0.0:
+                        clashes.append({"between": label, "overlap_in": -gap})
+                    elif gap < INTERLAYER_CLEAR_MIN_IN:
+                        tight.append({"between": label, "clear_in": gap})
     return {"type_id": entry["type_id"], "slab_mats_placed": placed, "clashes": clashes, "tight_crossings": tight,
             "passes": not clashes}
 

@@ -93,7 +93,7 @@ def _inputs(geometry, sections, policy):
         grades = set()
         for _sha, floor, _floors in floor_sections.distinct_floors(s):
             grades.add(floor["fc_beam_ksi"])
-            beams = floor["beam_lines"]["x"] + floor["beam_lines"]["y"]
+            beams = floor_sections.all_beams(floor)
             if max(beam["b_in"] for beam in beams) >= min(g["bay_x_in"], g["bay_y_in"]):
                 raise ValueError("Slab clear spans must be positive after subtracting beam width.")
             if max(beam["h_in"] for beam in beams) >= g["story_h_in"]:
@@ -174,7 +174,7 @@ def _panels_by_line(geometry, floor, policy, slab_h):
                            ("y_min", "x", j, j == 0, g["bay_y_in"]),
                            ("y_max", "x", j + 1, j == g["num_bay_y"] - 1, g["bay_y_in"]))
             for side, beam_axis, line, discontinuous, transverse_bay in definitions:
-                beam = floor_sections.beam_line(floor, beam_axis, line)
+                beam = floor_sections.beam_line(floor, beam_axis, line, i if beam_axis == "x" else j)
                 n_flange = 1 if discontinuous else 2
                 ib, projection, flange_width = _beam_inertia(beam["b_in"], beam["h_in"], slab_h, n_flange, transverse_bay)
                 slab_i = transverse_bay * slab_h ** 3 / 12.0
@@ -215,7 +215,7 @@ def _choose_slab_by_floor(g, s, p):
         raise ValueError("Slab thickness ladder exceeds 10,000 trials; increase the thickness increment.")
     distinct = floor_sections.distinct_floors(s)
     shallowest = min(beam["h_in"] for _sha, floor, _floors in distinct
-                     for beam in floor["beam_lines"]["x"] + floor["beam_lines"]["y"])
+                     for beam in floor_sections.all_beams(floor))
     trials = []
     for step in range(steps):
         slab_h = lower + step * increment

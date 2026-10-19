@@ -10,8 +10,8 @@ floor modules accept instead, builds it for a floor of the installed design, and
      "supports": [[column below the floor at (i, j) for i = 0..nx] for j = 0..ny],        # b_in, h_in
      "fc_beam_ksi": the one beam concrete grade (also the slab's)}
 
-A beam line carries one section over all its spans (the grouping policy gives every span of a line at a
-floor the same group; a line that does not is refused here rather than averaged). The support entry is
+A mixed floor uses SPAN_SCHEMA and beam_lines[axis][line][span], preserving the section of every
+physical span. Uniform lines retain the original SCHEMA and signatures. The support entry is
 the column whose section the joint core takes (Model.Member_Properties: the column below). Nothing in
 the description is bookkeeping: group names, floor numbers and bands are left out, so two floors with the
 same mechanical inputs have the same signature and may share one solution, and two floors that differ in
@@ -25,15 +25,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 
 SCHEMA = "smrf_floor_sections_by_line_v1"
+SPAN_SCHEMA = "smrf_floor_sections_by_span_v1"
 BY_FLOOR_SCHEMA = "smrf_floor_sections_by_floor_v1"
 _UNIFORM_KEYS = ("b_beam_in", "h_beam_in", "fc_beam_ksi", "b_col_in", "h_col_in")
 _PASS_THROUGH = ("slab_poisson_ratio", "beam_stiffness_modifier", "beam_torsion_modifier")
 
 
 def is_by_line(sections):
-    return isinstance(sections, dict) and sections.get("schema") == SCHEMA
+    """A grouped floor (including lines whose spans have different sections)."""
+    return isinstance(sections, dict) and sections.get("schema") in (SCHEMA, SPAN_SCHEMA)
+
+
+def is_by_span(sections):
+    return isinstance(sections, dict) and sections.get("schema") == SPAN_SCHEMA
 
 
 def is_by_floor(sections):
@@ -48,18 +55,31 @@ def require_uniform(sections, who):
     return sections
 
 
-def beam_line(sections, axis, line_index):
+def beam_line(sections, axis, line_index, span_index=None):
     """{"b_in", "h_in", "fc_ksi"} of the beam on X line j or Y line i."""
     if is_by_line(sections):
-        return sections["beam_lines"][axis][line_index]
+        entry = sections["beam_lines"][axis][line_index]
+        if is_by_span(sections):
+            if span_index is not None:
+                return entry[span_index]
+            if any(beam != entry[0] for beam in entry):
+                raise ValueError("A mixed beam line requires an explicit span_index; sections cannot be averaged.")
+            return entry[0]
+        return entry
     return {"b_in": sections["b_beam_in"], "h_in": sections["h_beam_in"], "fc_ksi": sections["fc_beam_ksi"]}
 
 
-def beam_width(sections, axis, line_index):
+def beam_width(sections, axis, line_index, span_index=None):
     """Width of the beam on X line j or Y line i (the only beam property the strip and mesh code needs)."""
-    if is_by_line(sections):
-        return sections["beam_lines"][axis][line_index]["b_in"]
-    return sections["b_beam_in"]
+    if not is_by_line(sections):
+        return sections["b_beam_in"]  # Width-only callers need no depth or material properties.
+    return beam_line(sections, axis, line_index, span_index)["b_in"]
+
+
+def all_beams(sections):
+    """All stored beam sections, for section bounds and material validation."""
+    return [beam for axis in ("x", "y") for entry in sections["beam_lines"][axis]
+            for beam in (entry if is_by_span(sections) else [entry])]
 
 
 def beam_lines(sections, axis, count):
@@ -85,14 +105,17 @@ def panel_face_widths(sections, panel_i, panel_j):
     "x" names the faces normal to X, which belong to the Y-direction beams on lines i and i + 1; "y" the
     faces normal to Y, the X-direction beams on lines j and j + 1.
     """
-    return {"x": (beam_width(sections, "y", panel_i), beam_width(sections, "y", panel_i + 1)),
-            "y": (beam_width(sections, "x", panel_j), beam_width(sections, "x", panel_j + 1))}
+    return {"x": (beam_width(sections, "y", panel_i, panel_j), beam_width(sections, "y", panel_i + 1, panel_j)),
+            "y": (beam_width(sections, "x", panel_j, panel_i), beam_width(sections, "x", panel_j + 1, panel_i))}
 
 
 def face_widths(sections, nx, ny):
     """Beam widths at the faces the mesh recipe grades toward: {"x": [Y line i widths], "y": [X line j widths]}."""
-    return {"x": [beam_width(sections, "y", i) for i in range(nx + 1)],
-            "y": [beam_width(sections, "x", j) for j in range(ny + 1)]}
+    def widths(axis, line, count):
+        values = [beam_width(sections, axis, line, span) for span in range(count)]
+        return values[0] if len(set(values)) == 1 else values
+    return {"x": [widths("y", i, ny) for i in range(nx + 1)],
+            "y": [widths("x", j, nx) for j in range(ny + 1)]}
 
 
 def _canonical(payload):
@@ -114,9 +137,12 @@ def validate(sections, nx, ny):
     if set(lines) != {"x", "y"} or len(lines["x"]) != ny + 1 or len(lines["y"]) != nx + 1:
         raise ValueError("A by-line floor needs one beam for every X line and every Y line.")
     for axis in ("x", "y"):
-        for beam in lines[axis]:
+        if is_by_span(sections) and any(not isinstance(row, list) or len(row) != (nx if axis == "x" else ny)
+                                         for row in lines[axis]):
+            raise ValueError("A by-span floor needs one beam section per physical span on each line.")
+        for beam in (b for row in lines[axis] for b in (row if is_by_span(sections) else [row])):
             if set(beam) != {"b_in", "h_in", "fc_ksi"} or any(
-                    isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0 for v in beam.values()):
+                    isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not v > 0 for v in beam.values()):
                 raise ValueError("Every beam line needs positive b_in, h_in and fc_ksi.")
             if beam["fc_ksi"] != sections.get("fc_beam_ksi"):
                 raise ValueError("Beam lines must share the one beam concrete grade (fc_beam_ksi) in this revision.")
@@ -126,7 +152,7 @@ def validate(sections, nx, ny):
     for row in rows:
         for column in row:
             if set(column) != {"b_in", "h_in"} or any(
-                    isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0 for v in column.values()):
+                    isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not v > 0 for v in column.values()):
                 raise ValueError("Every support needs positive b_in and h_in.")
     unknown = set(sections) - {"schema", "beam_lines", "supports", "fc_beam_ksi", *_PASS_THROUGH}
     if unknown:
@@ -138,7 +164,7 @@ def uniform_equivalent(sections):
     """The one-beam, one-column dictionary when every line and support is the same; None otherwise."""
     if not is_by_line(sections):
         return dict(sections)
-    beams = [beam for axis in ("x", "y") for beam in sections["beam_lines"][axis]]
+    beams = all_beams(sections)
     columns = [column for row in sections["supports"] for column in row]
     if any(beam != beams[0] for beam in beams) or any(column != columns[0] for column in columns):
         return None
@@ -159,15 +185,14 @@ def for_floor(floor):
     def line(kind, index):
         spans = ([mg.beam_at("beam_x", floor, i, index) for i in range(nx)] if kind == "beam_x"
                  else [mg.beam_at("beam_y", floor, index, j) for j in range(ny)])
-        designs = {(m.design.b_in, m.design.h_in, m.design.fc_ksi) for m in spans}
-        if len(designs) != 1:
-            raise mg.GroupedStateError(f"Floor {floor}: the spans of {kind} line {index} have different sections "
-                                       f"({sorted(designs)}); a beam line carries one section in the floor models.")
-        b, h, fc = designs.pop()
-        return {"b_in": b, "h_in": h, "fc_ksi": fc}
+        return [{"b_in": m.design.b_in, "h_in": m.design.h_in, "fc_ksi": m.design.fc_ksi} for m in spans]
 
     lines = {"x": [line("beam_x", j) for j in range(ny + 1)], "y": [line("beam_y", i) for i in range(nx + 1)]}
-    grades = {beam["fc_ksi"] for axis in ("x", "y") for beam in lines[axis]}
+    grades = {beam["fc_ksi"] for axis in ("x", "y") for row in lines[axis] for beam in row}
+    schema = SPAN_SCHEMA
+    if all(all(beam == row[0] for beam in row) for axis in ("x", "y") for row in lines[axis]):
+        schema = SCHEMA
+        lines = {axis: [row[0] for row in lines[axis]] for axis in ("x", "y")}
     if len(grades) != 1:
         raise mg.GroupedStateError(f"Floor {floor}: beam groups use different concrete grades {sorted(grades)}; this revision "
                                    "keeps one beam grade (group-specific grades wait for joint material-transition rules).")
@@ -178,7 +203,7 @@ def for_floor(floor):
             design = mp.joint_core_column(floor, i, j).design
             row.append({"b_in": design.b_in, "h_in": design.h_in})
         supports.append(row)
-    return validate({"schema": SCHEMA, "beam_lines": lines, "supports": supports, "fc_beam_ksi": grades.pop()}, nx, ny)
+    return validate({"schema": schema, "beam_lines": lines, "supports": supports, "fc_beam_ksi": grades.pop()}, nx, ny)
 
 
 def by_floor():

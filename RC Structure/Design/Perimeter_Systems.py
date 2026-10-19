@@ -93,8 +93,8 @@ def lateral_model(model):
 
 def member_systems():
     """{member tag (str): system} of every physical member of the current frame."""
-    nx, ny = sp.NUM_BAY_X, sp.NUM_BAY_Y
-    return {str(m.member_tag): mg.member_system(m.member_type, m.grid_i, m.grid_j, nx, ny) for m in mg.all_members()}
+    nx, ny, layout = sp.NUM_BAY_X, sp.NUM_BAY_Y, mg.active_layout()
+    return {str(m.member_tag): mg.member_system(m.member_type, m.grid_i, m.grid_j, nx, ny, layout) for m in mg.all_members()}
 
 
 # ---- the lateral solves of the design route --------------------------------------------------------------------
@@ -367,7 +367,9 @@ def gravity_frame_evidence(compatibility, cfg, state, beams, columns, actions):
             detailing = {"stirrup_spacing_in": hoops.get("spacing_in", design.stirrup_spacing_in), "smallest_bar_db_in": db,
                          "hoops": bool(hoops)}
             strengths = {"ve_kip": max((m["governing_ve_kip"] for m in data["members"]), default=None),
-                         "phi_vn_capacity_kip": hoops.get("phi_vn_kip")}
+                         "phi_vn_capacity_kip": hoops.get("phi_vn_kip"),
+                         "vs_required_kip": data.get("vs_required_kip"), "vs_four_root_fc_kip": data.get("vs_four_root_fc_kip")}
+            detailing["transverse_rule"] = data.get("transverse_rule")
             checks_of = gravity_rules.evaluate_gravity_beam(gid, branch_input, strengths, section, detailing)
         branch = next((c["details"] for c in checks_of if c["id"].endswith("compatibility_branch") and c.get("details")), {})
         groups[gid] = {"member_type": group["member_type"], "tie": state.tie_of(gid), "system": mg.SYSTEM_GRAVITY,
@@ -382,8 +384,9 @@ def gravity_frame_evidence(compatibility, cfg, state, beams, columns, actions):
     return {"groups": groups, "checks": checks_out, "compatibility_calculated": compatibility is not None,
             "basis": ("ACI 318-19 18.14: each gravity group's branch (18.14.3.2 within the design strengths, 18.14.3.3 otherwise) "
                       "from the induced actions of the compatibility run through the group strength routines; the checks of "
-                      "that branch are read on the hoops the capacity design selected (the special-frame hoops, kept for the "
-                      "gravity members in this revision)")}
+                      "that branch are read on the transverse steel the capacity design selected: gravity beams carry closed "
+                      "stirrups throughout at <= d/2 (18.14.3.2(a), Table 9.7.6.2.2) with the 18.6.5 shear (2026-10-18); gravity "
+                      "columns keep 18.7.5 in full (18.14.3.3(c))")}
 
 
 def gravity_induced_from_capacity(capacity):

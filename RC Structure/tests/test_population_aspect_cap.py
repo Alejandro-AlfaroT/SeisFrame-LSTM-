@@ -1,4 +1,4 @@
-"""The V2 population after the 2026-10-14 decisions: bays 3-6 and height over least plan width at most 2.25."""
+"""The V2 population after the 2026-10-18 decision: bays 3-7 and height over least plan width at most 2.25."""
 import json
 import os
 import subprocess
@@ -23,10 +23,10 @@ def manifest_problems(manifest):
 
 class Population(unittest.TestCase):
     def test_ranges_and_cap(self):
-        self.assertEqual(RANGES["num_bay_x"], (3, 4, 5, 6))
-        self.assertEqual(RANGES["num_bay_y"], (3, 4, 5, 6))
+        self.assertEqual(RANGES["num_bay_x"], (3, 4, 5, 6, 7))
+        self.assertEqual(RANGES["num_bay_y"], (3, 4, 5, 6, 7))
         self.assertEqual(MAX_HEIGHT_TO_WIDTH_RATIO, 2.25)
-        self.assertIn("bays3_6", POPULATION_BASIS)
+        self.assertIn("bays3_7", POPULATION_BASIS)
         self.assertIn("aspect_le_2p25", POPULATION_BASIS)
 
     def test_admissibility(self):
@@ -37,18 +37,22 @@ class Population(unittest.TestCase):
                                              "bay_x_width_ft": 18.0, "bay_y_width_ft": 18.0}))
         self.assertFalse(geometry_admissible((2, 3, 4, 12.0, 18.0, 18.0)))          # two bays: not a member
         self.assertTrue(geometry_admissible((6, 6, 9, 18.0, 30.0, 30.0)))
+        self.assertTrue(geometry_admissible((7, 3, 4, 12.0, 18.0, 18.0)))
+        self.assertTrue(geometry_admissible((3, 7, 4, 12.0, 18.0, 18.0)))
+        self.assertFalse(geometry_admissible((8, 3, 4, 12.0, 18.0, 18.0)))
+        self.assertFalse(geometry_admissible((3, 8, 4, 12.0, 18.0, 18.0)))
 
     def test_candidate_pool_respects_the_cap_and_records_it(self):
         pool = candidate_geometries(20261004, SAMPLING_METHOD)
         self.assertTrue(all(geometry_admissible(g) for g in pool))
-        self.assertTrue(all(g[0] >= 3 and g[1] >= 3 for g in pool))
+        self.assertTrue(all(3 <= g[0] <= 7 and 3 <= g[1] <= 7 for g in pool))
         worst = max(height_to_width_ratio(*g) for g in pool)
         self.assertLessEqual(worst, MAX_HEIGHT_TO_WIDTH_RATIO + 1e-12)
         provenance = sampling_provenance(20261004, include_source=False)
         self.assertEqual(provenance["max_height_to_width_ratio"], MAX_HEIGHT_TO_WIDTH_RATIO)
         self.assertEqual(provenance["pool_size"], len(pool))
         self.assertLess(provenance["pool_size"], provenance["cartesian_size"])
-        self.assertEqual(provenance["cartesian_size"], 4 * 4 * 6 * 13 * 25 * 25)
+        self.assertEqual(provenance["cartesian_size"], 5 * 5 * 6 * 13 * 25 * 25)
         inadmissible = sum(1 for g in product(*RANGES.values()) if not geometry_admissible(g))
         self.assertEqual(provenance["cartesian_size"] - provenance["pool_size"], inadmissible)
 
@@ -72,6 +76,11 @@ class ManifestValidation(unittest.TestCase):
         self.assertTrue(any("num_bay_x = 2 is outside the population" in p for p in problems), problems)
         fine = {**slender, "num_floor": 5, "story_height_ft": 12.0}
         self.assertEqual([p for p in manifest_problems(self.manifest(fine)) if "cap" in p or "outside" in p], [])
+        seven_bays = {**fine, "num_bay_x": 7, "num_bay_y": 7}
+        self.assertEqual([p for p in manifest_problems(self.manifest(seven_bays)) if "cap" in p or "outside" in p], [])
+        eight_bays = {**seven_bays, "num_bay_x": 8}
+        self.assertTrue(any("num_bay_x = 8 is outside the population" in p
+                            for p in manifest_problems(self.manifest(eight_bays))))
 
 
 class LatinHypercubeTool(unittest.TestCase):

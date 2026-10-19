@@ -246,6 +246,7 @@ def story_strength_distribution(cfg):
     # Under the system policy only the perimeter frames are the seismic force-resisting system: the interior lines
     # are gravity frames and carry no story strength here (ASCE 7-22 Table 12.3-1 reads the SFRS; decision D7).
     perimeter_only = systems.two_system()
+    layout = mg.active_layout()
     stories, worst = [], 0.0
     for floor in range(1, sp.NUM_FLOOR + 1):
         entry = {"story": floor, "by_direction": {}}
@@ -254,9 +255,15 @@ def story_strength_distribution(cfg):
             positions, strengths, groups, line_systems = [], [], [], []
             for line in range(lines):
                 total, group = 0.0, None
-                counted = (not perimeter_only) or line in (0, lines - 1)
+                counted = not perimeter_only
                 for span in range(spans):
                     beam = mg.beam_at(kind, floor, span, line) if kind == "beam_x" else mg.beam_at(kind, floor, line, span)
+                    # A span counts when its beam is part of the SFRS: every span of a perimeter line, the ring spans of
+                    # a core line under the perimeter-core layout, none of a gravity line.
+                    if perimeter_only and mg.member_system(kind, beam.grid_i, beam.grid_j, sp.NUM_BAY_X, sp.NUM_BAY_Y,
+                                                           layout) != mg.SYSTEM_SFRS:
+                        continue
+                    counted = True
                     values = mp.beam_strengths(beam)
                     total += (values["hogging"] + values["sagging"]) / sp.STORY_H
                     group = beam.group_id
@@ -271,7 +278,9 @@ def story_strength_distribution(cfg):
             worst = max(worst, fraction)
         stories.append(entry)
     return {"one_side_fraction": worst, "stories": stories,
-            "lines_counted": ("perimeter frames only (the interior lines are gravity frames, ACI 318-19 18.14)" if perimeter_only
+            "lines_counted": (("the seismic force-resisting lines only: "
+                              + ("the perimeter frames and the core ring" if layout == mg.SFRS_LAYOUT_PERIMETER_CORE else "the perimeter frames")
+                              + " (the other lines are gravity frames, ACI 318-19 18.14)") if perimeter_only
                               else "every frame line"),
             "applicability": driver._strength_model_applicability(cfg),
             "uniform_over_height": {"claim": False,

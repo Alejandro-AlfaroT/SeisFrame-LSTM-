@@ -495,7 +495,7 @@ def gravity_beam_released(ele_tag, member_type):
     kind, _story, i, j = mg.member_position(ele_tag)
     if kind != member_type:
         raise mg.GroupedStateError(f"Element {ele_tag} is built as a {member_type} but its tag is a {kind}.")
-    return mg.member_system(member_type, i, j, sp.NUM_BAY_X, sp.NUM_BAY_Y) == mg.SYSTEM_GRAVITY
+    return mg.member_system(member_type, i, j, sp.NUM_BAY_X, sp.NUM_BAY_Y, mg.active_layout()) == mg.SYSTEM_GRAVITY
 
 
 def _create_released_end_hinge(ele_tag, end_id, retained_node, hinge_node, member_type, props, length):

@@ -215,21 +215,29 @@ def _beam_inputs_by_line(sections, slab_h, lx, ly):
                 "flange_midplane_term_in4": flange_width * slab_h**3 / 12.0,
                 "iy_in4": modifier * (gross - flange_width * slab_h**3 / 12.0)}
 
-    lines = {"x": [line(beam, "x", j, ny, ly) for j, beam in enumerate(sections["beam_lines"]["x"])],
-             "y": [line(beam, "y", i, nx, lx) for i, beam in enumerate(sections["beam_lines"]["y"])]}
+    lines = {}
+    for axis, last, transverse in (("x", ny, ly), ("y", nx, lx)):
+        lines[axis] = [[line(beam, axis, index, last, transverse) for beam in entry]
+                       if floor_sections.is_by_span(sections) else line(entry, axis, index, last, transverse)
+                       for index, entry in enumerate(sections["beam_lines"][axis])]
     footprints = [[_number(column["h_in"], "h_in") * _number(column["b_in"], "b_in") for column in row]
                   for row in sections["supports"]]
-    return {"by_line": True, "lines": lines, "stiffness_modifier": modifier, "torsion_modifier": torsion,
+    return {"by_line": True, "by_span": floor_sections.is_by_span(sections), "lines": lines,
+            "stiffness_modifier": modifier, "torsion_modifier": torsion,
             "column_footprint_in2": footprints, "floor_sections_sha256": floor_sections.signature(sections),
             "basis": ("ACI 318-19 8.4.1.8 gross T/L-section of every beam line on its own web (SMRF_Slab._beam_inertia), "
                       "less the flange mid-plane term carried by the shells; centroidal element on the "
                       "slab mid-plane, no beam/slab centroid offset.")}
 
 
-def _line_properties(beam, axis, line, last):
+def _line_properties(beam, axis, line, last, span=None):
     """(A, E, G, J, Iy, Iz) of the beam segments on one line."""
     if beam.get("by_line"):
         p = beam["lines"][axis][line]
+        if beam.get("by_span"):
+            if span is None:
+                raise ValueError("Mixed-span beam stiffness requires a span index.")
+            p = p[span]
         return p["area_in2"], p["ec_ksi"], p["g_ksi"], p["j_in4"], p["iy_in4"], p["iz_in4"]
     iy = beam["line_inertia"][f"{axis}_edge" if line in (0, last) else f"{axis}_interior"]["iy_in4"]
     return beam["area_in2"], beam["ec_ksi"], beam["g_ksi"], beam["j_in4"], iy, beam["iz_in4"]
@@ -366,16 +374,16 @@ def analyze_floor(slab_record, geometry, sections, loadcase, mesh_per_bay=4,
             segment = ex * ey
             for line in range(ny + 1):
                 row = line * my
-                area, e_mod, g_mod, j_tor, iy, iz = _line_properties(beam, "x", line, ny)
                 for i in range(ex):
+                    area, e_mod, g_mod, j_tor, iy, iz = _line_properties(beam, "x", line, ny, i // mx)
                     segment += 1
                     ops.element("elasticBeamColumn", segment, tag(i, row), tag(i + 1, row),
                                 area, e_mod, g_mod, j_tor, iy, iz, 1)
                     beam_segments.append((segment, "x", line, i // mx, i % mx, tag(i, row), tag(i + 1, row)))
             for line in range(nx + 1):
                 col = line * mx
-                area, e_mod, g_mod, j_tor, iy, iz = _line_properties(beam, "y", line, nx)
                 for j in range(ey):
+                    area, e_mod, g_mod, j_tor, iy, iz = _line_properties(beam, "y", line, nx, j // my)
                     segment += 1
                     ops.element("elasticBeamColumn", segment, tag(col, j), tag(col, j + 1),
                                 area, e_mod, g_mod, j_tor, iy, iz, 1)

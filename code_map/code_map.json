@@ -11,8 +11,8 @@
   "RC Hybrid Surrogate Model"
  ],
  "counts": {
-  "nodes": 227,
-  "edges": 1139,
+  "nodes": 235,
+  "edges": 1194,
   "packages": 2
  },
  "nodes": [
@@ -1564,7 +1564,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 43,
+   "imported_by": 47,
    "imports_count": 3,
    "unresolved_imports": []
   },
@@ -1725,7 +1725,7 @@
    "name": "Gravity_Frame_Members.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 270,
+   "lines": 285,
    "module": "Design.Gravity_Frame_Members",
    "root": "RC Structure",
    "summary": "Members not designated as part of the seismic-force-resisting system: ACI 318-19 18.14 (2026-10-16).",
@@ -1748,7 +1748,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 5,
+   "imported_by": 6,
    "imports_count": 1,
    "unresolved_imports": []
   },
@@ -1757,7 +1757,7 @@
    "name": "Group_Capacity.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 787,
+   "lines": 818,
    "module": "Design.Group_Capacity",
    "root": "RC Structure",
    "summary": "Capacity design of a grouped design: every beam group, every column group, every joint (2026-10-02).",
@@ -1769,6 +1769,7 @@
     "beam_probable_strengths",
     "_span_face_reactions",
     "member_face_reactions",
+    "is_gravity_beam_group",
     "beam_group_capacity",
     "column_clear_heights",
     "column_group_capacity",
@@ -1837,8 +1838,8 @@
     "numpy",
     "openseespy"
    ],
-   "imported_by": 11,
-   "imports_count": 7,
+   "imported_by": 12,
+   "imports_count": 8,
    "unresolved_imports": []
   },
   {
@@ -1846,7 +1847,7 @@
    "name": "Group_Selection.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 642,
+   "lines": 648,
    "module": "Design.Group_Selection",
    "root": "RC Structure",
    "summary": "Reinforcement selection for a grouped design: one cage per group, on the group's own demands (2026-10-02).",
@@ -1881,8 +1882,8 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 8,
-   "imports_count": 13,
+   "imported_by": 9,
+   "imports_count": 14,
    "unresolved_imports": []
   },
   {
@@ -1890,7 +1891,7 @@
    "name": "Grouped_Design.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 1032,
+   "lines": 1041,
    "module": "Design.Grouped_Design",
    "root": "RC Structure",
    "summary": "Evaluation of one grouped design candidate, its quantities, and its design record (2026-10-02).",
@@ -1930,7 +1931,7 @@
    "external": [
     "openseespy"
    ],
-   "imported_by": 7,
+   "imported_by": 8,
    "imports_count": 19,
    "unresolved_imports": []
   },
@@ -1939,7 +1940,7 @@
    "name": "Grouped_Record.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 1002,
+   "lines": 1233,
    "module": "Design.Grouped_Record",
    "root": "RC Structure",
    "summary": "The grouped design record: built from a search result, applied to the model, and qualified (2026-10-02).",
@@ -1962,17 +1963,19 @@
     "build_record",
     "scratch_state",
     "_validated_slab",
+    "_validated_record_grade",
     "apply_grouped_design",
     "is_grouped_record",
     "apply_record",
     "_cfg_view",
-    "_rows_max",
     "group_detailing_checks",
     "_capacity_completion_checks",
     "_open_checks",
     "qualify_grouped_design",
     "_qualification_checks",
     "require_accepted_grouped_design",
+    "_search_with_grade_retry",
+    "_search_with_layout_ladder",
     "design_grouped_structure",
     "load_or_create_grouped_design"
    ],
@@ -1985,8 +1988,8 @@
    "external": [
     "openseespy"
    ],
-   "imported_by": 6,
-   "imports_count": 26,
+   "imported_by": 10,
+   "imports_count": 27,
    "unresolved_imports": []
   },
   {
@@ -1994,7 +1997,7 @@
    "name": "Grouped_Runner.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 351,
+   "lines": 374,
    "module": "Design.Grouped_Runner",
    "root": "RC Structure",
    "summary": "Grouped design of one case in a new output directory (2026-10-02).",
@@ -2016,8 +2019,8 @@
    "has_main_guard": true,
    "is_test": false,
    "external": [],
-   "imported_by": 3,
-   "imports_count": 7,
+   "imported_by": 4,
+   "imports_count": 8,
    "unresolved_imports": []
   },
   {
@@ -2025,14 +2028,16 @@
    "name": "Grouped_Search.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 724,
+   "lines": 780,
    "module": "Design.Grouped_Search",
    "root": "RC Structure",
    "summary": "Grouped design search: a feasibility phase and a bounded material-reduction phase (2026-10-02).",
    "summary_source": "docstring",
    "docstring_full": "Grouped design search: a feasibility phase and a bounded material-reduction phase (2026-10-02).\n\nA candidate is a grouped design (Model.Member_Groups.GroupedDesign); Design.Grouped_Design.evaluate_candidate\nevaluates one completely. This module proposes candidates, decides what happens to each, and keeps the\nrecord of every one of them.\n\n  seed          the uniform design expanded into its groups (the reproducibility reference), or a seed\n                the caller supplies. It is where the search starts, not a lower bound on any section.\n  feasibility   while the candidate is not feasible, the groups named by its failed constraints grow one\n                ladder step (the column of a joint that fails joint shear, the beams of a story that fails\n                drift, ...). Bounded by ``max_feasibility_trials``.\n  reduction     from a feasible design, one group at a time is offered the next smaller ladder section.\n                The whole frame is re-evaluated (slab, floor transfers of the floors that changed, every\n                combination, every group's reinforcement re-selected at the new size, capacity design,\n                joints, drift). The move is kept only under the declared policy; otherwise the previous\n                design is restored exactly (designs are immutable: nothing has to be undone).\n                Bounded by ``max_reduction_trials`` full evaluations.\n\nImprovement policy ``dominance_concrete_and_total_reinforcement_v1`` (a bounded dominance rule, not a claim\nof an optimum, and no cost data is implied): a feasible move is accepted when modeled concrete and total\nreinforcement do not increase and at least one decreases. A feasible move that lowers one and raises the\nother is kept in ``tradeoffs`` for review and not adopted. With both quantities tied, fewer distinct\nform sizes wins. When a quantity is not available (no established slab layout) the comparison is\n``unresolved`` and the move is not adopted: nothing is replaced by zero.\n\nColumn sizes along one column line may not grow upward and may not step in by 3 in or more per face\nbetween adjacent bands (Design.SMRF_Transitions); moves that would break that are not evaluated and are\nlogged as skipped with the reason. Concrete grades stay the seed's one column grade and one beam grade.\n\nEvery candidate is logged with why it was proposed, what it changed, its constraints and quantities and\nwhat was decided, and is appended to ``candidates.jsonl`` as soon as it is known when a log path is given,\nso a candidate that fails (or an unexpected exception after it) leaves its evidence behind.",
    "functions": [
+    "grade80_retry_reasons",
     "beam_rungs",
+    "_column_sizes",
     "_column_step",
     "_beam_step",
     "resized",
@@ -2067,8 +2072,8 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 6,
-   "imports_count": 6,
+   "imported_by": 10,
+   "imports_count": 7,
    "unresolved_imports": []
   },
   {
@@ -2076,7 +2081,7 @@
    "name": "Perimeter_Systems.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 408,
+   "lines": 411,
    "module": "Design.Perimeter_Systems",
    "root": "RC Structure",
    "summary": "Two systems in one frame: the perimeter special moment frames (the seismic force-resisting system) and the interior gravity frames, on the grouped-design engine (user decision 2026-10-16).",
@@ -2152,13 +2157,15 @@
    "name": "Section_Design.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 278,
+   "lines": 295,
    "module": "Design.Section_Design",
    "root": "RC Structure",
    "summary": "Design/Section_Design.py ========================",
    "summary_source": "docstring",
    "docstring_full": "Design/Section_Design.py\n========================\n\nDiscrete section-dimension and concrete-strength ladders for the iterative\ndesign loop, plus the heuristics that pick a rung from a demand-capacity\nratio.\n\nRedesign.py resizes longitudinal bars and stirrup spacing. That is only the\nlast ~20% of the design space: once a section is at its maximum practical\nsteel ratio, the only way to reduce DCR further is a bigger section or\nstronger concrete. Without this module the loop saturates and every geometry\nconverges on whatever section Structure_Parameters happened to start with.\n\nLadder ordering\n---------------\nRungs are ordered by increasing capacity. Concrete strength is stepped before\ndimensions at a given size because it is the cheaper way to buy capacity, and\nbecause deeper members attract more seismic demand through added mass and\nstiffness. Only when the strength options at a size are exhausted does the\nsection grow.\n\nUnit system: kip, inch, ksi.",
    "functions": [
+    "column_size_cap_in",
+    "column_sizes_in",
     "beam_width_for_depth",
     "beam_widths_for_depth",
     "column_ladder",
@@ -2176,7 +2183,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 20,
+   "imported_by": 24,
    "imports_count": 0,
    "unresolved_imports": []
   },
@@ -2250,7 +2257,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 26,
+   "imported_by": 28,
    "imports_count": 1,
    "unresolved_imports": []
   },
@@ -2278,6 +2285,29 @@
    "external": [],
    "imported_by": 2,
    "imports_count": 4,
+   "unresolved_imports": []
+  },
+  {
+   "id": "RC Structure/Design/SMRF_Beam_Steel.py",
+   "name": "SMRF_Beam_Steel.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/Design",
+   "lines": 40,
+   "module": "Design.SMRF_Beam_Steel",
+   "root": "RC Structure",
+   "summary": "Shared web-steel limits for candidate selection and saved-design detailing.",
+   "summary_source": "docstring",
+   "docstring_full": "Shared web-steel limits for candidate selection and saved-design detailing.\n\nAreas include all bars on the tension face; d is measured from the opposite\ncompression face to their area centroid. Equal bar sizes within a face are\nrequired. Slab steel is handled separately by the composite strength model.\nUnits: inches, square inches, ksi. The longitudinal grade is always explicit.",
+   "functions": [
+    "beam_face_steel_limits"
+   ],
+   "classes": [],
+   "is_cli": false,
+   "has_main_guard": false,
+   "is_test": false,
+   "external": [],
+   "imported_by": 2,
+   "imports_count": 2,
    "unresolved_imports": []
   },
   {
@@ -2354,7 +2384,7 @@
    "name": "SMRF_Capacity_Design.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 1953,
+   "lines": 1978,
    "module": "Design.SMRF_Capacity_Design",
    "root": "RC Structure",
    "summary": "Capacity design at every joint: probable strengths, shear, joint shear, anchorage.",
@@ -2412,7 +2442,7 @@
    "external": [
     "numpy"
    ],
-   "imported_by": 21,
+   "imported_by": 22,
    "imports_count": 7,
    "unresolved_imports": []
   },
@@ -2450,7 +2480,7 @@
    "name": "SMRF_Coupled_Analysis.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 578,
+   "lines": 585,
    "module": "Design.SMRF_Coupled_Analysis",
    "root": "RC Structure",
    "summary": "Monolithic elastic slab/web/column gravity diagnostic, NOT design approval.",
@@ -2471,7 +2501,7 @@
    "external": [
     "openseespy"
    ],
-   "imported_by": 5,
+   "imported_by": 6,
    "imports_count": 3,
    "unresolved_imports": []
   },
@@ -2591,18 +2621,19 @@
    "name": "SMRF_Detailing.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 333,
+   "lines": 376,
    "module": "Design.SMRF_Detailing",
    "root": "RC Structure",
-   "summary": "Pure checks for a declared Grade-60, normalweight rectangular RC scope.",
+   "summary": "Pure checks for a declared Grade-60/80, normalweight rectangular RC scope.",
    "summary_source": "docstring",
-   "docstring_full": "Pure checks for a declared Grade-60, normalweight rectangular RC scope.\n\nACI 318-19: 18.6.2--18.6.4, 18.7.2, 18.7.4--18.7.5, 25.2.\nUnits: kip, inch, ksi. Each member dictionary carries dimensions, bar areas,\ndiameters, counts, clear cover to OUTSIDE of hoops, and hoop spacing. Columns\nuse n_side_per_face (excluding corners). Geometry spans are center-to-center;\ncolumn h is along X, b along Y. Beam bar_stacking supplies declared layers;\nrecords without it retain the legacy single-row geometry.\n\nThis does not create a complete bar cage or certify hooks, anchorage, splices,\nconfinement area, development, or capacity shear. Those remain explicit open\nchecks. NIST GCR16-917-40 provides methodology (older code edition); the\nnumeric rules here use the declared ACI318-19 Grade60 scope.\nhttps://www.ocf.berkeley.edu/~chiep/wp-content/uploads/2024/01/CE-123-ACI-318-19.pdf",
+   "docstring_full": "Pure checks for a declared Grade-60/80, normalweight rectangular RC scope.\n\nACI 318-19: 18.6.2--18.6.4, 18.7.2, 18.7.4--18.7.5, 25.2.\nUnits: kip, inch, ksi. Each member dictionary carries dimensions, bar areas,\ndiameters, counts, clear cover to OUTSIDE of hoops, and hoop spacing. Columns\nuse n_side_per_face (excluding corners). Geometry spans are center-to-center;\ncolumn h is along X, b along Y. Grouped beams supply bar_rows per face;\nuniform beams supply directional bar_stacking. Records without either retain\nthe legacy single-row geometry.\n\nThis does not create a complete bar cage or certify hooks, anchorage, splices,\nconfinement area, development, or capacity shear. Those remain explicit open\nchecks. NIST GCR16-917-40 provides methodology (older code edition); the\nnumeric rules here use the declared ACI318-19 Grade60/80 scope.\nhttps://www.ocf.berkeley.edu/~chiep/wp-content/uploads/2024/01/CE-123-ACI-318-19.pdf",
    "functions": [
     "_num",
     "_count",
     "_dimensions",
     "_bar_geometry",
     "_grid_of",
+    "_beam_steel_by_face",
     "select_transverse_geometry",
     "evaluate_detailing"
    ],
@@ -2611,8 +2642,8 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 6,
-   "imports_count": 4,
+   "imported_by": 7,
+   "imports_count": 6,
    "unresolved_imports": []
   },
   {
@@ -2683,7 +2714,7 @@
    "name": "SMRF_Floor_Analysis.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 625,
+   "lines": 633,
    "module": "Design.SMRF_Floor_Analysis",
    "root": "RC Structure",
    "summary": "Independent elastic two-way floor diagnostic, NOT qualified slab demands.",
@@ -2709,7 +2740,7 @@
    "external": [
     "openseespy"
    ],
-   "imported_by": 12,
+   "imported_by": 13,
    "imports_count": 3,
    "unresolved_imports": []
   },
@@ -2718,7 +2749,7 @@
    "name": "SMRF_Floor_Mesh.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 456,
+   "lines": 478,
    "module": "Design.SMRF_Floor_Mesh",
    "root": "RC Structure",
    "summary": "Bounded rectangular floor grids with explicit coordinate provenance.",
@@ -2743,7 +2774,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 9,
+   "imported_by": 10,
    "imports_count": 1,
    "unresolved_imports": []
   },
@@ -2752,18 +2783,20 @@
    "name": "SMRF_Floor_Sections.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 218,
+   "lines": 243,
    "module": "Design.SMRF_Floor_Sections",
    "root": "RC Structure",
    "summary": "The beam lines and supports of one floor, for the floor models (grouped iterative design, 2026-10-02).",
    "summary_source": "docstring",
-   "docstring_full": "The beam lines and supports of one floor, for the floor models (grouped iterative design, 2026-10-02).\n\nThe floor and slab modules used to receive ``sections`` as one beam and one column for the whole\nbuilding. With design groups a floor has its own beam on every line and its own column under every\nsupport, and floors of different story bands differ. This module defines the by-line description the\nfloor modules accept instead, builds it for a floor of the installed design, and gives it an identity:\n\n    {\"schema\": SCHEMA,\n     \"beam_lines\": {\"x\": [beam of X line j = 0..ny], \"y\": [beam of Y line i = 0..nx]},   # b_in, h_in, fc_ksi\n     \"supports\": [[column below the floor at (i, j) for i = 0..nx] for j = 0..ny],        # b_in, h_in\n     \"fc_beam_ksi\": the one beam concrete grade (also the slab's)}\n\nA beam line carries one section over all its spans (the grouping policy gives every span of a line at a\nfloor the same group; a line that does not is refused here rather than averaged). The support entry is\nthe column whose section the joint core takes (Model.Member_Properties: the column below). Nothing in\nthe description is bookkeeping: group names, floor numbers and bands are left out, so two floors with the\nsame mechanical inputs have the same signature and may share one solution, and two floors that differ in\nany of them never do.\n\nThe one-beam, one-column dictionary of the uniform code is still accepted everywhere; the accessors below\nread either form. ``require_uniform`` is the refusal used by the diagnostic-only floor modules that are\nnot wired for unlike lines.",
+   "docstring_full": "The beam lines and supports of one floor, for the floor models (grouped iterative design, 2026-10-02).\n\nThe floor and slab modules used to receive ``sections`` as one beam and one column for the whole\nbuilding. With design groups a floor has its own beam on every line and its own column under every\nsupport, and floors of different story bands differ. This module defines the by-line description the\nfloor modules accept instead, builds it for a floor of the installed design, and gives it an identity:\n\n    {\"schema\": SCHEMA,\n     \"beam_lines\": {\"x\": [beam of X line j = 0..ny], \"y\": [beam of Y line i = 0..nx]},   # b_in, h_in, fc_ksi\n     \"supports\": [[column below the floor at (i, j) for i = 0..nx] for j = 0..ny],        # b_in, h_in\n     \"fc_beam_ksi\": the one beam concrete grade (also the slab's)}\n\nA mixed floor uses SPAN_SCHEMA and beam_lines[axis][line][span], preserving the section of every\nphysical span. Uniform lines retain the original SCHEMA and signatures. The support entry is\nthe column whose section the joint core takes (Model.Member_Properties: the column below). Nothing in\nthe description is bookkeeping: group names, floor numbers and bands are left out, so two floors with the\nsame mechanical inputs have the same signature and may share one solution, and two floors that differ in\nany of them never do.\n\nThe one-beam, one-column dictionary of the uniform code is still accepted everywhere; the accessors below\nread either form. ``require_uniform`` is the refusal used by the diagnostic-only floor modules that are\nnot wired for unlike lines.",
    "functions": [
     "is_by_line",
+    "is_by_span",
     "is_by_floor",
     "require_uniform",
     "beam_line",
     "beam_width",
+    "all_beams",
     "beam_lines",
     "support",
     "beam_concrete_ksi",
@@ -2783,7 +2816,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 14,
+   "imported_by": 15,
    "imports_count": 3,
    "unresolved_imports": []
   },
@@ -2817,7 +2850,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 9,
+   "imported_by": 10,
    "imports_count": 2,
    "unresolved_imports": []
   },
@@ -2856,7 +2889,7 @@
    "name": "SMRF_Joints.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 394,
+   "lines": 420,
    "module": "Design.SMRF_Joints",
    "root": "RC Structure",
    "summary": "Pure, evidence-based checks for RC special moment-frame connections.",
@@ -2943,7 +2976,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 10,
+   "imported_by": 11,
    "imports_count": 2,
    "unresolved_imports": []
   },
@@ -2952,7 +2985,7 @@
    "name": "SMRF_Slab_Actions.py",
    "package": "RC Structure",
    "folder": "RC Structure/Design",
-   "lines": 423,
+   "lines": 426,
    "module": "Design.SMRF_Slab_Actions",
    "root": "RC Structure",
    "summary": "Slab strip action evidence from the flexible-beam floor model.",
@@ -2971,7 +3004,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 13,
+   "imported_by": 14,
    "imports_count": 6,
    "unresolved_imports": []
   },
@@ -3869,7 +3902,7 @@
    "name": "Member_Bar_Layers.py",
    "package": "RC Structure",
    "folder": "RC Structure/Model",
-   "lines": 292,
+   "lines": 298,
    "module": "Model.Member_Bar_Layers",
    "root": "RC Structure",
    "summary": "Beam bar layers where different design groups meet (grouped iterative design, 2026-10-02).",
@@ -3903,22 +3936,32 @@
    "name": "Member_Groups.py",
    "package": "RC Structure",
    "folder": "RC Structure/Model",
-   "lines": 876,
+   "lines": 1046,
    "module": "Model.Member_Groups",
    "root": "RC Structure",
    "summary": "Design groups and the canonical per-member resolver (grouped iterative design, 2026-10-02).",
    "summary_source": "docstring",
    "docstring_full": "Design groups and the canonical per-member resolver (grouped iterative design, 2026-10-02).\n\nUser decision (grouped design, 2026-10-02): member design may vary by\nstory band and by framing location while mirrored positions keep one design. This module is the one\nplace that says which physical member belongs to which design group and what that group selected. Design,\nboth analysis models, the gravity and mass ledgers, the floor models, the joint and section checks, the\ndiagnostics and the exports all resolve a member through it.\n\nMembership is bookkeeping from integer grid indices only: no coordinate, no tolerance.\n\n  story bands        pairs of stories from the base; a last single story is merged into the band below\n                     (four stories: 1-2, 3-4; five: 1-2, 3-5; nine: 1-2, 3-4, 5-6, 7-9). A research\n                     search policy, not a code rule.\n  column story k     the segment between level k-1 and level k; it belongs to the band containing k.\n  beam at floor k    belongs to the band containing k.\n  column locations   corner (i on an X boundary and j on a Y boundary), x_boundary_edge (i = 0 or nx,\n                     j strictly interior), y_boundary_edge (j = 0 or ny, i strictly interior), interior.\n  beam locations     edge or interior line, separately for beam_x and beam_y (X and Y spans can differ).\n\nA group is (band, member type, location): four column groups and four beam groups per band. The reference case (2 x 6 bays, six stories) has\n24 groups over 318 members. Groups carry no dimensions or reinforcement by themselves: those are\nselected by the iterative design and stored as ``designs`` of a ``GroupedDesign``.\n\nTwo modes, never mixed:\n  * uniform (legacy): no grouped design is installed; ``resolve`` reads the single column and beam\n    design held in Structure_Parameters. This is the explicit uniform adapter the existing uniform\n    search, its records and the historical diagnostics use.\n  * grouped: ``install`` puts a ``GroupedDesign`` in force and replaces the uniform section and cage\n    values of Structure_Parameters by a sentinel that raises on any use. A consumer that has not been\n    made member-aware therefore fails loudly instead of installing one stale section everywhere, and\n    a grouped record can never fall back to a global property.\n\nPhysical element tags and nodes are those of Model.Build_Model / Design.SMRF_Elastic (columns by story,\nthen X beams, then Y beams); spring tags and local axes are identified separately (Model.IMK_Hinges).",
    "functions": [
+    "core_lines",
+    "layout_of",
+    "is_banded_policy",
+    "layout_policy",
+    "layout_ladder_next",
+    "default_system_policy",
     "policy_of",
     "stories_per_band_of",
     "is_system_policy",
+    "active_layout",
     "tie_kind",
     "tie_spec",
     "bands_of",
     "tie_of_location",
     "story_bands",
     "band_label",
+    "_on_core_ring",
+    "_on_core_lines",
+    "_core_sides",
     "column_location",
     "beam_location",
     "group_id",
@@ -3961,7 +4004,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 41,
+   "imported_by": 47,
    "imports_count": 2,
    "unresolved_imports": []
   },
@@ -4357,7 +4400,7 @@
    "has_main_guard": false,
    "is_test": false,
    "external": [],
-   "imported_by": 138,
+   "imported_by": 145,
    "imports_count": 1,
    "unresolved_imports": []
   },
@@ -4393,7 +4436,7 @@
    "external": [
     "openseespy"
    ],
-   "imported_by": 13,
+   "imported_by": 18,
    "imports_count": 2,
    "unresolved_imports": []
   },
@@ -4575,6 +4618,32 @@
    "unresolved_imports": []
   },
   {
+   "id": "RC Structure/tests/test_beam_steel_rows.py",
+   "name": "test_beam_steel_rows.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/tests",
+   "lines": 163,
+   "module": "tests.test_beam_steel_rows",
+   "root": "RC Structure",
+   "summary": "Regressions for layered face totals, actual depths and Grade 60/80 qualification.",
+   "summary_source": "docstring",
+   "docstring_full": "Regressions for layered face totals, actual depths and Grade 60/80 qualification.\n\nSmall hand-calculable sections reproduce the false failures in smoke cases\n0001 and 0003. These are implementation tests, not structural acceptance.",
+   "functions": [
+    "rows",
+    "layered_example"
+   ],
+   "classes": [
+    "LayeredSteelTests"
+   ],
+   "is_cli": true,
+   "has_main_guard": true,
+   "is_test": true,
+   "external": [],
+   "imported_by": 0,
+   "imports_count": 7,
+   "unresolved_imports": []
+  },
+  {
    "id": "RC Structure/tests/test_beam_symmetric_design.py",
    "name": "test_beam_symmetric_design.py",
    "package": "RC Structure",
@@ -4708,6 +4777,60 @@
    "external": [],
    "imported_by": 0,
    "imports_count": 10,
+   "unresolved_imports": []
+  },
+  {
+   "id": "RC Structure/tests/test_core_layout_regressions.py",
+   "name": "test_core_layout_regressions.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/tests",
+   "lines": 233,
+   "module": "tests.test_core_layout_regressions",
+   "root": "RC Structure",
+   "summary": "Core-layout size guards and layout/steel retry state, without a building search.",
+   "summary_source": "docstring",
+   "docstring_full": "Core-layout size guards and layout/steel retry state, without a building search.\n\nSearch outcomes are injected; section validation, evaluation installation, retry\ncoordination and saved grade-evidence validation use the production functions.",
+   "functions": [
+    "complete_evaluation"
+   ],
+   "classes": [
+    "SectionGuards",
+    "LayoutRetryState"
+   ],
+   "is_cli": true,
+   "has_main_guard": true,
+   "is_test": true,
+   "external": [],
+   "imported_by": 1,
+   "imports_count": 7,
+   "unresolved_imports": []
+  },
+  {
+   "id": "RC Structure/tests/test_core_sfrs_layout.py",
+   "name": "test_core_sfrs_layout.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/tests",
+   "lines": 251,
+   "module": "tests.test_core_sfrs_layout",
+   "root": "RC Structure",
+   "summary": "Perimeter + centered core SMRF layout (user proposal of 2026-10-18): the ring of frames around the middle bay (odd bay count) or the two middle bays (even bay count) joins the perimeter frames in the seismic force-resisting system. The policies system_perimeter_core_v1 and system_perimeter_core_three_story_v1 carry the layout; every other policy keeps the perimeter alone, and the classification of the perimeter policies is unchanged.",
+   "summary_source": "docstring",
+   "docstring_full": "Perimeter + centered core SMRF layout (user proposal of 2026-10-18): the ring of frames around the middle bay (odd\nbay count) or the two middle bays (even bay count) joins the perimeter frames in the seismic force-resisting system.\nThe policies system_perimeter_core_v1 and system_perimeter_core_three_story_v1 carry the layout; every other policy keeps\nthe perimeter alone, and the classification of the perimeter policies is unchanged.",
+   "functions": [],
+   "classes": [
+    "CoreLinesTests",
+    "FourByThreeTests",
+    "CoreLineFramesTests",
+    "LayoutLadderSearchTests",
+    "LayoutLadderErrorTests",
+    "FiveByFourTests"
+   ],
+   "is_cli": true,
+   "has_main_guard": true,
+   "is_test": true,
+   "external": [],
+   "imported_by": 0,
+   "imports_count": 7,
    "unresolved_imports": []
   },
   {
@@ -4848,6 +4971,29 @@
    "unresolved_imports": []
   },
   {
+   "id": "RC Structure/tests/test_gravity_beam_transverse.py",
+   "name": "test_gravity_beam_transverse.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/tests",
+   "lines": 70,
+   "module": "tests.test_gravity_beam_transverse",
+   "root": "RC Structure",
+   "summary": "Transverse steel of beams outside the seismic force-resisting system (ACI 318-19 18.14.3.2(a), design decision of 2026-10-18): closed stirrups throughout the length at not more than d/2 and 24 in, tightened to d/4 and 12 in where Vs exceeds 4 sqrt(f'c) bw d (Table 9.7.6.2.2); the 18.6.5 shear is kept. Perimeter-frame beams keep the 18.6.4.4 hinge-zone hoops.",
+   "summary_source": "docstring",
+   "docstring_full": "Transverse steel of beams outside the seismic force-resisting system (ACI 318-19 18.14.3.2(a), design decision of\n2026-10-18): closed stirrups throughout the length at not more than d/2 and 24 in, tightened to d/4 and 12 in where Vs\nexceeds 4 sqrt(f'c) bw d (Table 9.7.6.2.2); the 18.6.5 shear is kept. Perimeter-frame beams keep the 18.6.4.4\nhinge-zone hoops.",
+   "functions": [],
+   "classes": [
+    "GravityBeamTransverseTests"
+   ],
+   "is_cli": true,
+   "has_main_guard": true,
+   "is_test": true,
+   "external": [],
+   "imported_by": 0,
+   "imports_count": 3,
+   "unresolved_imports": []
+  },
+  {
    "id": "RC Structure/tests/test_gravity_frame_members.py",
    "name": "test_gravity_frame_members.py",
    "package": "RC Structure",
@@ -4984,6 +5130,32 @@
    ],
    "imported_by": 0,
    "imports_count": 18,
+   "unresolved_imports": []
+  },
+  {
+   "id": "RC Structure/tests/test_grouped_grade_retry.py",
+   "name": "test_grouped_grade_retry.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/tests",
+   "lines": 201,
+   "module": "tests.test_grouped_grade_retry",
+   "root": "RC Structure",
+   "summary": "Grade 80 fallback decisions, fresh searches, provenance and atomic restoration.",
+   "summary_source": "docstring",
+   "docstring_full": "Grade 80 fallback decisions, fresh searches, provenance and atomic restoration.",
+   "functions": [
+    "evaluation",
+    "search_result"
+   ],
+   "classes": [
+    "GradeRetryTests"
+   ],
+   "is_cli": true,
+   "has_main_guard": true,
+   "is_test": true,
+   "external": [],
+   "imported_by": 0,
+   "imports_count": 6,
    "unresolved_imports": []
   },
   {
@@ -5608,6 +5780,59 @@
    "unresolved_imports": []
   },
   {
+   "id": "RC Structure/tests/test_mixed_span_floor.py",
+   "name": "test_mixed_span_floor.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/tests",
+   "lines": 196,
+   "module": "tests.test_mixed_span_floor",
+   "root": "RC Structure",
+   "summary": "Mixed sections on one beam line: actual solver/load-path and case-0003 regressions.",
+   "summary_source": "docstring",
+   "docstring_full": "Mixed sections on one beam line: actual solver/load-path and case-0003 regressions.\n\nSoftware diagnostics, not structural design qualification. Small asymmetric floors exercise\nboth directions, centroid steps, physical slab faces, conservation and stale-transfer refusal.",
+   "functions": [
+    "floor",
+    "mirror"
+   ],
+   "classes": [
+    "MixedSpans"
+   ],
+   "is_cli": true,
+   "has_main_guard": true,
+   "is_test": true,
+   "external": [
+    "openseespy"
+   ],
+   "imported_by": 0,
+   "imports_count": 10,
+   "unresolved_imports": []
+  },
+  {
+   "id": "RC Structure/tests/test_perimeter_column_cap.py",
+   "name": "test_perimeter_column_cap.py",
+   "package": "RC Structure",
+   "folder": "RC Structure/tests",
+   "lines": 60,
+   "module": "tests.test_perimeter_column_cap",
+   "root": "RC Structure",
+   "summary": "Perimeter-only designs stop at 32 in columns (design decision of 2026-10-18): the core frames come in when the perimeter columns would pass 32 in, and at the cap the column reinforcement may go to the ACI 318-19 18.7.4.1 limit before the layout ladder adds frames. The core layouts keep the general cap.",
+   "summary_source": "docstring",
+   "docstring_full": "Perimeter-only designs stop at 32 in columns (design decision of 2026-10-18): the core frames come in when the\nperimeter columns would pass 32 in, and at the cap the column reinforcement may go to the ACI 318-19 18.7.4.1 limit\nbefore the layout ladder adds frames. The core layouts keep the general cap.",
+   "functions": [
+    "_rho"
+   ],
+   "classes": [
+    "PerimeterColumnCapTests"
+   ],
+   "is_cli": true,
+   "has_main_guard": true,
+   "is_test": true,
+   "external": [],
+   "imported_by": 0,
+   "imports_count": 6,
+   "unresolved_imports": []
+  },
+  {
    "id": "RC Structure/tests/test_perimeter_systems.py",
    "name": "test_perimeter_systems.py",
    "package": "RC Structure",
@@ -5644,12 +5869,12 @@
    "name": "test_population_aspect_cap.py",
    "package": "RC Structure",
    "folder": "RC Structure/tests",
-   "lines": 96,
+   "lines": 105,
    "module": "tests.test_population_aspect_cap",
    "root": "RC Structure",
-   "summary": "The V2 population after the 2026-10-14 decisions: bays 3-6 and height over least plan width at most 2.25.",
+   "summary": "The V2 population after the 2026-10-18 decision: bays 3-7 and height over least plan width at most 2.25.",
    "summary_source": "docstring",
-   "docstring_full": "The V2 population after the 2026-10-14 decisions: bays 3-6 and height over least plan width at most 2.25.",
+   "docstring_full": "The V2 population after the 2026-10-18 decision: bays 3-7 and height over least plan width at most 2.25.",
    "functions": [
     "manifest_problems"
    ],
@@ -5968,7 +6193,7 @@
    "has_main_guard": true,
    "is_test": true,
    "external": [],
-   "imported_by": 0,
+   "imported_by": 1,
    "imports_count": 4,
    "unresolved_imports": []
   },
@@ -6355,7 +6580,7 @@
    "has_main_guard": true,
    "is_test": true,
    "external": [],
-   "imported_by": 0,
+   "imported_by": 1,
    "imports_count": 3,
    "unresolved_imports": []
   },
@@ -6561,7 +6786,7 @@
    "name": "test_smrf_joints.py",
    "package": "RC Structure",
    "folder": "RC Structure/tests",
-   "lines": 210,
+   "lines": 240,
    "module": "tests.test_smrf_joints",
    "root": "RC Structure",
    "summary": "Independent numeric examples and missing-evidence regressions.",
@@ -6999,7 +7224,7 @@
    "name": "test_system_rules.py",
    "package": "RC Structure",
    "folder": "RC Structure/tests",
-   "lines": 192,
+   "lines": 201,
    "module": "tests.test_system_rules",
    "root": "RC Structure",
    "summary": "System rules of the perimeter-SFRS basis (2026-10-16): tied reinforcement selection, the strong-column rule in the perimeter-frame directions only, Chapter 15 joint shear outside the SFRS, tie-governing hoops, SFRS-only story strength lines and the ACI 318-19 18.14 gravity-frame evidence of the capacity design.",
@@ -7055,7 +7280,7 @@
    "name": "test_three_story_system.py",
    "package": "RC Structure",
    "folder": "RC Structure/tests",
-   "lines": 125,
+   "lines": 126,
    "module": "tests.test_three_story_system",
    "root": "RC Structure",
    "summary": "Three-story systems preserve lateral/gravity classification and enforce both dimensions at every boundary.",
@@ -11382,8 +11607,8 @@
     "FY_KSI": 11,
     "NUM_BAY_X": 5,
     "STORY_H": 5,
+    "rebar_diameter": 5,
     "NUM_BAY_Y": 4,
-    "rebar_diameter": 4,
     "rebar_area": 3,
     "COL_CLEAR_COVER_IN": 3,
     "SLAB_THICKNESS_IN": 2,
@@ -11398,11 +11623,11 @@
     "ASCE_SDS": 1
    },
    "calls": {
-    "rebar_diameter": 4,
+    "rebar_diameter": 5,
     "rebar_area": 3,
     "through_joint_bar_depth_factor": 1
    },
-   "how": "imports Structure_Parameters; uses FY_KSI, NUM_BAY_X, STORY_H, NUM_BAY_Y, rebar_diameter, rebar_area, COL_CLEAR_COVER_IN, SLAB_THICKNESS_IN ...; calls rebar_diameter (4x), rebar_area (3x), through_joint_bar_depth_factor (1x)",
+   "how": "imports Structure_Parameters; uses FY_KSI, NUM_BAY_X, STORY_H, rebar_diameter, NUM_BAY_Y, rebar_area, COL_CLEAR_COVER_IN, SLAB_THICKNESS_IN ...; calls rebar_diameter (5x), rebar_area (3x), through_joint_bar_depth_factor (1x)",
    "used_count": 17
   },
   {
@@ -11419,7 +11644,8 @@
     "straight_development_length": 3,
     "PROBABLE_FY_FACTOR": 2,
     "CONFINING_BEAM_WIDTH_RATIO": 2,
-    "PHI_JOINT": 2,
+    "BEAM_TRANSVERSE_GRAVITY": 1,
+    "BEAM_TRANSVERSE_SFRS": 1,
     "select_beam_hoops": 1,
     "column_action_envelopes": 1,
     "design_column_shear": 1,
@@ -11432,8 +11658,8 @@
     "design_column_shear": 1,
     "classify_joint_shear_inputs": 1
    },
-   "how": "imports Design.SMRF_Capacity_Design; uses COLUMN_SHEAR_METHOD_COLUMN_OWN, straight_development_length, PROBABLE_FY_FACTOR, CONFINING_BEAM_WIDTH_RATIO, PHI_JOINT, select_beam_hoops, column_action_envelopes, design_column_shear ...; calls straight_development_length (3x), select_beam_hoops (1x), column_action_envelopes (1x), design_column_shear (1x), classify_joint_shear_inputs (1x)",
-   "used_count": 9
+   "how": "imports Design.SMRF_Capacity_Design; uses COLUMN_SHEAR_METHOD_COLUMN_OWN, straight_development_length, PROBABLE_FY_FACTOR, CONFINING_BEAM_WIDTH_RATIO, BEAM_TRANSVERSE_GRAVITY, BEAM_TRANSVERSE_SFRS, select_beam_hoops, column_action_envelopes ...; calls straight_development_length (3x), select_beam_hoops (1x), column_action_envelopes (1x), design_column_shear (1x), classify_joint_shear_inputs (1x)",
+   "used_count": 10
   },
   {
    "source": "RC Structure/Design/Group_Capacity.py",
@@ -11484,6 +11710,8 @@
    "module_as_written": "Design.SMRF_Joints",
    "names": {
     "MPR_BASIS": 2,
+    "JOINT_SHEAR_BASES": 1,
+    "JOINT_SHEAR_PHI": 1,
     "beam_capacity_shear_envelope": 1,
     "rectangular_joint_area": 1
    },
@@ -11492,15 +11720,15 @@
     "beam_capacity_shear_envelope": 1,
     "rectangular_joint_area": 1
    },
-   "how": "imports Design.SMRF_Joints: MPR_BASIS, beam_capacity_shear_envelope, rectangular_joint_area; calls beam_capacity_shear_envelope (1x), rectangular_joint_area (1x)",
-   "used_count": 3
+   "how": "imports Design.SMRF_Joints: MPR_BASIS, JOINT_SHEAR_BASES, JOINT_SHEAR_PHI, beam_capacity_shear_envelope, rectangular_joint_area; calls beam_capacity_shear_envelope (1x), rectangular_joint_area (1x)",
+   "used_count": 5
   },
   {
    "source": "RC Structure/Design/Group_Capacity.py",
    "target": "RC Structure/Design/SMRF_Transitions.py",
    "kind": "import",
    "lines": [
-    35
+    36
    ],
    "module_as_written": "Design.SMRF_Transitions",
    "names": {
@@ -11518,7 +11746,7 @@
    "target": "RC Structure/Model/Member_Bar_Layers.py",
    "kind": "import",
    "lines": [
-    36
+    37
    ],
    "module_as_written": "Model.Member_Bar_Layers",
    "names": {},
@@ -11540,34 +11768,38 @@
    "target": "RC Structure/Model/Member_Groups.py",
    "kind": "import",
    "lines": [
-    37
+    38
    ],
    "module_as_written": "Model.Member_Groups",
    "names": {},
    "attributes_used": {
     "active": 4,
+    "is_system_policy": 3,
     "GroupedStateError": 3,
-    "is_system_policy": 2,
+    "layout_of": 2,
     "column_sfrs_directions": 1,
+    "SYSTEM_GRAVITY": 1,
     "joint_members": 1,
+    "SFRS_LAYOUT_PERIMETER_CORE": 1,
     "LEG_DIRECTIONS": 1
    },
    "calls": {
     "active": 4,
+    "is_system_policy": 3,
     "GroupedStateError": 3,
-    "is_system_policy": 2,
+    "layout_of": 2,
     "column_sfrs_directions": 1,
     "joint_members": 1
    },
-   "how": "imports Model.Member_Groups; uses active, GroupedStateError, is_system_policy, column_sfrs_directions, joint_members, LEG_DIRECTIONS; calls active (4x), GroupedStateError (3x), is_system_policy (2x), column_sfrs_directions (1x), joint_members (1x)",
-   "used_count": 6
+   "how": "imports Model.Member_Groups; uses active, is_system_policy, GroupedStateError, layout_of, column_sfrs_directions, SYSTEM_GRAVITY, joint_members, SFRS_LAYOUT_PERIMETER_CORE ...; calls active (4x), is_system_policy (3x), GroupedStateError (3x), layout_of (2x), column_sfrs_directions (1x), joint_members (1x)",
+   "used_count": 9
   },
   {
    "source": "RC Structure/Design/Group_Capacity.py",
    "target": "RC Structure/Model/Member_Properties.py",
    "kind": "import",
    "lines": [
-    38
+    39
    ],
    "module_as_written": "Model.Member_Properties",
    "names": {},
@@ -11599,7 +11831,7 @@
    "target": "RC Structure/RC_Design_Check.py",
    "kind": "import",
    "lines": [
-    39
+    40
    ],
    "module_as_written": "RC_Design_Check",
    "names": {
@@ -11617,7 +11849,7 @@
    "target": "RC Structure/Design/Group_Checks.py",
    "kind": "lazy_import",
    "lines": [
-    187
+    198
    ],
    "module_as_written": "Design.Group_Checks",
    "names": {
@@ -11635,7 +11867,7 @@
    "target": "RC Structure/Design/SMRF_Cage_Geometry.py",
    "kind": "lazy_import",
    "lines": [
-    412
+    443
    ],
    "module_as_written": "Design.SMRF_Cage_Geometry",
    "names": {
@@ -11651,7 +11883,7 @@
    "target": "RC Structure/Design/Perimeter_Systems.py",
    "kind": "lazy_import",
    "lines": [
-    669
+    700
    ],
    "module_as_written": "Design.Perimeter_Systems",
    "names": {
@@ -11669,7 +11901,7 @@
    "target": "RC Structure/Design/SMRF_Cage_Layout.py",
    "kind": "lazy_import",
    "lines": [
-    684
+    715
    ],
    "module_as_written": "Design.SMRF_Cage_Layout",
    "names": {
@@ -11687,7 +11919,7 @@
    "target": "RC Structure/Design/ACI_Checks.py",
    "kind": "lazy_import",
    "lines": [
-    696
+    727
    ],
    "module_as_written": "Design.ACI_Checks",
    "names": {
@@ -11756,10 +11988,28 @@
   },
   {
    "source": "RC Structure/Design/Group_Checks.py",
-   "target": "RC Structure/Model/Member_Bar_Layers.py",
+   "target": "RC Structure/Design/SMRF_Beam_Steel.py",
    "kind": "import",
    "lines": [
     26
+   ],
+   "module_as_written": "Design.SMRF_Beam_Steel",
+   "names": {
+    "beam_face_steel_limits": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "beam_face_steel_limits": 1
+   },
+   "how": "imports Design.SMRF_Beam_Steel: beam_face_steel_limits; calls beam_face_steel_limits (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/Design/Group_Checks.py",
+   "target": "RC Structure/Model/Member_Bar_Layers.py",
+   "kind": "import",
+   "lines": [
+    27
    ],
    "module_as_written": "Model.Member_Bar_Layers",
    "names": {},
@@ -11777,7 +12027,7 @@
    "target": "RC Structure/Model/Member_Groups.py",
    "kind": "import",
    "lines": [
-    27
+    28
    ],
    "module_as_written": "Model.Member_Groups",
    "names": {},
@@ -11801,7 +12051,7 @@
    "target": "RC Structure/Model/Member_Properties.py",
    "kind": "import",
    "lines": [
-    28
+    29
    ],
    "module_as_written": "Model.Member_Properties",
    "names": {},
@@ -11827,7 +12077,7 @@
    "target": "RC Structure/RC_Design_Check.py",
    "kind": "import",
    "lines": [
-    29
+    30
    ],
    "module_as_written": "RC_Design_Check",
    "names": {
@@ -11845,7 +12095,7 @@
    "target": "RC Structure/Design/SMRF_Beam_Actions.py",
    "kind": "lazy_import",
    "lines": [
-    51
+    52
    ],
    "module_as_written": "Design.SMRF_Beam_Actions",
    "names": {
@@ -11994,6 +12244,7 @@
    "attributes_used": {
     "installed": 6,
     "joint_members": 4,
+    "layout_of": 3,
     "is_system_policy": 1,
     "column_sfrs_directions": 1,
     "tie_spec": 1,
@@ -12005,13 +12256,14 @@
    "calls": {
     "installed": 6,
     "joint_members": 4,
+    "layout_of": 3,
     "is_system_policy": 1,
     "column_sfrs_directions": 1,
     "tie_spec": 1,
     "tie_kind": 1
    },
-   "how": "imports Model.Member_Groups; uses installed, joint_members, is_system_policy, column_sfrs_directions, tie_spec, SYSTEM_DESIGN_TIES, tie_kind, COLUMN_LOCATIONS ...; calls installed (6x), joint_members (4x), is_system_policy (1x), column_sfrs_directions (1x), tie_spec (1x), tie_kind (1x)",
-   "used_count": 9
+   "how": "imports Model.Member_Groups; uses installed, joint_members, layout_of, is_system_policy, column_sfrs_directions, tie_spec, SYSTEM_DESIGN_TIES, tie_kind ...; calls installed (6x), joint_members (4x), layout_of (3x), is_system_policy (1x), column_sfrs_directions (1x), tie_spec (1x)",
+   "used_count": 10
   },
   {
    "source": "RC Structure/Design/Group_Selection.py",
@@ -12060,7 +12312,7 @@
    "target": "RC Structure/Design/SMRF_Capacity_Design.py",
    "kind": "lazy_import",
    "lines": [
-    102
+    105
    ],
    "module_as_written": "Design.SMRF_Capacity_Design",
    "names": {
@@ -12075,10 +12327,28 @@
   },
   {
    "source": "RC Structure/Design/Group_Selection.py",
+   "target": "RC Structure/Design/Section_Design.py",
+   "kind": "lazy_import",
+   "lines": [
+    106
+   ],
+   "module_as_written": "Design.Section_Design",
+   "names": {
+    "column_size_cap_in": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "column_size_cap_in": 1
+   },
+   "how": "imports inside a function Design.Section_Design: column_size_cap_in; calls column_size_cap_in (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/Design/Group_Selection.py",
    "target": "RC Structure/Redesign.py",
    "kind": "lazy_import",
    "lines": [
-    103
+    107
    ],
    "module_as_written": "Redesign",
    "names": {
@@ -12094,7 +12364,7 @@
    "target": "RC Structure/Design/SMRF_Beam_Slab_Strength.py",
    "kind": "lazy_import",
    "lines": [
-    169
+    175
    ],
    "module_as_written": "Design.SMRF_Beam_Slab_Strength",
    "names": {
@@ -12112,8 +12382,8 @@
    "target": "RC Structure/Design/Group_Capacity.py",
    "kind": "lazy_import",
    "lines": [
-    361,
-    491
+    367,
+    497
    ],
    "module_as_written": "Design.Group_Capacity",
    "names": {
@@ -12131,7 +12401,7 @@
    "target": "RC Structure/Design/ACI_Checks.py",
    "kind": "lazy_import",
    "lines": [
-    367
+    373
    ],
    "module_as_written": "Design.ACI_Checks",
    "names": {
@@ -12158,8 +12428,8 @@
    "attributes_used": {
     "FLOOR_LIVE_LOAD_KSF": 5,
     "NUM_FLOOR": 5,
-    "NUM_BAY_X": 4,
-    "NUM_BAY_Y": 4,
+    "NUM_BAY_X": 5,
+    "NUM_BAY_Y": 5,
     "FLOOR_TRANSFER": 4,
     "SLAB_REINFORCEMENT": 4,
     "rebar_area": 4,
@@ -12398,8 +12668,11 @@
     "all_members": 3,
     "GroupedStateError": 3,
     "beam_at": 2,
-    "SYSTEM_SFRS": 1,
+    "SYSTEM_SFRS": 2,
+    "active_layout": 1,
+    "member_system": 1,
     "SYSTEM_GRAVITY": 1,
+    "SFRS_LAYOUT_PERIMETER_CORE": 1,
     "installed": 1,
     "GroupedDesign": 1,
     "MemberDesign": 1,
@@ -12412,11 +12685,13 @@
     "all_members": 3,
     "beam_at": 2,
     "GroupedStateError": 2,
+    "active_layout": 1,
+    "member_system": 1,
     "installed": 1,
     "design_record": 1
    },
-   "how": "imports Model.Member_Groups; uses active, install, all_members, GroupedStateError, beam_at, SYSTEM_SFRS, SYSTEM_GRAVITY, installed ...; calls active (5x), install (5x), all_members (3x), beam_at (2x), GroupedStateError (2x), installed (1x)",
-   "used_count": 12
+   "how": "imports Model.Member_Groups; uses active, install, all_members, GroupedStateError, beam_at, SYSTEM_SFRS, active_layout, member_system ...; calls active (5x), install (5x), all_members (3x), beam_at (2x), GroupedStateError (2x), active_layout (1x)",
+   "used_count": 15
   },
   {
    "source": "RC Structure/Design/Grouped_Design.py",
@@ -12491,7 +12766,7 @@
    "lines": [
     165,
     245,
-    792
+    801
    ],
    "module_as_written": "Design.SMRF_Demands",
    "names": {
@@ -12515,7 +12790,7 @@
    "kind": "lazy_import",
    "lines": [
     166,
-    787
+    796
    ],
    "module_as_written": "Design.SMRF_Floor_Transfer",
    "names": {
@@ -12555,7 +12830,7 @@
    "kind": "lazy_import",
    "lines": [
     168,
-    837
+    846
    ],
    "module_as_written": "Design.SMRF_Slab_Reinforcement",
    "names": {
@@ -12573,7 +12848,7 @@
    "target": "RC Structure/Design/SMRF_Joints.py",
    "kind": "lazy_import",
    "lines": [
-    698
+    707
    ],
    "module_as_written": "Design.SMRF_Joints",
    "names": {
@@ -12596,14 +12871,19 @@
    "module_as_written": "Structure_Parameters",
    "names": {},
    "attributes_used": {
-    "FLOOR_TRANSFER": 4,
-    "NUM_BAY_X": 3,
-    "NUM_BAY_Y": 3,
+    "FLOOR_TRANSFER": 6,
+    "FY_KSI": 5,
+    "NUM_BAY_X": 4,
+    "NUM_BAY_Y": 4,
+    "SLAB_ACTIONS": 4,
+    "apply_reinforcement_grade": 4,
     "NUM_FLOOR": 3,
     "FYT_KSI": 3,
-    "FY_KSI": 2,
+    "STORY_H": 3,
+    "SLAB_REINFORCEMENT": 3,
     "ES_KSI": 2,
     "SLAB_FY_KSI": 2,
+    "longitudinal_grade_for_story": 2,
     "CONCRETE_UNIT_WEIGHT_KCF": 2,
     "AGGREGATE_MAX_SIZE_IN": 2,
     "BEAM_CLEAR_COVER_IN": 2,
@@ -12612,13 +12892,13 @@
     "beam_bar_stacking_convention": 2,
     "BEAM_BAR_MAX_LAYERS": 2,
     "BEAM_BAR_LAYER_ORDER": 2,
-    "SLAB_ACTIONS": 2,
+    "require_a706": 2,
+    "REINFORCEMENT_SPECIFICATION": 2,
     "SLAB_THICKNESS_IN": 2,
     "rebar_diameter": 2,
     "TRANSVERSE_SPECIFICATION": 1,
     "SLAB_REINFORCEMENT_SPECIFICATION": 1,
     "LONGITUDINAL_GRADE_STORY_HEIGHT_FT": 1,
-    "STORY_H": 1,
     "effective_gravity_load_model": 1,
     "ASCE_SDS": 1,
     "ASCE_SD1": 1,
@@ -12627,26 +12907,25 @@
     "ASCE_RISK_CATEGORY": 1,
     "ASCE_IE": 1,
     "seismic_design_basis": 1,
-    "require_a706": 1,
-    "REINFORCEMENT_SPECIFICATION": 1,
     "MATERIAL_EXPOSURE": 1,
     "floor_dead_load_ksf": 1,
     "FLOOR_LIVE_LOAD_KSF": 1,
-    "SLAB_REINFORCEMENT": 1,
     "JOINT_SHEAR_CATEGORIES": 1,
     "rebar_area": 1
    },
    "calls": {
+    "apply_reinforcement_grade": 4,
+    "longitudinal_grade_for_story": 2,
     "beam_bar_stacking_convention": 2,
+    "require_a706": 2,
     "rebar_diameter": 2,
     "effective_gravity_load_model": 1,
     "seismic_design_basis": 1,
-    "require_a706": 1,
     "floor_dead_load_ksf": 1,
     "rebar_area": 1
    },
-   "how": "imports Structure_Parameters; uses FLOOR_TRANSFER, NUM_BAY_X, NUM_BAY_Y, NUM_FLOOR, FYT_KSI, FY_KSI, ES_KSI, SLAB_FY_KSI ...; calls beam_bar_stacking_convention (2x), rebar_diameter (2x), effective_gravity_load_model (1x), seismic_design_basis (1x), require_a706 (1x), floor_dead_load_ksf (1x)",
-   "used_count": 39
+   "how": "imports Structure_Parameters; uses FLOOR_TRANSFER, FY_KSI, NUM_BAY_X, NUM_BAY_Y, SLAB_ACTIONS, apply_reinforcement_grade, NUM_FLOOR, FYT_KSI ...; calls apply_reinforcement_grade (4x), longitudinal_grade_for_story (2x), beam_bar_stacking_convention (2x), require_a706 (2x), rebar_diameter (2x), effective_gravity_load_model (1x)",
+   "used_count": 41
   },
   {
    "source": "RC Structure/Design/Grouped_Record.py",
@@ -12684,18 +12963,20 @@
    "module_as_written": "Design.Group_Capacity",
    "names": {},
    "attributes_used": {
+    "is_gravity_beam_group": 2,
     "METHOD_VERSION": 1,
     "column_clear_heights": 1,
     "build_group_capacity_design": 1,
     "hoop_updates": 1
    },
    "calls": {
+    "is_gravity_beam_group": 2,
     "column_clear_heights": 1,
     "build_group_capacity_design": 1,
     "hoop_updates": 1
    },
-   "how": "imports Design.Group_Capacity; uses METHOD_VERSION, column_clear_heights, build_group_capacity_design, hoop_updates; calls column_clear_heights (1x), build_group_capacity_design (1x), hoop_updates (1x)",
-   "used_count": 4
+   "how": "imports Design.Group_Capacity; uses is_gravity_beam_group, METHOD_VERSION, column_clear_heights, build_group_capacity_design, hoop_updates; calls is_gravity_beam_group (2x), column_clear_heights (1x), build_group_capacity_design (1x), hoop_updates (1x)",
+   "used_count": 5
   },
   {
    "source": "RC Structure/Design/Grouped_Record.py",
@@ -12747,6 +13028,7 @@
    "names": {},
    "attributes_used": {
     "joint_check_inputs": 2,
+    "install_evaluation": 2,
     "SCHEMA": 1,
     "_json_safe": 1,
     "EVALUATION_VERSION": 1,
@@ -12758,6 +13040,7 @@
    },
    "calls": {
     "joint_check_inputs": 2,
+    "install_evaluation": 2,
     "_json_safe": 1,
     "_require_common_grades": 1,
     "story_strength_distribution": 1,
@@ -12765,8 +13048,8 @@
     "regularity_checks": 1,
     "quantities": 1
    },
-   "how": "imports Design.Grouped_Design; uses joint_check_inputs, SCHEMA, _json_safe, EVALUATION_VERSION, _require_common_grades, story_strength_distribution, vertical_regularity, regularity_checks ...; calls joint_check_inputs (2x), _json_safe (1x), _require_common_grades (1x), story_strength_distribution (1x), vertical_regularity (1x), regularity_checks (1x)",
-   "used_count": 9
+   "how": "imports Design.Grouped_Design; uses joint_check_inputs, install_evaluation, SCHEMA, _json_safe, EVALUATION_VERSION, _require_common_grades, story_strength_distribution, vertical_regularity ...; calls joint_check_inputs (2x), install_evaluation (2x), _json_safe (1x), _require_common_grades (1x), story_strength_distribution (1x), vertical_regularity (1x)",
+   "used_count": 10
   },
   {
    "source": "RC Structure/Design/Grouped_Record.py",
@@ -12778,19 +13061,23 @@
    "module_as_written": "Design.Grouped_Search",
    "names": {},
    "attributes_used": {
-    "SearchPolicy": 1,
-    "SEARCH_VERSION": 1,
+    "SearchPolicy": 3,
+    "STEEL_GRADE_RETRY_RULE": 3,
+    "SEARCH_VERSION": 2,
+    "grade80_retry_reasons": 2,
+    "search": 2,
     "MAX_COLUMN_SIZE_STEP_IN": 1,
     "MAX_BEAM_REDUCTION_OPTIONS": 1,
     "LEVER_ORDER_ID": 1,
-    "search": 1
+    "SFRS_LAYOUT_LADDER_RULE": 1
    },
    "calls": {
-    "SearchPolicy": 1,
-    "search": 1
+    "SearchPolicy": 3,
+    "grade80_retry_reasons": 2,
+    "search": 2
    },
-   "how": "imports Design.Grouped_Search; uses SearchPolicy, SEARCH_VERSION, MAX_COLUMN_SIZE_STEP_IN, MAX_BEAM_REDUCTION_OPTIONS, LEVER_ORDER_ID, search; calls SearchPolicy (1x), search (1x)",
-   "used_count": 6
+   "how": "imports Design.Grouped_Search; uses SearchPolicy, STEEL_GRADE_RETRY_RULE, SEARCH_VERSION, grade80_retry_reasons, search, MAX_COLUMN_SIZE_STEP_IN, MAX_BEAM_REDUCTION_OPTIONS, LEVER_ORDER_ID ...; calls SearchPolicy (3x), grade80_retry_reasons (2x), search (2x)",
+   "used_count": 9
   },
   {
    "source": "RC Structure/Design/Grouped_Record.py",
@@ -12877,12 +13164,13 @@
    "module_as_written": "Model.Member_Groups",
    "names": {},
    "attributes_used": {
+    "clear": 5,
+    "layout_of": 5,
     "MemberDesign": 4,
     "install": 4,
     "POLICY_ID": 3,
     "GroupedDesign": 3,
     "active": 3,
-    "clear": 3,
     "tie_spec": 2,
     "_legs_tuple": 1,
     "is_grouped": 1,
@@ -12890,14 +13178,17 @@
     "build_assignments": 1,
     "policy_of": 1,
     "joint_members": 1,
-    "SYSTEM_BANDED_POLICY_ID": 1,
-    "section_order_problems": 1
+    "is_banded_policy": 1,
+    "section_order_problems": 1,
+    "SFRS_LAYOUT_LADDER": 1,
+    "layout_ladder_next": 1
    },
    "calls": {
+    "clear": 5,
+    "layout_of": 5,
     "MemberDesign": 4,
     "install": 4,
     "active": 3,
-    "clear": 3,
     "tie_spec": 2,
     "_legs_tuple": 1,
     "is_grouped": 1,
@@ -12905,10 +13196,12 @@
     "build_assignments": 1,
     "policy_of": 1,
     "joint_members": 1,
-    "section_order_problems": 1
+    "is_banded_policy": 1,
+    "section_order_problems": 1,
+    "layout_ladder_next": 1
    },
-   "how": "imports Model.Member_Groups; uses MemberDesign, install, POLICY_ID, GroupedDesign, active, clear, tie_spec, _legs_tuple ...; calls MemberDesign (4x), install (4x), active (3x), clear (3x), tie_spec (2x), _legs_tuple (1x)",
-   "used_count": 15
+   "how": "imports Model.Member_Groups; uses clear, layout_of, MemberDesign, install, POLICY_ID, GroupedDesign, active, tie_spec ...; calls clear (5x), layout_of (5x), MemberDesign (4x), install (4x), active (3x), tie_spec (2x)",
+   "used_count": 18
   },
   {
    "source": "RC Structure/Design/Grouped_Record.py",
@@ -12949,7 +13242,7 @@
    "target": "RC Structure/Design/Perimeter_Systems.py",
    "kind": "lazy_import",
    "lines": [
-    276
+    287
    ],
    "module_as_written": "Design.Perimeter_Systems",
    "names": {},
@@ -12971,8 +13264,8 @@
    "target": "RC Structure/Design/SMRF_Coupled_Comparison.py",
    "kind": "lazy_import",
    "lines": [
-    324,
-    901
+    335,
+    953
    ],
    "module_as_written": "Design.SMRF_Coupled_Comparison",
    "names": {
@@ -12992,10 +13285,10 @@
    "target": "RC Structure/Design/SMRF_Slab_Reinforcement.py",
    "kind": "lazy_import",
    "lines": [
-    331,
-    497,
-    909,
-    918
+    342,
+    545,
+    961,
+    970
    ],
    "module_as_written": "Design.SMRF_Slab_Reinforcement",
    "names": {
@@ -13017,8 +13310,8 @@
    "target": "RC Structure/Design/SMRF_Design_Evidence.py",
    "kind": "lazy_import",
    "lines": [
-    391,
-    754
+    404,
+    806
    ],
    "module_as_written": "Design.SMRF_Design_Evidence",
    "names": {
@@ -13040,8 +13333,8 @@
    "target": "RC Structure/Design/SMRF_Slab.py",
    "kind": "lazy_import",
    "lines": [
-    423,
-    894
+    436,
+    946
    ],
    "module_as_written": "Design.SMRF_Slab",
    "names": {
@@ -13059,8 +13352,8 @@
    "target": "RC Structure/Design/SMRF_Floor_Transfer.py",
    "kind": "lazy_import",
    "lines": [
-    486,
-    781
+    534,
+    833
    ],
    "module_as_written": "Design.SMRF_Floor_Transfer",
    "names": {
@@ -13078,7 +13371,7 @@
    "target": "RC Structure/Design/SMRF_Detailing.py",
    "kind": "lazy_import",
    "lines": [
-    554
+    598
    ],
    "module_as_written": "Design.SMRF_Detailing",
    "names": {
@@ -13096,8 +13389,8 @@
    "target": "RC Structure/Design/SMRF_Qualification.py",
    "kind": "lazy_import",
    "lines": [
-    737,
-    756
+    789,
+    808
    ],
    "module_as_written": "Design.SMRF_Qualification",
    "names": {
@@ -13118,7 +13411,7 @@
    "target": "RC Structure/Design/SMRF_Joints.py",
    "kind": "lazy_import",
    "lines": [
-    755
+    807
    ],
    "module_as_written": "Design.SMRF_Joints",
    "names": {
@@ -13136,8 +13429,8 @@
    "target": "RC Structure/Design/SMRF_Demands.py",
    "kind": "lazy_import",
    "lines": [
-    867,
-    870
+    919,
+    922
    ],
    "module_as_written": "Design.SMRF_Demands",
    "names": {
@@ -13157,7 +13450,7 @@
    "target": "RC Structure/Design/SMRF_Common.py",
    "kind": "lazy_import",
    "lines": [
-    877
+    929
    ],
    "module_as_written": "Design.SMRF_Common",
    "names": {
@@ -13175,7 +13468,7 @@
    "target": "RC Structure/Design/SMRF_Beam_Actions.py",
    "kind": "lazy_import",
    "lines": [
-    903
+    955
    ],
    "module_as_written": "Design.SMRF_Beam_Actions",
    "names": {
@@ -13193,7 +13486,7 @@
    "target": "RC Structure/Design/SMRF_Slab_Actions.py",
    "kind": "lazy_import",
    "lines": [
-    920
+    972
    ],
    "module_as_written": "Design.SMRF_Slab_Actions",
    "names": {
@@ -13204,6 +13497,24 @@
     "evaluate_slab_actions": 1
    },
    "how": "imports inside a function Design.SMRF_Slab_Actions: evaluate_slab_actions; calls evaluate_slab_actions (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/Design/Grouped_Record.py",
+   "target": "RC Structure/Design/Section_Design.py",
+   "kind": "lazy_import",
+   "lines": [
+    1088
+   ],
+   "module_as_written": "Design.Section_Design",
+   "names": {
+    "column_size_cap_in": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "column_size_cap_in": 1
+   },
+   "how": "imports inside a function Design.Section_Design: column_size_cap_in; calls column_size_cap_in (1x)",
    "used_count": 1
   },
   {
@@ -13231,8 +13542,8 @@
    "target": "RC Structure/Design/Grouped_Record.py",
    "kind": "lazy_import",
    "lines": [
-    91,
-    212
+    100,
+    221
    ],
    "module_as_written": "Design.Grouped_Record",
    "names": {},
@@ -13258,9 +13569,9 @@
    "target": "RC Structure/Design/Screening_Manifest.py",
    "kind": "lazy_import",
    "lines": [
-    106,
-    197,
-    278
+    115,
+    206,
+    298
    ],
    "module_as_written": "Design.Screening_Manifest",
    "names": {
@@ -13282,7 +13593,7 @@
    "target": "RC Structure/Design/Verify_Designs.py",
    "kind": "lazy_import",
    "lines": [
-    191
+    200
    ],
    "module_as_written": "Design.Verify_Designs",
    "names": {
@@ -13302,7 +13613,7 @@
    "target": "RC Structure/Structure_Parameters.py",
    "kind": "lazy_import",
    "lines": [
-    211
+    220
    ],
    "module_as_written": "Structure_Parameters",
    "names": {},
@@ -13322,7 +13633,7 @@
    "target": "RC Structure/Design/Grouped_Search.py",
    "kind": "lazy_import",
    "lines": [
-    213
+    222
    ],
    "module_as_written": "Design.Grouped_Search",
    "names": {},
@@ -13340,7 +13651,7 @@
    "target": "RC Structure/Design/Config.py",
    "kind": "lazy_import",
    "lines": [
-    214
+    223
    ],
    "module_as_written": "Design.Config",
    "names": {
@@ -13349,6 +13660,24 @@
    "attributes_used": {},
    "calls": {},
    "how": "imports inside a function Design.Config: DesignConfig",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/Design/Grouped_Runner.py",
+   "target": "RC Structure/Model/Member_Groups.py",
+   "kind": "lazy_import",
+   "lines": [
+    231
+   ],
+   "module_as_written": "Model.Member_Groups",
+   "names": {},
+   "attributes_used": {
+    "default_system_policy": 1
+   },
+   "calls": {
+    "default_system_policy": 1
+   },
+   "how": "imports inside a function Model.Member_Groups; uses default_system_policy; calls default_system_policy (1x)",
    "used_count": 1
   },
   {
@@ -13364,11 +13693,12 @@
     "SLAB_THICKNESS_IN": 2,
     "BAY_X": 1,
     "BAY_Y": 1,
-    "STORY_H": 1
+    "STORY_H": 1,
+    "FY_KSI": 1
    },
    "calls": {},
-   "how": "imports Structure_Parameters; uses SLAB_THICKNESS_IN, BAY_X, BAY_Y, STORY_H",
-   "used_count": 4
+   "how": "imports Structure_Parameters; uses SLAB_THICKNESS_IN, BAY_X, BAY_Y, STORY_H, FY_KSI",
+   "used_count": 5
   },
   {
    "source": "RC Structure/Design/Grouped_Search.py",
@@ -13425,16 +13755,16 @@
    ],
    "module_as_written": "Design.Section_Design",
    "names": {
-    "COLUMN_SIZES_IN": 2,
     "BEAM_CONCRETE_STRENGTHS_KSI": 1,
     "COLUMN_CONCRETE_STRENGTHS_KSI": 1,
-    "beam_ladder": 1
+    "beam_ladder": 1,
+    "COLUMN_SIZES_IN": 0
    },
    "attributes_used": {},
    "calls": {
     "beam_ladder": 1
    },
-   "how": "imports Design.Section_Design: COLUMN_SIZES_IN, BEAM_CONCRETE_STRENGTHS_KSI, COLUMN_CONCRETE_STRENGTHS_KSI, beam_ladder; calls beam_ladder (1x)",
+   "how": "imports Design.Section_Design: BEAM_CONCRETE_STRENGTHS_KSI, COLUMN_CONCRETE_STRENGTHS_KSI, beam_ladder, COLUMN_SIZES_IN; calls beam_ladder (1x)",
    "used_count": 4
   },
   {
@@ -13449,21 +13779,24 @@
    "attributes_used": {
     "GroupedStateError": 5,
     "tie_kind": 4,
-    "SYSTEM_BANDED_POLICY_ID": 3,
+    "is_banded_policy": 3,
     "require_section_order": 3,
     "section_order_problems": 2,
+    "layout_of": 1,
     "installed": 1,
     "SYSTEM_SFRS": 1
    },
    "calls": {
     "GroupedStateError": 5,
     "tie_kind": 4,
+    "is_banded_policy": 3,
     "require_section_order": 3,
     "section_order_problems": 2,
+    "layout_of": 1,
     "installed": 1
    },
-   "how": "imports Model.Member_Groups; uses GroupedStateError, tie_kind, SYSTEM_BANDED_POLICY_ID, require_section_order, section_order_problems, installed, SYSTEM_SFRS; calls GroupedStateError (5x), tie_kind (4x), require_section_order (3x), section_order_problems (2x), installed (1x)",
-   "used_count": 7
+   "how": "imports Model.Member_Groups; uses GroupedStateError, tie_kind, is_banded_policy, require_section_order, section_order_problems, layout_of, installed, SYSTEM_SFRS; calls GroupedStateError (5x), tie_kind (4x), is_banded_policy (3x), require_section_order (3x), section_order_problems (2x), layout_of (1x)",
+   "used_count": 8
   },
   {
    "source": "RC Structure/Design/Grouped_Search.py",
@@ -13484,6 +13817,24 @@
    },
    "how": "imports Model.Member_Properties; uses longitudinal_cover_in, beam_clear_span_in; calls longitudinal_cover_in (1x), beam_clear_span_in (1x)",
    "used_count": 2
+  },
+  {
+   "source": "RC Structure/Design/Grouped_Search.py",
+   "target": "RC Structure/Design/Section_Design.py",
+   "kind": "lazy_import",
+   "lines": [
+    147
+   ],
+   "module_as_written": "Design.Section_Design",
+   "names": {
+    "column_sizes_in": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "column_sizes_in": 1
+   },
+   "how": "imports inside a function Design.Section_Design: column_sizes_in; calls column_sizes_in (1x)",
+   "used_count": 1
   },
   {
    "source": "RC Structure/Design/Perimeter_Systems.py",
@@ -13638,6 +13989,7 @@
     "active": 4,
     "all_members": 2,
     "is_system_policy": 1,
+    "active_layout": 1,
     "member_system": 1,
     "SYSTEM_SFRS": 1
    },
@@ -13645,10 +13997,11 @@
     "active": 4,
     "all_members": 2,
     "is_system_policy": 1,
+    "active_layout": 1,
     "member_system": 1
    },
-   "how": "imports Model.Member_Groups; uses SYSTEM_GRAVITY, active, all_members, is_system_policy, member_system, SYSTEM_SFRS; calls active (4x), all_members (2x), is_system_policy (1x), member_system (1x)",
-   "used_count": 6
+   "how": "imports Model.Member_Groups; uses SYSTEM_GRAVITY, active, all_members, is_system_policy, active_layout, member_system, SYSTEM_SFRS; calls active (4x), all_members (2x), is_system_policy (1x), active_layout (1x), member_system (1x)",
+   "used_count": 7
   },
   {
    "source": "RC Structure/Design/Perimeter_Systems.py",
@@ -14033,6 +14386,42 @@
    "used_count": 3
   },
   {
+   "source": "RC Structure/Design/SMRF_Beam_Steel.py",
+   "target": "RC Structure/Design/SMRF_Beam_Slab_Strength.py",
+   "kind": "import",
+   "lines": [
+    10
+   ],
+   "module_as_written": "Design.SMRF_Beam_Slab_Strength",
+   "names": {
+    "validate_bar_rows": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "validate_bar_rows": 1
+   },
+   "how": "imports Design.SMRF_Beam_Slab_Strength: validate_bar_rows; calls validate_bar_rows (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/Design/SMRF_Beam_Steel.py",
+   "target": "RC Structure/Structure_Parameters.py",
+   "kind": "lazy_import",
+   "lines": [
+    20
+   ],
+   "module_as_written": "Structure_Parameters",
+   "names": {},
+   "attributes_used": {
+    "beam_rho_max_code": 1
+   },
+   "calls": {
+    "beam_rho_max_code": 1
+   },
+   "how": "imports inside a function Structure_Parameters; uses beam_rho_max_code; calls beam_rho_max_code (1x)",
+   "used_count": 1
+  },
+  {
    "source": "RC Structure/Design/SMRF_Cage_Geometry.py",
    "target": "RC Structure/Design/SMRF_Cage_Layout.py",
    "kind": "import",
@@ -14168,10 +14557,10 @@
    "target": "RC Structure/Structure_Parameters.py",
    "kind": "lazy_import",
    "lines": [
-    90,
-    366,
-    1709,
-    1715
+    94,
+    384,
+    1734,
+    1740
    ],
    "module_as_written": "Structure_Parameters",
    "names": {},
@@ -14192,9 +14581,9 @@
    "target": "RC Structure/Design/SMRF_Cage_Layout.py",
    "kind": "lazy_import",
    "lines": [
-    365,
-    1299,
-    1908
+    383,
+    1324,
+    1933
    ],
    "module_as_written": "Design.SMRF_Cage_Layout",
    "names": {
@@ -14216,8 +14605,8 @@
    "target": "RC Structure/Design/ACI_Checks.py",
    "kind": "lazy_import",
    "lines": [
-    1727,
-    1743
+    1752,
+    1768
    ],
    "module_as_written": "Design.ACI_Checks",
    "names": {
@@ -14238,7 +14627,7 @@
    "target": "RC Structure/Design/SMRF_Cage_Geometry.py",
    "kind": "lazy_import",
    "lines": [
-    1816
+    1841
    ],
    "module_as_written": "Design.SMRF_Cage_Geometry",
    "names": {
@@ -14261,13 +14650,17 @@
    "module_as_written": "Design.SMRF_Floor_Sections",
    "names": {},
    "attributes_used": {
+    "all_beams": 2,
+    "beam_line": 2,
     "validate": 1
    },
    "calls": {
+    "all_beams": 2,
+    "beam_line": 2,
     "validate": 1
    },
-   "how": "imports Design.SMRF_Floor_Sections; uses validate; calls validate (1x)",
-   "used_count": 1
+   "how": "imports Design.SMRF_Floor_Sections; uses all_beams, beam_line, validate; calls all_beams (2x), beam_line (2x), validate (1x)",
+   "used_count": 3
   },
   {
    "source": "RC Structure/Design/SMRF_Coupled_Analysis.py",
@@ -14779,7 +15172,7 @@
    "target": "RC Structure/Design/SMRF_Common.py",
    "kind": "import",
    "lines": [
-    20
+    21
    ],
    "module_as_written": "Design.SMRF_Common",
    "names": {
@@ -14796,40 +15189,74 @@
   },
   {
    "source": "RC Structure/Design/SMRF_Detailing.py",
+   "target": "RC Structure/Design/SMRF_Beam_Slab_Strength.py",
+   "kind": "import",
+   "lines": [
+    22
+   ],
+   "module_as_written": "Design.SMRF_Beam_Slab_Strength",
+   "names": {
+    "validate_bar_rows": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "validate_bar_rows": 1
+   },
+   "how": "imports Design.SMRF_Beam_Slab_Strength: validate_bar_rows; calls validate_bar_rows (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/Design/SMRF_Detailing.py",
+   "target": "RC Structure/Design/SMRF_Beam_Steel.py",
+   "kind": "import",
+   "lines": [
+    23
+   ],
+   "module_as_written": "Design.SMRF_Beam_Steel",
+   "names": {
+    "beam_face_steel_limits": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "beam_face_steel_limits": 1
+   },
+   "how": "imports Design.SMRF_Beam_Steel: beam_face_steel_limits; calls beam_face_steel_limits (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/Design/SMRF_Detailing.py",
    "target": "RC Structure/Structure_Parameters.py",
    "kind": "lazy_import",
    "lines": [
-    51,
-    60,
-    85,
-    167,
-    209,
-    216
+    54,
+    63,
+    113,
+    195,
+    253,
+    260
    ],
    "module_as_written": "Structure_Parameters",
    "names": {},
    "attributes_used": {
+    "face_bar_min_pitch_in": 3,
     "hoop_spacing_bar_factor": 2,
-    "face_bar_min_pitch_in": 2,
     "first_bar_offset_in": 1,
-    "MODULE_GRID": 1,
-    "beam_rho_max_code": 1
+    "MODULE_GRID": 1
    },
    "calls": {
+    "face_bar_min_pitch_in": 3,
     "hoop_spacing_bar_factor": 2,
-    "face_bar_min_pitch_in": 2,
-    "first_bar_offset_in": 1,
-    "beam_rho_max_code": 1
+    "first_bar_offset_in": 1
    },
-   "how": "imports inside a function Structure_Parameters; uses hoop_spacing_bar_factor, face_bar_min_pitch_in, first_bar_offset_in, MODULE_GRID, beam_rho_max_code; calls hoop_spacing_bar_factor (2x), face_bar_min_pitch_in (2x), first_bar_offset_in (1x), beam_rho_max_code (1x)",
-   "used_count": 5
+   "how": "imports inside a function Structure_Parameters; uses face_bar_min_pitch_in, hoop_spacing_bar_factor, first_bar_offset_in, MODULE_GRID; calls face_bar_min_pitch_in (3x), hoop_spacing_bar_factor (2x), first_bar_offset_in (1x)",
+   "used_count": 4
   },
   {
    "source": "RC Structure/Design/SMRF_Detailing.py",
    "target": "RC Structure/Design/Section_Design.py",
    "kind": "lazy_import",
    "lines": [
-    175
+    203
    ],
    "module_as_written": "Design.Section_Design",
    "names": {
@@ -14846,7 +15273,7 @@
    "target": "RC Structure/Design/SMRF_Beam_Spacing.py",
    "kind": "lazy_import",
    "lines": [
-    206
+    250
    ],
    "module_as_written": "Design.SMRF_Beam_Spacing",
    "names": {
@@ -15097,17 +15524,19 @@
    "module_as_written": "Design.SMRF_Floor_Sections",
    "names": {},
    "attributes_used": {
+    "is_by_span": 2,
     "is_by_line": 1,
     "validate": 1,
     "signature": 1
    },
    "calls": {
+    "is_by_span": 2,
     "is_by_line": 1,
     "validate": 1,
     "signature": 1
    },
-   "how": "imports Design.SMRF_Floor_Sections; uses is_by_line, validate, signature; calls is_by_line (1x), validate (1x), signature (1x)",
-   "used_count": 3
+   "how": "imports Design.SMRF_Floor_Sections; uses is_by_span, is_by_line, validate, signature; calls is_by_span (2x), is_by_line (1x), validate (1x), signature (1x)",
+   "used_count": 4
   },
   {
    "source": "RC Structure/Design/SMRF_Floor_Analysis.py",
@@ -15153,7 +15582,7 @@
    "target": "RC Structure/Design/SMRF_Floor_Sections.py",
    "kind": "lazy_import",
    "lines": [
-    302
+    310
    ],
    "module_as_written": "Design.SMRF_Floor_Sections",
    "names": {
@@ -15171,8 +15600,8 @@
    "target": "RC Structure/Structure_Parameters.py",
    "kind": "lazy_import",
    "lines": [
-    152,
-    187
+    178,
+    212
    ],
    "module_as_written": "Structure_Parameters",
    "names": {},
@@ -15190,21 +15619,21 @@
    "target": "RC Structure/Model/Member_Groups.py",
    "kind": "lazy_import",
    "lines": [
-    153
+    179
    ],
    "module_as_written": "Model.Member_Groups",
    "names": {},
    "attributes_used": {
-    "GroupedStateError": 3,
+    "GroupedStateError": 2,
     "beam_at": 2,
     "is_grouped": 1
    },
    "calls": {
-    "GroupedStateError": 3,
+    "GroupedStateError": 2,
     "beam_at": 2,
     "is_grouped": 1
    },
-   "how": "imports inside a function Model.Member_Groups; uses GroupedStateError, beam_at, is_grouped; calls GroupedStateError (3x), beam_at (2x), is_grouped (1x)",
+   "how": "imports inside a function Model.Member_Groups; uses GroupedStateError, beam_at, is_grouped; calls GroupedStateError (2x), beam_at (2x), is_grouped (1x)",
    "used_count": 3
   },
   {
@@ -15212,7 +15641,7 @@
    "target": "RC Structure/Model/Member_Properties.py",
    "kind": "lazy_import",
    "lines": [
-    154
+    180
    ],
    "module_as_written": "Model.Member_Properties",
    "names": {},
@@ -15679,6 +16108,7 @@
    "attributes_used": {
     "is_by_floor": 3,
     "distinct_floors": 2,
+    "all_beams": 2,
     "validate_by_floor": 1,
     "panel_face_widths": 1,
     "beam_line": 1
@@ -15686,12 +16116,13 @@
    "calls": {
     "is_by_floor": 3,
     "distinct_floors": 2,
+    "all_beams": 2,
     "validate_by_floor": 1,
     "panel_face_widths": 1,
     "beam_line": 1
    },
-   "how": "imports Design.SMRF_Floor_Sections; uses is_by_floor, distinct_floors, validate_by_floor, panel_face_widths, beam_line; calls is_by_floor (3x), distinct_floors (2x), validate_by_floor (1x), panel_face_widths (1x), beam_line (1x)",
-   "used_count": 5
+   "how": "imports Design.SMRF_Floor_Sections; uses is_by_floor, distinct_floors, all_beams, validate_by_floor, panel_face_widths, beam_line; calls is_by_floor (3x), distinct_floors (2x), all_beams (2x), validate_by_floor (1x), panel_face_widths (1x), beam_line (1x)",
+   "used_count": 6
   },
   {
    "source": "RC Structure/Design/SMRF_Slab.py",
@@ -15725,15 +16156,17 @@
    "attributes_used": {
     "beam_width": 2,
     "panel_face_widths": 2,
-    "is_by_line": 1
+    "is_by_line": 1,
+    "is_by_span": 1
    },
    "calls": {
     "beam_width": 2,
     "panel_face_widths": 2,
-    "is_by_line": 1
+    "is_by_line": 1,
+    "is_by_span": 1
    },
-   "how": "imports Design.SMRF_Floor_Sections; uses beam_width, panel_face_widths, is_by_line; calls beam_width (2x), panel_face_widths (2x), is_by_line (1x)",
-   "used_count": 3
+   "how": "imports Design.SMRF_Floor_Sections; uses beam_width, panel_face_widths, is_by_line, is_by_span; calls beam_width (2x), panel_face_widths (2x), is_by_line (1x), is_by_span (1x)",
+   "used_count": 4
   },
   {
    "source": "RC Structure/Design/SMRF_Slab_Actions.py",
@@ -15822,7 +16255,7 @@
    "target": "RC Structure/Design/SMRF_Slab_Refinement.py",
    "kind": "lazy_import",
    "lines": [
-    375
+    378
    ],
    "module_as_written": "Design.SMRF_Slab_Refinement",
    "names": {
@@ -17936,6 +18369,7 @@
     "resolve": 1,
     "member_position": 1,
     "member_system": 1,
+    "active_layout": 1,
     "SYSTEM_GRAVITY": 1,
     "is_grouped": 1,
     "design_record": 1
@@ -17945,11 +18379,12 @@
     "resolve": 1,
     "member_position": 1,
     "member_system": 1,
+    "active_layout": 1,
     "is_grouped": 1,
     "design_record": 1
    },
-   "how": "imports Model.Member_Groups; uses GroupedStateError, resolve, member_position, member_system, SYSTEM_GRAVITY, is_grouped, design_record; calls GroupedStateError (3x), resolve (1x), member_position (1x), member_system (1x), is_grouped (1x), design_record (1x)",
-   "used_count": 7
+   "how": "imports Model.Member_Groups; uses GroupedStateError, resolve, member_position, member_system, active_layout, SYSTEM_GRAVITY, is_grouped, design_record; calls GroupedStateError (3x), resolve (1x), member_position (1x), member_system (1x), active_layout (1x), is_grouped (1x)",
+   "used_count": 8
   },
   {
    "source": "RC Structure/Model/IMK_Hinges.py",
@@ -18262,16 +18697,19 @@
    "names": {},
    "attributes_used": {
     "GroupedStateError": 4,
+    "active_layout": 1,
+    "SFRS_LAYOUT_PERIMETER_CORE": 1,
     "joint_members": 1,
     "active": 1
    },
    "calls": {
     "GroupedStateError": 4,
+    "active_layout": 1,
     "joint_members": 1,
     "active": 1
    },
-   "how": "imports Model.Member_Groups; uses GroupedStateError, joint_members, active; calls GroupedStateError (4x), joint_members (1x), active (1x)",
-   "used_count": 3
+   "how": "imports Model.Member_Groups; uses GroupedStateError, active_layout, SFRS_LAYOUT_PERIMETER_CORE, joint_members, active; calls GroupedStateError (4x), active_layout (1x), joint_members (1x), active (1x)",
+   "used_count": 5
   },
   {
    "source": "RC Structure/Model/Member_Bar_Layers.py",
@@ -18296,7 +18734,7 @@
    "target": "RC Structure/Model/Member_Properties.py",
    "kind": "lazy_import",
    "lines": [
-    90
+    93
    ],
    "module_as_written": "Model.Member_Properties",
    "names": {},
@@ -18357,15 +18795,17 @@
    "target": "RC Structure/Design/Section_Design.py",
    "kind": "lazy_import",
    "lines": [
-    707
+    876
    ],
    "module_as_written": "Design.Section_Design",
    "names": {
-    "COLUMN_SIZE_CAP_IN": 2
+    "column_size_cap_in": 1
    },
    "attributes_used": {},
-   "calls": {},
-   "how": "imports inside a function Design.Section_Design: COLUMN_SIZE_CAP_IN",
+   "calls": {
+    "column_size_cap_in": 1
+   },
+   "how": "imports inside a function Design.Section_Design: column_size_cap_in; calls column_size_cap_in (1x)",
    "used_count": 1
   },
   {
@@ -19783,6 +20223,136 @@
    "used_count": 1
   },
   {
+   "source": "RC Structure/tests/test_beam_steel_rows.py",
+   "target": "RC Structure/tests/grouped_fixture.py",
+   "kind": "import",
+   "lines": [
+    15
+   ],
+   "module_as_written": "grouped_fixture",
+   "names": {},
+   "attributes_used": {
+    "BEAM": 2,
+    "frame": 1,
+    "uniform_state": 1,
+    "BAY_X": 1,
+    "BAY_Y": 1
+   },
+   "calls": {
+    "frame": 1,
+    "uniform_state": 1
+   },
+   "how": "imports tests.grouped_fixture; uses BEAM, frame, uniform_state, BAY_X, BAY_Y; calls frame (1x), uniform_state (1x)",
+   "used_count": 5
+  },
+  {
+   "source": "RC Structure/tests/test_beam_steel_rows.py",
+   "target": "RC Structure/Structure_Parameters.py",
+   "kind": "import",
+   "lines": [
+    16
+   ],
+   "module_as_written": "Structure_Parameters",
+   "names": {},
+   "attributes_used": {},
+   "calls": {},
+   "how": "imports Structure_Parameters",
+   "used_count": 0
+  },
+  {
+   "source": "RC Structure/tests/test_beam_steel_rows.py",
+   "target": "RC Structure/Design/Group_Checks.py",
+   "kind": "import",
+   "lines": [
+    17
+   ],
+   "module_as_written": "Design.Group_Checks",
+   "names": {},
+   "attributes_used": {
+    "beam_flexural_strengths": 1
+   },
+   "calls": {
+    "beam_flexural_strengths": 1
+   },
+   "how": "imports Design.Group_Checks; uses beam_flexural_strengths; calls beam_flexural_strengths (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_beam_steel_rows.py",
+   "target": "RC Structure/Design/Grouped_Record.py",
+   "kind": "import",
+   "lines": [
+    17
+   ],
+   "module_as_written": "Design.Grouped_Record",
+   "names": {},
+   "attributes_used": {
+    "bar_layers": 1,
+    "group_detailing_checks": 1
+   },
+   "calls": {
+    "group_detailing_checks": 1
+   },
+   "how": "imports Design.Grouped_Record; uses bar_layers, group_detailing_checks; calls group_detailing_checks (1x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_beam_steel_rows.py",
+   "target": "RC Structure/Design/SMRF_Detailing.py",
+   "kind": "import",
+   "lines": [
+    18
+   ],
+   "module_as_written": "Design.SMRF_Detailing",
+   "names": {
+    "evaluate_detailing": 11
+   },
+   "attributes_used": {},
+   "calls": {
+    "evaluate_detailing": 11
+   },
+   "how": "imports Design.SMRF_Detailing: evaluate_detailing; calls evaluate_detailing (11x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_beam_steel_rows.py",
+   "target": "RC Structure/Model/Member_Groups.py",
+   "kind": "import",
+   "lines": [
+    19
+   ],
+   "module_as_written": "Model.Member_Groups",
+   "names": {},
+   "attributes_used": {
+    "install": 1
+   },
+   "calls": {
+    "install": 1
+   },
+   "how": "imports Model.Member_Groups; uses install; calls install (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_beam_steel_rows.py",
+   "target": "RC Structure/tests/test_smrf_detailing.py",
+   "kind": "import",
+   "lines": [
+    20
+   ],
+   "module_as_written": "test_smrf_detailing",
+   "names": {
+    "find": 15,
+    "example": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "find": 15,
+    "example": 1
+   },
+   "how": "imports tests.test_smrf_detailing: find, example; calls find (15x), example (1x)",
+   "used_count": 2
+  },
+  {
    "source": "RC Structure/tests/test_beam_symmetric_design.py",
    "target": "RC Structure/Structure_Parameters.py",
    "kind": "import",
@@ -20435,6 +21005,345 @@
    },
    "how": "imports inside a function Design.SMRF_Beam_Slab_Strength: validate_bar_rows, BeamBarRowsError; calls validate_bar_rows (2x)",
    "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_core_layout_regressions.py",
+   "target": "RC Structure/tests/grouped_fixture.py",
+   "kind": "import",
+   "lines": [
+    15
+   ],
+   "module_as_written": "grouped_fixture",
+   "names": {},
+   "attributes_used": {
+    "COLUMN": 5,
+    "BEAM": 4,
+    "frame": 2
+   },
+   "calls": {
+    "frame": 2
+   },
+   "how": "imports tests.grouped_fixture; uses COLUMN, BEAM, frame; calls frame (2x)",
+   "used_count": 3
+  },
+  {
+   "source": "RC Structure/tests/test_core_layout_regressions.py",
+   "target": "RC Structure/Structure_Parameters.py",
+   "kind": "import",
+   "lines": [
+    16
+   ],
+   "module_as_written": "Structure_Parameters",
+   "names": {},
+   "attributes_used": {
+    "FY_KSI": 9,
+    "apply_reinforcement_grade": 4,
+    "SLAB_THICKNESS_IN": 2,
+    "FLOOR_TRANSFER": 2,
+    "REINFORCEMENT_SPECIFICATION_BY_GRADE": 1,
+    "REINFORCEMENT_SPECIFICATION": 1,
+    "FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF": 1,
+    "SEISMIC_LIVE_LOAD_FRACTION": 1,
+    "SLAB_ACTIONS": 1,
+    "SLAB_REINFORCEMENT": 1
+   },
+   "calls": {
+    "apply_reinforcement_grade": 4
+   },
+   "how": "imports Structure_Parameters; uses FY_KSI, apply_reinforcement_grade, SLAB_THICKNESS_IN, FLOOR_TRANSFER, REINFORCEMENT_SPECIFICATION_BY_GRADE, REINFORCEMENT_SPECIFICATION, FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF, SEISMIC_LIVE_LOAD_FRACTION ...; calls apply_reinforcement_grade (4x)",
+   "used_count": 10
+  },
+  {
+   "source": "RC Structure/tests/test_core_layout_regressions.py",
+   "target": "RC Structure/Design/Grouped_Design.py",
+   "kind": "import",
+   "lines": [
+    17
+   ],
+   "module_as_written": "Design.Grouped_Design",
+   "names": {},
+   "attributes_used": {
+    "install_evaluation": 1
+   },
+   "calls": {
+    "install_evaluation": 1
+   },
+   "how": "imports Design.Grouped_Design; uses install_evaluation; calls install_evaluation (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_core_layout_regressions.py",
+   "target": "RC Structure/Design/Grouped_Record.py",
+   "kind": "import",
+   "lines": [
+    17
+   ],
+   "module_as_written": "Design.Grouped_Record",
+   "names": {},
+   "attributes_used": {
+    "_validated_record_grade": 2,
+    "seed_from_sections": 1,
+    "_search_with_layout_ladder": 1
+   },
+   "calls": {
+    "_validated_record_grade": 2,
+    "seed_from_sections": 1,
+    "_search_with_layout_ladder": 1
+   },
+   "how": "imports Design.Grouped_Record; uses _validated_record_grade, seed_from_sections, _search_with_layout_ladder; calls _validated_record_grade (2x), seed_from_sections (1x), _search_with_layout_ladder (1x)",
+   "used_count": 3
+  },
+  {
+   "source": "RC Structure/tests/test_core_layout_regressions.py",
+   "target": "RC Structure/Design/Grouped_Search.py",
+   "kind": "import",
+   "lines": [
+    17
+   ],
+   "module_as_written": "Design.Grouped_Search",
+   "names": {},
+   "attributes_used": {
+    "beam_size_problem": 1,
+    "search": 1,
+    "SEARCH_VERSION": 1,
+    "SearchPolicy": 1,
+    "grade80_retry_reasons": 1
+   },
+   "calls": {
+    "beam_size_problem": 1,
+    "search": 1,
+    "SearchPolicy": 1,
+    "grade80_retry_reasons": 1
+   },
+   "how": "imports Design.Grouped_Search; uses beam_size_problem, search, SEARCH_VERSION, SearchPolicy, grade80_retry_reasons; calls beam_size_problem (1x), search (1x), SearchPolicy (1x), grade80_retry_reasons (1x)",
+   "used_count": 5
+  },
+  {
+   "source": "RC Structure/tests/test_core_layout_regressions.py",
+   "target": "RC Structure/Design/Config.py",
+   "kind": "import",
+   "lines": [
+    18
+   ],
+   "module_as_written": "Design.Config",
+   "names": {
+    "DesignConfig": 2
+   },
+   "attributes_used": {},
+   "calls": {},
+   "how": "imports Design.Config: DesignConfig",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_core_layout_regressions.py",
+   "target": "RC Structure/Model/Member_Groups.py",
+   "kind": "import",
+   "lines": [
+    19
+   ],
+   "module_as_written": "Model.Member_Groups",
+   "names": {},
+   "attributes_used": {
+    "SYSTEM_BANDED_POLICY_ID": 5,
+    "install": 5,
+    "GroupedDesign": 4,
+    "active": 4,
+    "SYSTEM_CORE_BANDED_POLICY_ID": 3,
+    "GroupedStateError": 3,
+    "clear": 3,
+    "SYSTEM_CORE_LINES_BANDED_POLICY_ID": 1,
+    "SFRS_LAYOUT_PERIMETER": 1,
+    "SFRS_LAYOUT_PERIMETER_CORE": 1,
+    "SFRS_LAYOUT_PERIMETER_CORE_LINES": 1,
+    "layout_policy": 1,
+    "section_order_problems": 1,
+    "SFRS_LAYOUT_LADDER": 1
+   },
+   "calls": {
+    "install": 5,
+    "active": 4,
+    "clear": 3,
+    "layout_policy": 1,
+    "section_order_problems": 1
+   },
+   "how": "imports Model.Member_Groups; uses SYSTEM_BANDED_POLICY_ID, install, GroupedDesign, active, SYSTEM_CORE_BANDED_POLICY_ID, GroupedStateError, clear, SYSTEM_CORE_LINES_BANDED_POLICY_ID ...; calls install (5x), active (4x), clear (3x), layout_policy (1x), section_order_problems (1x)",
+   "used_count": 14
+  },
+  {
+   "source": "RC Structure/tests/test_core_sfrs_layout.py",
+   "target": "RC Structure/tests/grouped_fixture.py",
+   "kind": "import",
+   "lines": [
+    10
+   ],
+   "module_as_written": "grouped_fixture",
+   "names": {},
+   "attributes_used": {
+    "frame": 1
+   },
+   "calls": {
+    "frame": 1
+   },
+   "how": "imports tests.grouped_fixture; uses frame; calls frame (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_core_sfrs_layout.py",
+   "target": "RC Structure/Design/Config.py",
+   "kind": "import",
+   "lines": [
+    11
+   ],
+   "module_as_written": "Design.Config",
+   "names": {
+    "DesignConfig": 1
+   },
+   "attributes_used": {},
+   "calls": {},
+   "how": "imports Design.Config: DesignConfig",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_core_sfrs_layout.py",
+   "target": "RC Structure/Model/Member_Groups.py",
+   "kind": "import",
+   "lines": [
+    12
+   ],
+   "module_as_written": "Model.Member_Groups",
+   "names": {},
+   "attributes_used": {
+    "SYSTEM_BANDED_POLICY_ID": 15,
+    "SYSTEM_CORE_BANDED_POLICY_ID": 9,
+    "SYSTEM_CORE_LINES_BANDED_POLICY_ID": 8,
+    "SYSTEM_CORE_POLICY_ID": 7,
+    "layout_of": 6,
+    "column_location": 6,
+    "column_sfrs_directions": 6,
+    "build_assignments": 6,
+    "is_banded_policy": 5,
+    "beam_location": 5,
+    "SYSTEM_SFRS": 5,
+    "layout_ladder_next": 5,
+    "SYSTEM_POLICY_ID": 4,
+    "system_inventory": 4,
+    "SYSTEM_GRAVITY": 3,
+    "SFRS_LAYOUT_PERIMETER_CORE_LINES": 3,
+    "SFRS_LAYOUT_PERIMETER_CORE": 2,
+    "core_lines": 2,
+    "POLICY_ID": 2,
+    "SFRS_LAYOUT_PERIMETER": 2,
+    "is_system_policy": 2,
+    "stories_per_band_of": 2,
+    "policy_of": 2,
+    "member_system": 2,
+    "default_system_policy": 1,
+    "SYSTEM_CORE_LINES_POLICY_ID": 1,
+    "SFRS_LAYOUT_LADDER": 1,
+    "clear": 1,
+    "GroupedStateError": 1
+   },
+   "calls": {
+    "layout_of": 6,
+    "column_location": 6,
+    "column_sfrs_directions": 6,
+    "build_assignments": 6,
+    "is_banded_policy": 5,
+    "beam_location": 5,
+    "layout_ladder_next": 5,
+    "system_inventory": 4,
+    "core_lines": 2,
+    "is_system_policy": 2,
+    "stories_per_band_of": 2,
+    "policy_of": 2,
+    "member_system": 2,
+    "default_system_policy": 1,
+    "clear": 1,
+    "GroupedStateError": 1
+   },
+   "how": "imports Model.Member_Groups; uses SYSTEM_BANDED_POLICY_ID, SYSTEM_CORE_BANDED_POLICY_ID, SYSTEM_CORE_LINES_BANDED_POLICY_ID, SYSTEM_CORE_POLICY_ID, layout_of, column_location, column_sfrs_directions, build_assignments ...; calls layout_of (6x), column_location (6x), column_sfrs_directions (6x), build_assignments (6x), is_banded_policy (5x), beam_location (5x)",
+   "used_count": 29
+  },
+  {
+   "source": "RC Structure/tests/test_core_sfrs_layout.py",
+   "target": "RC Structure/tests/test_core_layout_regressions.py",
+   "kind": "import",
+   "lines": [
+    13
+   ],
+   "module_as_written": "test_core_layout_regressions",
+   "names": {
+    "complete_evaluation": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "complete_evaluation": 1
+   },
+   "how": "imports tests.test_core_layout_regressions: complete_evaluation; calls complete_evaluation (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_core_sfrs_layout.py",
+   "target": "RC Structure/Structure_Parameters.py",
+   "kind": "lazy_import",
+   "lines": [
+    128,
+    195
+   ],
+   "module_as_written": "Structure_Parameters",
+   "names": {},
+   "attributes_used": {
+    "NUM_BAY_X": 1,
+    "NUM_BAY_Y": 1,
+    "NUM_FLOOR": 1
+   },
+   "calls": {},
+   "how": "imports inside a function Structure_Parameters; uses NUM_BAY_X, NUM_BAY_Y, NUM_FLOOR",
+   "used_count": 3
+  },
+  {
+   "source": "RC Structure/tests/test_core_sfrs_layout.py",
+   "target": "RC Structure/Design/Grouped_Record.py",
+   "kind": "lazy_import",
+   "lines": [
+    150,
+    167,
+    206,
+    230
+   ],
+   "module_as_written": "Design.Grouped_Record",
+   "names": {},
+   "attributes_used": {
+    "_search_with_layout_ladder": 6,
+    "seed_from_sections": 5
+   },
+   "calls": {
+    "_search_with_layout_ladder": 6,
+    "seed_from_sections": 5
+   },
+   "how": "imports inside a function Design.Grouped_Record; uses _search_with_layout_ladder, seed_from_sections; calls _search_with_layout_ladder (6x), seed_from_sections (5x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_core_sfrs_layout.py",
+   "target": "RC Structure/Design/Grouped_Search.py",
+   "kind": "lazy_import",
+   "lines": [
+    151,
+    168,
+    207,
+    231
+   ],
+   "module_as_written": "Design.Grouped_Search",
+   "names": {},
+   "attributes_used": {
+    "SearchPolicy": 6
+   },
+   "calls": {
+    "SearchPolicy": 6
+   },
+   "how": "imports inside a function Design.Grouped_Search; uses SearchPolicy; calls SearchPolicy (6x)",
+   "used_count": 1
   },
   {
    "source": "RC Structure/tests/test_deformation_ownership.py",
@@ -21232,6 +22141,66 @@
     "_portable_path": 1
    },
    "how": "imports inside a function Data_Generation.Hybrid_Exporter; uses _sample_is_stale, _load_acceleration_from_summary, _portable_path; calls _sample_is_stale (4x), _load_acceleration_from_summary (1x), _portable_path (1x)",
+   "used_count": 3
+  },
+  {
+   "source": "RC Structure/tests/test_gravity_beam_transverse.py",
+   "target": "RC Structure/Structure_Parameters.py",
+   "kind": "import",
+   "lines": [
+    10
+   ],
+   "module_as_written": "Structure_Parameters",
+   "names": {},
+   "attributes_used": {
+    "FY_KSI": 2,
+    "REINFORCEMENT_SPECIFICATION": 2,
+    "apply_reinforcement_grade": 1
+   },
+   "calls": {
+    "apply_reinforcement_grade": 1
+   },
+   "how": "imports Structure_Parameters; uses FY_KSI, REINFORCEMENT_SPECIFICATION, apply_reinforcement_grade; calls apply_reinforcement_grade (1x)",
+   "used_count": 3
+  },
+  {
+   "source": "RC Structure/tests/test_gravity_beam_transverse.py",
+   "target": "RC Structure/Design/Gravity_Frame_Members.py",
+   "kind": "import",
+   "lines": [
+    11
+   ],
+   "module_as_written": "Design.Gravity_Frame_Members",
+   "names": {},
+   "attributes_used": {
+    "beam_requirements": 4,
+    "BRANCH_YIELDING": 3,
+    "BRANCH_WITHIN_STRENGTH": 1
+   },
+   "calls": {
+    "beam_requirements": 4
+   },
+   "how": "imports Design.Gravity_Frame_Members; uses beam_requirements, BRANCH_YIELDING, BRANCH_WITHIN_STRENGTH; calls beam_requirements (4x)",
+   "used_count": 3
+  },
+  {
+   "source": "RC Structure/tests/test_gravity_beam_transverse.py",
+   "target": "RC Structure/Design/SMRF_Capacity_Design.py",
+   "kind": "import",
+   "lines": [
+    12
+   ],
+   "module_as_written": "Design.SMRF_Capacity_Design",
+   "names": {},
+   "attributes_used": {
+    "select_beam_hoops": 4,
+    "BEAM_TRANSVERSE_GRAVITY": 2,
+    "BEAM_TRANSVERSE_SFRS": 1
+   },
+   "calls": {
+    "select_beam_hoops": 4
+   },
+   "how": "imports Design.SMRF_Capacity_Design; uses select_beam_hoops, BEAM_TRANSVERSE_GRAVITY, BEAM_TRANSVERSE_SFRS; calls select_beam_hoops (4x)",
    "used_count": 3
   },
   {
@@ -22286,6 +23255,135 @@
    },
    "how": "imports inside a function Structure_Parameters; uses FLOOR_LIVE_LOAD_KSF, FLOOR_TRANSFER, floor_dead_load_ksf; calls floor_dead_load_ksf (1x)",
    "used_count": 3
+  },
+  {
+   "source": "RC Structure/tests/test_grouped_grade_retry.py",
+   "target": "RC Structure/tests/grouped_fixture.py",
+   "kind": "import",
+   "lines": [
+    12
+   ],
+   "module_as_written": "grouped_fixture",
+   "names": {},
+   "attributes_used": {
+    "frame": 1,
+    "uniform_state": 1
+   },
+   "calls": {
+    "frame": 1,
+    "uniform_state": 1
+   },
+   "how": "imports tests.grouped_fixture; uses frame, uniform_state; calls frame (1x), uniform_state (1x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_grouped_grade_retry.py",
+   "target": "RC Structure/Structure_Parameters.py",
+   "kind": "import",
+   "lines": [
+    13
+   ],
+   "module_as_written": "Structure_Parameters",
+   "names": {},
+   "attributes_used": {
+    "FY_KSI": 8,
+    "REINFORCEMENT_SPECIFICATION_BY_GRADE": 4,
+    "SLAB_REINFORCEMENT": 4,
+    "apply_reinforcement_grade": 2,
+    "FYT_KSI": 1,
+    "SLAB_FY_KSI": 1,
+    "FLOOR_TRANSFER": 1,
+    "ES_KSI": 1,
+    "REINFORCEMENT_SPECIFICATION": 1
+   },
+   "calls": {
+    "apply_reinforcement_grade": 2
+   },
+   "how": "imports Structure_Parameters; uses FY_KSI, REINFORCEMENT_SPECIFICATION_BY_GRADE, SLAB_REINFORCEMENT, apply_reinforcement_grade, FYT_KSI, SLAB_FY_KSI, FLOOR_TRANSFER, ES_KSI ...; calls apply_reinforcement_grade (2x)",
+   "used_count": 9
+  },
+  {
+   "source": "RC Structure/tests/test_grouped_grade_retry.py",
+   "target": "RC Structure/Design/Grouped_Record.py",
+   "kind": "import",
+   "lines": [
+    14
+   ],
+   "module_as_written": "Design.Grouped_Record",
+   "names": {},
+   "attributes_used": {
+    "_search_with_grade_retry": 6,
+    "gd": 2,
+    "_validated_record_grade": 2,
+    "grouped_request_identity": 2,
+    "SCHEMA": 1,
+    "driver": 1,
+    "apply_grouped_design": 1
+   },
+   "calls": {
+    "_search_with_grade_retry": 6,
+    "_validated_record_grade": 2,
+    "grouped_request_identity": 2,
+    "apply_grouped_design": 1
+   },
+   "how": "imports Design.Grouped_Record; uses _search_with_grade_retry, gd, _validated_record_grade, grouped_request_identity, SCHEMA, driver, apply_grouped_design; calls _search_with_grade_retry (6x), _validated_record_grade (2x), grouped_request_identity (2x), apply_grouped_design (1x)",
+   "used_count": 7
+  },
+  {
+   "source": "RC Structure/tests/test_grouped_grade_retry.py",
+   "target": "RC Structure/Design/Grouped_Search.py",
+   "kind": "import",
+   "lines": [
+    14
+   ],
+   "module_as_written": "Design.Grouped_Search",
+   "names": {},
+   "attributes_used": {
+    "SearchPolicy": 12,
+    "grade80_retry_reasons": 2,
+    "SEARCH_VERSION": 1,
+    "STEEL_GRADE_RETRY_RULE": 1
+   },
+   "calls": {
+    "SearchPolicy": 12,
+    "grade80_retry_reasons": 2
+   },
+   "how": "imports Design.Grouped_Search; uses SearchPolicy, grade80_retry_reasons, SEARCH_VERSION, STEEL_GRADE_RETRY_RULE; calls SearchPolicy (12x), grade80_retry_reasons (2x)",
+   "used_count": 4
+  },
+  {
+   "source": "RC Structure/tests/test_grouped_grade_retry.py",
+   "target": "RC Structure/Design/Grouped_Runner.py",
+   "kind": "import",
+   "lines": [
+    14
+   ],
+   "module_as_written": "Design.Grouped_Runner",
+   "names": {},
+   "attributes_used": {
+    "build_parser": 1
+   },
+   "calls": {
+    "build_parser": 1
+   },
+   "how": "imports Design.Grouped_Runner; uses build_parser; calls build_parser (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_grouped_grade_retry.py",
+   "target": "RC Structure/Design/Config.py",
+   "kind": "import",
+   "lines": [
+    15
+   ],
+   "module_as_written": "Design.Config",
+   "names": {
+    "DesignConfig": 2
+   },
+   "attributes_used": {},
+   "calls": {},
+   "how": "imports Design.Config: DesignConfig",
+   "used_count": 1
   },
   {
    "source": "RC Structure/tests/test_grouped_model.py",
@@ -25214,6 +26312,342 @@
    },
    "how": "imports inside a function Structure_Parameters; uses NUM_FLOOR, B_COL, H_COL, total_structural_self_weight_per_floor, total_floor_seismic_weight, NUM_BAY_Y, NUM_BAY_X, CONCRETE_UNIT_WEIGHT_KCF ...; calls beam_flexural_section (2x), beam_self_weight_kip_per_in (2x), beam_flange_geometry (2x), total_structural_self_weight_per_floor (2x), total_floor_seismic_weight (2x), node_seismic_mass (2x)",
    "used_count": 26
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/tests/grouped_fixture.py",
+   "kind": "import",
+   "lines": [
+    13
+   ],
+   "module_as_written": "grouped_fixture",
+   "names": {},
+   "attributes_used": {
+    "COLUMN": 1,
+    "BEAM": 1,
+    "frame": 1
+   },
+   "calls": {
+    "frame": 1
+   },
+   "how": "imports tests.grouped_fixture; uses COLUMN, BEAM, frame; calls frame (1x)",
+   "used_count": 3
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/Model/Member_Groups.py",
+   "kind": "import",
+   "lines": [
+    15
+   ],
+   "module_as_written": "Model.Member_Groups",
+   "names": {},
+   "attributes_used": {
+    "GroupedDesign": 1,
+    "SYSTEM_CORE_BANDED_POLICY_ID": 1,
+    "install": 1,
+    "beam_at": 1
+   },
+   "calls": {
+    "install": 1,
+    "beam_at": 1
+   },
+   "how": "imports Model.Member_Groups; uses GroupedDesign, SYSTEM_CORE_BANDED_POLICY_ID, install, beam_at; calls install (1x), beam_at (1x)",
+   "used_count": 4
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/Design/SMRF_Floor_Sections.py",
+   "kind": "import",
+   "lines": [
+    16
+   ],
+   "module_as_written": "Design.SMRF_Floor_Sections",
+   "names": {},
+   "attributes_used": {
+    "validate": 3,
+    "SPAN_SCHEMA": 2,
+    "beam_line": 2,
+    "signature": 2,
+    "panel_face_widths": 2,
+    "by_floor": 1,
+    "for_floor": 1,
+    "uniform_equivalent": 1,
+    "beam_width": 1
+   },
+   "calls": {
+    "validate": 3,
+    "beam_line": 2,
+    "signature": 2,
+    "panel_face_widths": 2,
+    "by_floor": 1,
+    "for_floor": 1,
+    "uniform_equivalent": 1,
+    "beam_width": 1
+   },
+   "how": "imports Design.SMRF_Floor_Sections; uses validate, SPAN_SCHEMA, beam_line, signature, panel_face_widths, by_floor, for_floor, uniform_equivalent ...; calls validate (3x), beam_line (2x), signature (2x), panel_face_widths (2x), by_floor (1x), for_floor (1x)",
+   "used_count": 9
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/Design/SMRF_Floor_Analysis.py",
+   "kind": "import",
+   "lines": [
+    17
+   ],
+   "module_as_written": "Design.SMRF_Floor_Analysis",
+   "names": {
+    "analyze_floor": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "analyze_floor": 1
+   },
+   "how": "imports Design.SMRF_Floor_Analysis: analyze_floor; calls analyze_floor (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/Design/SMRF_Floor_Mesh.py",
+   "kind": "import",
+   "lines": [
+    18
+   ],
+   "module_as_written": "Design.SMRF_Floor_Mesh",
+   "names": {
+    "resolve_recipe_plan": 4,
+    "floor_mesh": 3,
+    "nested_refinement": 2,
+    "witness_face_band_extension": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "resolve_recipe_plan": 4,
+    "floor_mesh": 3,
+    "nested_refinement": 2,
+    "witness_face_band_extension": 1
+   },
+   "how": "imports Design.SMRF_Floor_Mesh: resolve_recipe_plan, floor_mesh, nested_refinement, witness_face_band_extension; calls resolve_recipe_plan (4x), floor_mesh (3x), nested_refinement (2x), witness_face_band_extension (1x)",
+   "used_count": 4
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/Design/SMRF_Floor_Transfer.py",
+   "kind": "import",
+   "lines": [
+    19
+   ],
+   "module_as_written": "Design.SMRF_Floor_Transfer",
+   "names": {
+    "validate_floor_transfer": 2,
+    "build_floor_transfer": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "validate_floor_transfer": 2,
+    "build_floor_transfer": 1
+   },
+   "how": "imports Design.SMRF_Floor_Transfer: validate_floor_transfer, build_floor_transfer; calls validate_floor_transfer (2x), build_floor_transfer (1x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/Design/SMRF_Slab.py",
+   "kind": "import",
+   "lines": [
+    20
+   ],
+   "module_as_written": "Design.SMRF_Slab",
+   "names": {
+    "_panels_by_line": 1,
+    "choose_slab": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "_panels_by_line": 1,
+    "choose_slab": 1
+   },
+   "how": "imports Design.SMRF_Slab: _panels_by_line, choose_slab; calls _panels_by_line (1x), choose_slab (1x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/Design/SMRF_Coupled_Analysis.py",
+   "kind": "import",
+   "lines": [
+    21
+   ],
+   "module_as_written": "Design.SMRF_Coupled_Analysis",
+   "names": {
+    "analyze_coupled_gravity": 1,
+    "BY_MEMBER_SCHEMA": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "analyze_coupled_gravity": 1
+   },
+   "how": "imports Design.SMRF_Coupled_Analysis: analyze_coupled_gravity, BY_MEMBER_SCHEMA; calls analyze_coupled_gravity (1x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/Design/SMRF_Slab_Actions.py",
+   "kind": "lazy_import",
+   "lines": [
+    148,
+    168
+   ],
+   "module_as_written": "Design.SMRF_Slab_Actions",
+   "names": {
+    "build_slab_action_evidence": 1,
+    "compare_slab_action_refinement": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "build_slab_action_evidence": 1,
+    "compare_slab_action_refinement": 1
+   },
+   "how": "imports inside a function Design.SMRF_Slab_Actions: build_slab_action_evidence, compare_slab_action_refinement; calls build_slab_action_evidence (1x), compare_slab_action_refinement (1x)",
+   "used_count": 2
+  },
+  {
+   "source": "RC Structure/tests/test_mixed_span_floor.py",
+   "target": "RC Structure/tests/test_slab_local_refinement.py",
+   "kind": "lazy_import",
+   "lines": [
+    167
+   ],
+   "module_as_written": "test_slab_local_refinement",
+   "names": {
+    "action": 2
+   },
+   "attributes_used": {},
+   "calls": {
+    "action": 2
+   },
+   "how": "imports inside a function tests.test_slab_local_refinement: action; calls action (2x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_perimeter_column_cap.py",
+   "target": "RC Structure/Structure_Parameters.py",
+   "kind": "import",
+   "lines": [
+    9
+   ],
+   "module_as_written": "Structure_Parameters",
+   "names": {},
+   "attributes_used": {
+    "NUM_BAY_X": 3,
+    "NUM_BAY_Y": 3,
+    "NUM_FLOOR": 3,
+    "rebar_area": 1
+   },
+   "calls": {
+    "rebar_area": 1
+   },
+   "how": "imports Structure_Parameters; uses NUM_BAY_X, NUM_BAY_Y, NUM_FLOOR, rebar_area; calls rebar_area (1x)",
+   "used_count": 4
+  },
+  {
+   "source": "RC Structure/tests/test_perimeter_column_cap.py",
+   "target": "RC Structure/Design/Grouped_Search.py",
+   "kind": "import",
+   "lines": [
+    10
+   ],
+   "module_as_written": "Design.Grouped_Search",
+   "names": {},
+   "attributes_used": {
+    "_column_step": 3
+   },
+   "calls": {
+    "_column_step": 3
+   },
+   "how": "imports Design.Grouped_Search; uses _column_step; calls _column_step (3x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_perimeter_column_cap.py",
+   "target": "RC Structure/Design/Group_Selection.py",
+   "kind": "import",
+   "lines": [
+    11
+   ],
+   "module_as_written": "Design.Group_Selection",
+   "names": {},
+   "attributes_used": {
+    "column_cage_candidates": 3
+   },
+   "calls": {
+    "column_cage_candidates": 3
+   },
+   "how": "imports Design.Group_Selection; uses column_cage_candidates; calls column_cage_candidates (3x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_perimeter_column_cap.py",
+   "target": "RC Structure/Design/Section_Design.py",
+   "kind": "import",
+   "lines": [
+    12
+   ],
+   "module_as_written": "Design.Section_Design",
+   "names": {},
+   "attributes_used": {
+    "column_size_cap_in": 4,
+    "COLUMN_SIZE_CAP_IN": 4,
+    "column_sizes_in": 2,
+    "PERIMETER_COLUMN_SIZE_CAP_IN": 1
+   },
+   "calls": {
+    "column_size_cap_in": 4,
+    "column_sizes_in": 2
+   },
+   "how": "imports Design.Section_Design; uses column_size_cap_in, COLUMN_SIZE_CAP_IN, column_sizes_in, PERIMETER_COLUMN_SIZE_CAP_IN; calls column_size_cap_in (4x), column_sizes_in (2x)",
+   "used_count": 4
+  },
+  {
+   "source": "RC Structure/tests/test_perimeter_column_cap.py",
+   "target": "RC Structure/Design/Config.py",
+   "kind": "import",
+   "lines": [
+    13
+   ],
+   "module_as_written": "Design.Config",
+   "names": {
+    "DesignConfig": 1
+   },
+   "attributes_used": {},
+   "calls": {
+    "DesignConfig": 1
+   },
+   "how": "imports Design.Config: DesignConfig; calls DesignConfig (1x)",
+   "used_count": 1
+  },
+  {
+   "source": "RC Structure/tests/test_perimeter_column_cap.py",
+   "target": "RC Structure/Model/Member_Groups.py",
+   "kind": "import",
+   "lines": [
+    14
+   ],
+   "module_as_written": "Model.Member_Groups",
+   "names": {},
+   "attributes_used": {
+    "SFRS_LAYOUT_PERIMETER": 4,
+    "MemberDesign": 4,
+    "SFRS_LAYOUT_PERIMETER_CORE": 3,
+    "GroupedDesign": 2,
+    "SFRS_LAYOUT_PERIMETER_CORE_LINES": 1,
+    "SYSTEM_BANDED_POLICY_ID": 1,
+    "SYSTEM_CORE_BANDED_POLICY_ID": 1
+   },
+   "calls": {
+    "MemberDesign": 4
+   },
+   "how": "imports Model.Member_Groups; uses SFRS_LAYOUT_PERIMETER, MemberDesign, SFRS_LAYOUT_PERIMETER_CORE, GroupedDesign, SFRS_LAYOUT_PERIMETER_CORE_LINES, SYSTEM_BANDED_POLICY_ID, SYSTEM_CORE_BANDED_POLICY_ID; calls MemberDesign (4x)",
+   "used_count": 7
   },
   {
    "source": "RC Structure/tests/test_perimeter_systems.py",
@@ -28795,10 +30229,10 @@
    ],
    "module_as_written": "Design.SMRF_Joints",
    "names": {
+    "joint_shear_check": 8,
     "scwb_check": 8,
     "through_bar_anchorage_checks": 6,
     "beam_capacity_shear_checks": 4,
-    "joint_shear_check": 4,
     "evaluate_joints": 3,
     "beam_capacity_shear_envelope": 2,
     "rectangular_joint_area": 2,
@@ -28806,15 +30240,15 @@
    },
    "attributes_used": {},
    "calls": {
+    "joint_shear_check": 8,
     "scwb_check": 8,
     "through_bar_anchorage_checks": 6,
     "beam_capacity_shear_checks": 4,
-    "joint_shear_check": 4,
     "evaluate_joints": 3,
     "beam_capacity_shear_envelope": 2,
     "rectangular_joint_area": 2
    },
-   "how": "imports Design.SMRF_Joints: scwb_check, through_bar_anchorage_checks, beam_capacity_shear_checks, joint_shear_check, evaluate_joints, beam_capacity_shear_envelope, rectangular_joint_area, MPR_BASIS; calls scwb_check (8x), through_bar_anchorage_checks (6x), beam_capacity_shear_checks (4x), joint_shear_check (4x), evaluate_joints (3x), beam_capacity_shear_envelope (2x)",
+   "how": "imports Design.SMRF_Joints: joint_shear_check, scwb_check, through_bar_anchorage_checks, beam_capacity_shear_checks, evaluate_joints, beam_capacity_shear_envelope, rectangular_joint_area, MPR_BASIS; calls joint_shear_check (8x), scwb_check (8x), through_bar_anchorage_checks (6x), beam_capacity_shear_checks (4x), evaluate_joints (3x), beam_capacity_shear_envelope (2x)",
    "used_count": 8
   },
   {
@@ -30825,18 +32259,21 @@
    "target": "RC Structure/Design/SMRF_Joints.py",
    "kind": "lazy_import",
    "lines": [
-    122
+    96,
+    131
    ],
    "module_as_written": "Design.SMRF_Joints",
    "names": {
+    "joint_shear_check": 1,
     "evaluate_joints": 1
    },
    "attributes_used": {},
    "calls": {
+    "joint_shear_check": 1,
     "evaluate_joints": 1
    },
-   "how": "imports inside a function Design.SMRF_Joints: evaluate_joints; calls evaluate_joints (1x)",
-   "used_count": 1
+   "how": "imports inside a function Design.SMRF_Joints: joint_shear_check, evaluate_joints; calls joint_shear_check (1x), evaluate_joints (1x)",
+   "used_count": 2
   },
   {
    "source": "RC Structure/tests/test_t_section_stiffness.py",
@@ -31122,7 +32559,7 @@
    "target": "RC Structure/Design/Config.py",
    "kind": "lazy_import",
    "lines": [
-    106
+    107
    ],
    "module_as_written": "Design.Config",
    "names": {

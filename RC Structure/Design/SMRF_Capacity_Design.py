@@ -77,6 +77,10 @@ PHI_JOINT = 0.85
 SPACING_GRID_IN = 1.0
 SPACING_MIN_IN = 3.0
 STIRRUP_LADDER = ((4, 2), (4, 3), (4, 4), (5, 2), (5, 3), (5, 4), (5, 6))   # (bar, legs): beam hoops
+# Beam transverse rules: the special moment frame hinge-zone hoops (18.6.4.4) or the gravity-system stirrups of
+# 18.14.3.2(a) (throughout the length at not more than d/2, Table 9.7.6.2.2 bounds), user decision 2026-10-18.
+BEAM_TRANSVERSE_SFRS = "sfrs_hinge_zone_hoops_18.6.4"
+BEAM_TRANSVERSE_GRAVITY = "gravity_stirrups_18.14.3.2a"
 COLUMN_HOOP_BARS = (4, 5)   # column hoop bars; legs per direction come from the cage (SMRF_Cage_Layout)
 # The largest hoop bar of both ladders: the bar layout is set for it (Structure_Parameters.BAR_LAYOUT_HOOP_DB_IN,
 # design-basis rule 2026-10-14) and the confinement core is measured to it, so a hoop selection never moves the
@@ -346,20 +350,34 @@ def design_beam_shear(state, strengths, transfer):
 
 
 def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bars, worst_ve, worst_mechanism,
-                      grid_in=_GRID_OMITTED):
-    """Hinge-zone hoops of one beam cage for its governing capacity shear (18.6.4.4, 18.6.5, 22.5.1.2).
+                      grid_in=_GRID_OMITTED, transverse_rule=BEAM_TRANSVERSE_SFRS):
+    """Transverse steel of one beam cage for its governing capacity shear (18.6.5, 22.5.1.2).
+
+    ``transverse_rule`` BEAM_TRANSVERSE_SFRS: hinge-zone hoops at <= min(d/4, 6 db or 5 db, 6 in) (18.6.4.4).
+    BEAM_TRANSVERSE_GRAVITY (a beam not part of the seismic force-resisting system, 18.14.3.2(a)): closed stirrups
+    throughout the length at <= d/2 and 24 in, tightened to d/4 and 12 in where Vs exceeds 4 sqrt(f'c) bw d
+    (Table 9.7.6.2.2); the 18.6.5 shear (probable moments, Vc = 0 rule) is kept, which 18.14.3.3(b) requires and
+    which is conservative for 18.14.3.2. Hoops per 18.7.5.2 where the beam carries Pu > Ag f'c / 10 are the
+    caller's (Gravity_Frame_Members.beam_requirements).
 
     Returns the entries design_beam_shear reports beside its families: ve_kip, mechanism_shear_kip,
     vc_zero_hinge_zone, vc_kip, vs_required_kip, vs_limit_kip, section_adequate, cage, spacing_bounds_in,
     hoops and basis. Shared by the uniform design (one beam) and the grouped design (each beam group).
     """
+    if transverse_rule not in (BEAM_TRANSVERSE_SFRS, BEAM_TRANSVERSE_GRAVITY):
+        raise ValueError(f"unknown beam transverse rule {transverse_rule!r}")
     # Hinge-zone concrete contribution (18.6.5.2): beams carry no axial load.
     vc_zero = worst_mechanism >= 0.5 * worst_ve
     vc = 0.0 if vc_zero else 2.0 * math.sqrt(fc * 1000.0) * bw * d / 1000.0
     vs_required = max(0.0, worst_ve / PHI_SHEAR - vc)
     vs_limit = 8.0 * math.sqrt(fc * 1000.0) * bw * d / 1000.0
     db = _BAR[bar_size][0]
-    bounds = {"d_over_4": d / 4.0, "bar_diameters": _hoop_bar_factor() * db, "absolute": 6.0}   # 18.6.4.4: 6 db (Grade 60), 5 db (Grade 80)
+    if transverse_rule == BEAM_TRANSVERSE_SFRS:
+        bounds = {"d_over_4": d / 4.0, "bar_diameters": _hoop_bar_factor() * db, "absolute": 6.0}   # 18.6.4.4: 6 db (Grade 60), 5 db (Grade 80)
+    elif vs_required > 0.5 * vs_limit:                                                              # Table 9.7.6.2.2, Vs > 4 sqrt(f'c) bw d
+        bounds = {"d_over_4": d / 4.0, "absolute": 12.0}
+    else:
+        bounds = {"d_over_2": d / 2.0, "absolute": 24.0}                                            # 18.14.3.2(a); Table 9.7.6.2.2
     # Hinge-zone hoops must also support the top and bottom bars (18.6.4.4 /
     # 25.7.2.3): the leg count is bounded by what the bars need and can engage.
     from Design.SMRF_Cage_Layout import beam_cage, cage_passes
@@ -387,12 +405,19 @@ def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bar
                 "checks": [{"rule": "18.6.4.4 / 25.7.2.3", "passes": False,
                             "detail": f"no hoop in the ladder is constructible: bars allow {first['legs_max']} legs, "
                                       f"support rules need {first['legs_min']}"}]}
+    basis = ("Vc = 0 in the hinge zone when the Mpr mechanism shear is at least half of Ve (18.6.5.2); "
+             + ("hoops at <= min(d/4, 6db Grade 60 or 5db Grade 80, 6 in) and Av fyt d / Vs; uniform along the member"
+                if transverse_rule == BEAM_TRANSVERSE_SFRS else
+                "a beam outside the seismic force-resisting system (18.14.3.2(a)): closed stirrups throughout the length at "
+                "<= min(d/2, 24 in), or min(d/4, 12 in) where Vs > 4 sqrt(f'c) bw d (Table 9.7.6.2.2), and Av fyt d / Vs; "
+                "the 18.6.5 shear kept (18.14.3.3(b)); hoops per 18.7.5.2 only where Pu > Ag f'c / 10"))
     return {"ve_kip": worst_ve, "mechanism_shear_kip": worst_mechanism,
             "vc_zero_hinge_zone": vc_zero, "vc_kip": vc, "vs_required_kip": vs_required,
-            "vs_limit_kip": vs_limit, "section_adequate": vs_required <= vs_limit, "cage": cage,
-            "spacing_bounds_in": bounds, "hoops": selected,
-            "basis": ("Vc = 0 in the hinge zone when the Mpr mechanism shear is at least half of Ve (18.6.5.2); "
-                      "hoops at <= min(d/4, 6db Grade 60 or 5db Grade 80, 6 in) and Av fyt d / Vs; uniform along the member")}
+            "vs_limit_kip": vs_limit, "vs_four_root_fc_kip": 0.5 * vs_limit, "section_adequate": vs_required <= vs_limit,
+            "cage": cage, "spacing_bounds_in": bounds, "hoops": selected, "transverse_rule": transverse_rule,
+            "transverse_kind": ("hoops in the hinge zones (18.6.4), uniform along the member" if transverse_rule == BEAM_TRANSVERSE_SFRS
+                                else "closed stirrups throughout the length (18.14.3.2(a), 25.7.1)"),
+            "basis": basis}
 
 
 def column_probable_pm(state, fy_factor=1.25, n_pts=160):

@@ -149,18 +149,18 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
             raise ValueError("The perimeter-face slab extension assumes one beam width; a grouped design uses 'centerlines'.")
         for floor in floors:
             floor_sections.validate(floor, nx, ny)
-            for beam in floor["beam_lines"]["x"] + floor["beam_lines"]["y"]:
+            for beam in floor_sections.all_beams(floor):
                 if not hs < beam["h_in"] < sh or beam["b_in"] >= min(lx, ly):
                     raise ValueError("Coupled geometry must leave a downstand web, clear column height and clear beam spans.")
             for row in floor["supports"]:
                 for col in row:
                     if col["h_in"] >= lx or col["b_in"] >= ly:
                         raise ValueError("Coupled geometry must leave a downstand web, clear column height and clear beam spans.")
-        b = min(beam["b_in"] for floor in floors for beam in floor["beam_lines"]["x"] + floor["beam_lines"]["y"])
+        b = min(beam["b_in"] for floor in floors for beam in floor_sections.all_beams(floor))
         web = column = offset = None
 
-        def web_of(k, axis, line):
-            beam = floors[k-1]["beam_lines"][axis][line]
+        def web_of(k, axis, line, span):
+            beam = floor_sections.beam_line(floors[k-1], axis, line, span)
             return _rectangle(beam["b_in"], beam["h_in"]-hs, beam["fc_ksi"], bm, nu), -beam["h_in"]/2., beam
 
         def column_of(k, i, j):
@@ -269,16 +269,22 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                     floor_nodes[k, i, j] = n
                     if 0 <= i <= ex and 0 <= j <= ey and (i % mx == 0 or j % my == 0):
                         if by_member:
-                            # One web node for each beam line through this point, at that line's own centroid
-                            # depth; where an X and a Y line cross, two web nodes hang from the one slab node.
+                            # Each incident span uses its own web centroid. At a depth step,
+                            # separate web ends link to the same retained slab/joint node.
                             for axis, on_line, line in (("x", j % my == 0, j // my), ("y", i % mx == 0, i // mx)):
                                 if on_line:
-                                    depth = web_of(k, axis, line)[1]
-                                    nw = node(x, y, k*sh+depth)
-                                    web_nodes[k, i, j, axis] = nw
-                                    ops.rigidLink("beam", n, nw)
-                                    links.append((n, nw))
-                                    link_offset[nw] = depth
+                                    t, cells, count = (i, mx, nx) if axis == "x" else (j, my, ny)
+                                    spans = [t // cells] + ([t // cells - 1] if t % cells == 0 else [])
+                                    depths = {}
+                                    for span in sorted(s for s in spans if 0 <= s < count):
+                                        depth = web_of(k, axis, line, span)[1]
+                                        if depth not in depths:
+                                            nw = node(x, y, k*sh+depth)
+                                            depths[depth] = nw
+                                            ops.rigidLink("beam", n, nw)
+                                            links.append((n, nw))
+                                            link_offset[nw] = depth
+                                        web_nodes[k, i, j, axis, span] = depths[depth]
                             continue
                         nw = node(x, y, k*sh+offset)
                         web_nodes[k, i, j] = nw
@@ -335,13 +341,14 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                     for t in range(intervals):
                         i, j = (t, line*my) if axis == "x" else (line*mx, t)
                         if by_member:
-                            ni = web_nodes[k, i, j, axis]
-                            nj = web_nodes[k, i+int(axis == "x"), j+int(axis == "y"), axis]
+                            span = t // (mx if axis == "x" else my)
+                            ni = web_nodes[k, i, j, axis, span]
+                            nj = web_nodes[k, i+int(axis == "x"), j+int(axis == "y"), axis, span]
                         else:
                             ni = web_nodes[k, i, j]
                             nj = web_nodes[k, i+int(axis == "x"), j+int(axis == "y")]
                         tag += 1
-                        _frame_element(tag, ni, nj, web_of(k, axis, line)[0] if by_member else web, 2)
+                        _frame_element(tag, ni, nj, web_of(k, axis, line, span)[0] if by_member else web, 2)
                         beams.append({"tag": tag, "floor": k, "axis": axis, "line_index": line,
                                       "span_index": t//(mx if axis == "x" else my), "segment_index": t % (mx if axis == "x" else my), "nodes": [ni, nj],
                                       "body_load_force_kip": [0., 0., 0.]})
@@ -367,7 +374,7 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                 if by_member:
                     # The drop of this line's own web, between the faces of the columns below the floor at its two ends.
                     floor, line, span = floors[item["floor"]-1], item["line_index"], item["span_index"]
-                    beam = floor["beam_lines"][axis][line]
+                    beam = floor_sections.beam_line(floor, axis, line, span)
                     if axis == "x":
                         length = lx
                         clear = lx-0.5*floor["supports"][line][span]["h_in"]-0.5*floor["supports"][line][span+1]["h_in"]

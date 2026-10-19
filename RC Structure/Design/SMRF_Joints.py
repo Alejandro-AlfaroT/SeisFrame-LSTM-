@@ -311,18 +311,32 @@ def through_bar_anchorage_checks(data, *, location=""):
     return checks
 
 
+JOINT_SHEAR_BASES = {
+    "18.8": "ACI318-19_Table18.8.4.3",
+    "chapter_15": "ACI318-19_Table15.4.2.3 (Table 18.8.4.3 row, conservative)",
+}
+JOINT_SHEAR_PHI = {"18.8": 0.85, "chapter_15": 0.75}
+GRAVITY_JOINT_SHEAR_CLAUSE = "ACI 318-19 15.4.1.1(b); 15.4.2; Table 21.2.1(b)"
+
+
 def joint_shear_check(data, *, location=""):
-    """Check supplied joint design strength against signed probable actions.
+    """Check supplied joint design strength against signed, consistent actions.
 
     ``beam_face_forces_kip`` are signed horizontal forces on the chosen
     joint half free body; ``column_shear_kip`` is subtracted in that SAME
     sign convention. Require probable_face_forces_complete=True and
     column_shear_consistent_with_mpr=True. Strength must be provided as
-    nominal_vn_kip, capacity_basis='ACI318-19_Table18.8.4.3', and
-    capacity_topology_and_confinement_checked=True. Caller is responsible
+    nominal_vn_kip, a recognized capacity_basis matching rule, and
+    capacity_topology_and_confinement_checked=True. Chapter 15 evidence must
+    explicitly declare nominal (fy) beam actions; the two legacy action
+    completeness flags above also certify that mechanism. Caller is responsible
     for the actual rectangular area, 2019 continuity/confinement category
-    and required joint transverse steel. This module only applies phi=.85.
+    and required joint transverse steel. Apply phi=.85 only for SMRF joints;
+    Chapter 15 uses phi=.75 (15.4.2.2, Table 21.2.1(b)). Legacy evidence with
+    no rule remains supported only for the original Table 18.8.4.3 basis.
     """
+    rule = data.get("rule", "18.8") if isinstance(data, Mapping) else "18.8"
+    clause = GRAVITY_JOINT_SHEAR_CLAUSE if rule == "chapter_15" else JOINT_SHEAR_CLAUSE
     try:
         if not isinstance(data, Mapping):
             raise ValueError("Signed probable joint face actions and capacity evidence are missing.")
@@ -335,21 +349,33 @@ def joint_shear_check(data, *, location=""):
         column_shear = _number(data.get("column_shear_kip"), "column_shear_kip")
         demand = abs(sum(face_forces) - column_shear)
     except ValueError as exc:
-        return not_evaluated("joint_shear", JOINT_SHEAR_CLAUSE, str(exc), location)
+        return not_evaluated("joint_shear", clause, str(exc), location)
     try:
-        if (data.get("capacity_basis") != "ACI318-19_Table18.8.4.3"
-                or data.get("capacity_topology_and_confinement_checked") is not True):
+        if not isinstance(rule, str) or rule not in JOINT_SHEAR_BASES:
+            raise ValueError("Joint shear rule is not recognized; declare 18.8 or chapter_15.")
+        if data.get("capacity_basis") != JOINT_SHEAR_BASES[rule]:
+            raise ValueError("Joint capacity basis is missing or does not match its declared rule.")
+        if rule == "chapter_15" and (data.get("steel_stress_factor") != 1.0
+                                    or data.get("beam_moment_basis") != "nominal (fy)"):
+            raise ValueError("Chapter 15 nominal-strength mechanism requires beam steel at fy and nominal (fy) moments.")
+        if rule == "18.8" and (data.get("steel_stress_factor", 1.25) != 1.25
+                              or data.get("beam_moment_basis", "probable (1.25 fy)") != "probable (1.25 fy)"):
+            raise ValueError("SMRF joint actions require beam steel at 1.25 fy and consistent probable moments.")
+        if (data.get("capacity_topology_and_confinement_checked") is not True
+                or data.get("evidence_complete", True) is not True
+                or data.get("unevaluated_evidence")):
             missing = data.get("unevaluated_evidence")
             raise ValueError("Verified 2019 joint-area, continuity, confinement and transverse-steel capacity is required."
                              + (f" Unevaluated: {', '.join(str(m) for m in missing)}." if isinstance(missing, list) and missing else ""))
         nominal = _number(data.get("nominal_vn_kip"), "nominal_vn_kip", minimum=0)
     except ValueError as exc:
-        check = not_evaluated("joint_shear", JOINT_SHEAR_CLAUSE, str(exc), location)
+        check = not_evaluated("joint_shear", clause, str(exc), location)
         check.update(demand=demand, units="kip")
         return check
-    return make_check("joint_shear", JOINT_SHEAR_CLAUSE, demand, 0.85 * nominal,
+    phi = JOINT_SHEAR_PHI[rule]
+    return make_check("joint_shear", clause, demand, phi * nominal,
                       units="kip", location=location,
-                      details={"phi": 0.85, "nominal_vn_kip": nominal,
+                      details={"phi": phi, "rule": rule, "nominal_vn_kip": nominal,
                                "signed_face_forces_kip": face_forces,
                                "signed_column_shear_kip": column_shear,
                                "capacity_basis": data["capacity_basis"]})

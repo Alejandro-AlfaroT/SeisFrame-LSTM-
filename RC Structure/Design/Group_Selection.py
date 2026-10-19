@@ -61,7 +61,8 @@ def _scwb_axes(state, member):
     (Model.Member_Groups.column_sfrs_directions), none for an interior column."""
     if not mg.is_system_policy(state.policy_id):
         return ("x", "y")
-    directions = mg.column_sfrs_directions(member.grid_i, member.grid_j, sp.NUM_BAY_X, sp.NUM_BAY_Y)
+    directions = mg.column_sfrs_directions(member.grid_i, member.grid_j, sp.NUM_BAY_X, sp.NUM_BAY_Y,
+                                           layout=mg.layout_of(state.policy_id))
     return tuple(axis for axis in ("x", "y") if axis in directions)
 
 
@@ -91,18 +92,23 @@ def _objective(dcr, steel, cfg):
 
 
 # ---- candidate cages --------------------------------------------------------------------------------------
-def column_cage_candidates(design, cfg, rho_max=None):
+def column_cage_candidates(design, cfg, rho_max=None, layout=None):
     """Column cages of the declared domain that one section can hold, as MemberDesigns (hoops unchanged).
 
     The static rules of Redesign._col_candidates on the slab-aware path: ACI ratio limits, clear spacing
     on both faces, supported bars within 14 in (18.7.5.2(f)), no more face bars than the hoop ladder can
     tie, and a layout the largest hoop can confine at the minimum spacing. ``rho_max`` defaults to the
-    practical ceiling the uniform strong-column escalation uses (RebarConfig.rho_col_practical_max).
+    practical ceiling the uniform strong-column escalation uses (RebarConfig.rho_col_practical_max), lifted to
+    the ACI 318-19 18.7.4.1 limit (RebarConfig.rho_col_max) for a column at its layout's size cap: at the cap the
+    search exhausts the reinforcement before the layout ladder adds frames (user direction 2026-10-18).
     """
     from Design.SMRF_Capacity_Design import column_layout_confinable
+    from Design.Section_Design import column_size_cap_in
     from Redesign import COLUMN_MAX_TIED_FACE_BARS
     b, h, ag = design.b_in, design.h_in, design.b_in * design.h_in
     low = max(0.01, cfg.rebar.rho_col_min)
+    if rho_max is None and max(b, h) >= column_size_cap_in(layout) - 1e-9:
+        rho_max = cfg.rebar.rho_col_max                                   # the last lever at the cap
     high = min(0.06, cfg.rebar.rho_col_max, cfg.rebar.rho_col_practical_max if rho_max is None else rho_max)
     result = []
     for bar_size in cfg.rebar.bar_sizes_col:
@@ -411,7 +417,7 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0, requirem
         stories = set().union(*(set(state.groups[gid]["stories_or_floors"]) for gid in gids))
         priced, rejected = [], {"strength": 0, "axial_domain": 0, "scwb": 0, "bar_bond": 0}
         clear_height = min(_column_clear_height_face(member) for member in members.values())
-        for candidate in column_cage_candidates(current, cfg):
+        for candidate in column_cage_candidates(current, cfg, layout=mg.layout_of(state.policy_id)):
             if not _cage_develops_its_bars(candidate, clear_height):
                 # ACI 318-19 18.7.4.3 (2026-10-02): 1.25 ld at Ktr = 0 must fit in half the clear height.
                 rejected["bar_bond"] += 1
@@ -555,7 +561,7 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0, requirem
             if node["pool"]:
                 design = min(node["pool"], key=lambda item: _objective(item["dcr"], item["steel"], cfg))["design"]
             else:
-                everything = column_cage_candidates(current, cfg)
+                everything = column_cage_candidates(current, cfg, layout=mg.layout_of(state.policy_id))
                 design = max(everything, key=lambda c: c.longitudinal_area_in2) if everything else current
             selected.update({gid: design for gid in node["gids"]})
         report.update(status="no_feasible_chain", exhausted=True, blocked_at=blocked,

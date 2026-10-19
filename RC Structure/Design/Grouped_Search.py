@@ -49,6 +49,7 @@ from Model import Member_Properties as mp
 
 SEARCH_VERSION = "grouped_search_v2"
 STEEL_GRADE_RETRY_RULE = "grade60_limits_then_grade80_full_search_v1"
+SFRS_LAYOUT_LADDER_RULE = "perimeter_then_core_ring_then_core_lines_v1"
 IMPROVEMENT_POLICY_ID = "dominance_concrete_and_total_reinforcement_v1"
 # The lever order of the iterative design (user decision 2026-10-16): concrete strength first, then the reinforcement
 # (which every evaluation exhausts through the cage selection), and the section size last. A growth move therefore
@@ -73,6 +74,9 @@ class SearchPolicy:
     reduction_order: str = "top_band_first__columns_then_beams__one_step_per_group_per_sweep"
     lever_order: str = LEVER_ORDER_ID
     grade80_retry_on_limits: bool = True
+    # More frames around the core when a system-policy search finds no design (user direction 2026-10-18): the same
+    # seed is searched again under the next layout of Model.Member_Groups.SFRS_LAYOUT_LADDER, each with its own budget.
+    sfrs_layout_ladder_on_no_design: bool = True
 
     def problems(self):
         issues = []
@@ -86,6 +90,8 @@ class SearchPolicy:
             issues.append(f"unknown lever order {self.lever_order!r}")
         if type(self.grade80_retry_on_limits) is not bool:
             issues.append("grade80_retry_on_limits must be a boolean")
+        if type(self.sfrs_layout_ladder_on_no_design) is not bool:
+            issues.append("sfrs_layout_ladder_on_no_design must be a boolean")
         return issues
 
 
@@ -135,8 +141,15 @@ def beam_rungs(member_type):
     return sorted(rungs, key=lambda r: (r[0] * r[1] ** 2, r[1], r[0]))
 
 
-def _column_step(design, direction):
-    sizes = list(COLUMN_SIZES_IN)
+def _column_sizes(state=None):
+    """The column size ladder of the state's layout: 32 in at most for the perimeter-only layout, the general cap for
+    the core layouts (Design.Section_Design.column_sizes_in)."""
+    from Design.Section_Design import column_sizes_in
+    return list(column_sizes_in(None if state is None else mg.layout_of(state.policy_id)))
+
+
+def _column_step(design, direction, state=None):
+    sizes = _column_sizes(state)
     if design.b_in != design.h_in or design.b_in not in sizes:
         return None
     index = sizes.index(design.b_in) + direction
@@ -275,7 +288,7 @@ def enforce_system_coupling(state):
 
 def column_taper_problem(state, gid, size):
     """Why a column group may not take ``size`` beside the bands below and above it, or None."""
-    if state.policy_id == mg.SYSTEM_BANDED_POLICY_ID:
+    if mg.is_banded_policy(state.policy_id):
         problems = mg.section_order_problems(resized(state,gid,size))
         if problems:
             return problems[0]
@@ -302,7 +315,7 @@ def column_taper_problem(state, gid, size):
 
 def enforce_column_taper(state):
     """Grow columns until no line grows upward or steps in too far. Returns (state, [(gid, from, to, reason)])."""
-    if state.policy_id == mg.SYSTEM_BANDED_POLICY_ID:
+    if mg.is_banded_policy(state.policy_id):
         return enforce_banded_section_order(state)
     changes = []
     for chain in _chains(state).values():
@@ -313,7 +326,7 @@ def enforce_column_taper(state):
                 if upper.b_in > lower.b_in:
                     target, gid, reason = (upper.b_in, upper.h_in), chain[index][0], "a column may not be smaller than the one above it"
                 elif lower.b_in - upper.b_in > MAX_COLUMN_SIZE_STEP_IN:
-                    grown = _column_step(upper, +1)
+                    grown = _column_step(upper, +1, state)
                     if grown is None:
                         continue
                     target, gid, reason = grown, chain[index + 1][0], "the face step from the column below must stay under 3 in"
@@ -349,7 +362,7 @@ def enforce_banded_section_order(state):
                 if b.b_in > a.b_in + 1e-9 or b.h_in > a.h_in + 1e-9:
                     width,depth=max(a.b_in,b.b_in),max(a.h_in,b.h_in)
                     if a.is_column:
-                        size=next((v for v in COLUMN_SIZES_IN if v>=max(width,depth)-1e-9),None)
+                        size=next((v for v in _column_sizes(state) if v>=max(width,depth)-1e-9),None)
                         target=None if size is None else (size,size)
                     else:
                         # A beam tie spans X/Y: its rung must fit both directions' ladders.
@@ -364,7 +377,7 @@ def enforce_banded_section_order(state):
                     changes.append((low,[a.b_in,a.h_in],list(target),"both section dimensions must not increase upward"))
                     state=resized(state,low,target)
                 elif a.is_column and max(a.b_in-b.b_in,a.h_in-b.h_in)>MAX_COLUMN_SIZE_STEP_IN+1e-9:
-                    target=_column_step(b,+1)
+                    target=_column_step(b,+1,state)
                     if target is None:
                         raise mg.GroupedStateError(f"No column rung can support the transition above {low}.")
                     changes.append((up,[b.b_in,b.h_in],list(target),"retain the supported column transition step"))
@@ -378,7 +391,7 @@ def enforce_banded_section_order(state):
 def beam_size_problem(state, gid, size):
     """Why a beam group may not take ``size`` between its own end columns and over the slab, or None."""
     trial = resized(state, gid, size)
-    if state.policy_id == mg.SYSTEM_BANDED_POLICY_ID:
+    if mg.is_banded_policy(state.policy_id):
         problems = mg.section_order_problems(trial)
         if problems:
             return problems[0]
@@ -438,7 +451,7 @@ def propose_growth(evaluation, state):
     def grow_column(gid, reason, grade_first=True):
         if grade_first and grade_move("column", reason):
             return
-        size = _column_step(state.designs[gid], +1)
+        size = _column_step(state.designs[gid], +1, state)
         if size is not None:
             moves.setdefault(size_key(gid), (size, reason))
         elif not grade_first:
@@ -709,7 +722,7 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
                 design = base.designs[gid]
                 # A column has one next smaller square; a beam has several lighter rungs, strongest first: the
                 # first one that fits its own columns and the slab is the move, the others are logged as skipped.
-                options = ([_column_step(design, -1)] if design.is_column else _beam_step(design, "smaller")[:MAX_BEAM_REDUCTION_OPTIONS])
+                options = ([_column_step(design, -1, state)] if design.is_column else _beam_step(design, "smaller")[:MAX_BEAM_REDUCTION_OPTIONS])
                 size = proposal = None
                 for option in (o for o in options if o is not None):
                     problem = ((column_taper_problem(base, gid, option) if design.is_column

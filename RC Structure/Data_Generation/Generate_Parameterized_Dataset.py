@@ -51,18 +51,18 @@ SEED = 20260731
 # direction, independently, and one story height per building of 12 to 18 ft, both in 0.5-ft steps
 # (25 bay-width levels, 13 story-height levels). The earlier 10-15 ft bays and 12-16 ft stories were
 # narrower than practice (NIST GCR 16-917-40 reports 20 to 30 ft as the typical economical beam span;
-# the 18-ft lower bound is the user's research choice, not the guide's). Bay counts (2..6) and floor
-# counts (4..9) are unchanged and stay integers. Lengths are generated from integer half-foot ticks,
+# the 18-ft lower bound is the user's research choice, not the guide's). Bay counts are now 3..7
+# (user decision 2026-10-18); floor counts remain 4..9. Both stay integers. Lengths use half-foot ticks,
 # so every value is an exact binary fraction and its inch value (6 x ticks) is exact. The basis name
 # travels with every plan built from these ranges so a plan of an earlier population is never mistaken
 # for this one.
-POPULATION_BASIS = "v2_bays3_6_18_30ft_stories_12_18ft_half_foot_steps_aspect_le_2p25_sdc_c_d_20261014"
+POPULATION_BASIS = "v2_bays3_7_18_30ft_stories_12_18ft_half_foot_steps_aspect_le_2p25_sdc_c_d_20261018"
 GEOMETRY_INCREMENT_FT = 0.5
 RANGES = {
-    # Bays 3-6 each way (user decision 2026-10-14: two-bay frames were judged unrealistic and produced the
-    # slender towers; the former population allowed 2-6).
-    "num_bay_x": tuple(range(3, 7)),
-    "num_bay_y": tuple(range(3, 7)),
+    # Bays 3-7 each way for future plans (user decision 2026-10-18). Existing saved plans and frozen
+    # smoke-run sources retain their original population; the three-bay minimum dates to 2026-10-14.
+    "num_bay_x": tuple(range(3, 8)),
+    "num_bay_y": tuple(range(3, 8)),
     "num_floor": tuple(range(4, 10)),
     "story_height_ft": tuple(tick / 2 for tick in range(24, 37)),  # 12–18 ft inclusive, 0.5 ft steps: 13 levels.
     "bay_x_width_ft": tuple(tick / 2 for tick in range(36, 61)),   # 18–30 ft inclusive, 0.5 ft steps: 25 levels.
