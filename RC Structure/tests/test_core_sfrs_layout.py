@@ -158,10 +158,28 @@ class LayoutLadderSearchTests(unittest.TestCase):
         self.assertIn("original seed sections", trial["restart_basis"])
         self.assertEqual(trial["selected_policy"], mg.SYSTEM_CORE_LINES_BANDED_POLICY_ID)
         self.assertEqual([a["sfrs_layout"] for a in trial["attempts"]], list(mg.SFRS_LAYOUT_LADDER))
+        self.assertEqual([a["column_size_cap_in"] for a in trial["attempts"]], [36., 36., 36.])
         self.assertEqual([e["index"] for e in result["log"]], [1, 2, 3, 4, 5, 6])
         self.assertEqual(result["counts"]["feasibility_candidates"], 6)
         self.assertEqual(result["elapsed_seconds"], 3.0)
         self.assertEqual(result["final"]["state"].policy_id, mg.SYSTEM_CORE_LINES_BANDED_POLICY_ID)
+
+    def test_feasible_perimeter_at_36_is_retained(self):
+        from Design import Grouped_Record as gr
+        from Design import Grouped_Search as gs
+        calls = []
+
+        def search(cfg, state, policy, log_path, verbose):
+            calls.append(state.policy_id)
+            self.assertEqual({d.b_in for d in state.designs.values() if d.is_column}, {36.})
+            return ({"final": complete_evaluation(state), "log": [], "stop": {"reason": "reduction_budget_exhausted"},
+                     "counts": {}, "elapsed_seconds": 0.}, cfg)
+
+        state, seed = gr.seed_from_sections((36., 36., 10.), (14., 24., 5.), policy_id=mg.SYSTEM_BANDED_POLICY_ID)
+        result, _ = gr._search_with_layout_ladder(None, state, seed, gs.SearchPolicy(), None, False, search=search)
+        self.assertEqual(calls, [mg.SYSTEM_BANDED_POLICY_ID])
+        self.assertFalse(result["sfrs_layout_trial"]["attempted"])
+        self.assertIsNotNone(result["final"])
 
     def test_stops_at_the_top_and_respects_the_switch(self):
         from Design import Grouped_Record as gr

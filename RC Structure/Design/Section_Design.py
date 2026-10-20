@@ -46,19 +46,19 @@ import math
 # Capped at 32 in (user decision 2026-10-16, with the perimeter-frame basis): the tallest structure of the
 # population is 162 ft and the lever order is concrete strength, then reinforcement, then section size, so a
 # column is never offered beyond 32 in for now: 1 in from 14 to 24, then 2 in from 24 to 32.
-# User decision 2026-10-17: raise the cap to 40 in while allowing three-story system bands.
-COLUMN_SIZE_CAP_IN = 40.0
+# User decision 2026-10-19: search the perimeter up to 36 in, then try the
+# core layouts with the same 36-in cap. Three-story system bands still apply.
+COLUMN_SIZE_CAP_IN = 36.0
 COLUMN_SIZES_IN = tuple(float(size) for size in (*range(14, 25), *range(26, int(COLUMN_SIZE_CAP_IN) + 1, 2)))
-# The perimeter-only layout stops at 32 in columns (user direction 2026-10-18): a frame whose perimeter columns would
-# pass 32 in takes the core frames instead (the layout ladder of the grouped search). The core layouts keep the cap above.
-PERIMETER_COLUMN_SIZE_CAP_IN = 32.0
+# A bounded perimeter search without a feasible candidate advances to the core
+# ring, then full core lines. Every layout uses the same column size ceiling.
+PERIMETER_COLUMN_SIZE_CAP_IN = 36.0
 COLUMN_SIZE_CAP_BY_LAYOUT = {"perimeter": PERIMETER_COLUMN_SIZE_CAP_IN, "perimeter_core": COLUMN_SIZE_CAP_IN,
                              "perimeter_core_lines": COLUMN_SIZE_CAP_IN}
 
 
 def column_size_cap_in(layout=None):
-    """The column size cap of an SFRS layout (Model.Member_Groups.layout_of): 32 in for the perimeter-only layout, the
-    general cap for the core layouts and for anything else (the band policy, the uniform route)."""
+    """The column size cap: 36 in for perimeter, core layouts and the uniform route."""
     return COLUMN_SIZE_CAP_BY_LAYOUT.get(layout, COLUMN_SIZE_CAP_IN)
 
 

@@ -1117,9 +1117,11 @@ def _search_with_layout_ladder(cfg, seed_state, seed, policy, log_path, verbose,
                                   "failed layout grew to: with more frames the members start small again, the feasibility "
                                   "phase grows only what the new system needs and the reduction phase then steps the groups "
                                   "down (user direction 2026-10-18)"),
-                "trigger_basis": ("the perimeter-only layout stops at 32 in columns (Section_Design.PERIMETER_COLUMN_SIZE_CAP_IN); "
-                                  "at the cap the concrete grades (lever order) and the column reinforcement up to the 18.7.4.1 "
-                                  "limit are exhausted first; a search that still finds no design climbs the ladder"),
+                "trigger_basis": ("advance only when the current layout returns no feasible candidate, including a "
+                                  "budget stop or recorded attempt error; reaching the column size cap alone does not "
+                                  "discard a feasible design. Each layout's cap is recorded in attempts. Concrete and "
+                                  "reinforcement trials follow their existing rules within the search budget; a stop "
+                                  "does not prove all permitted designs were exhausted"),
                 "attempts": [attempt(result, seed_state.policy_id, log_path)]}
     logs = [[{**e, "grouping_policy": seed_state.policy_id} for e in result["log"]]]
     elapsed = [float(result.get("elapsed_seconds") or 0.0)]

@@ -142,8 +142,7 @@ def beam_rungs(member_type):
 
 
 def _column_sizes(state=None):
-    """The column size ladder of the state's layout: 32 in at most for the perimeter-only layout, the general cap for
-    the core layouts (Design.Section_Design.column_sizes_in)."""
+    """The state's layout-specific column ladder, currently capped at 36 in for every layout."""
     from Design.Section_Design import column_sizes_in
     return list(column_sizes_in(None if state is None else mg.layout_of(state.policy_id)))
 

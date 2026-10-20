@@ -31,14 +31,14 @@ class ThreeStorySystems(unittest.TestCase):
         self.assertEqual(len(self.state.ties()),12)
         self.assertEqual(DEFAULT_GROUPING,POLICY)
 
-    def test_general_ladder_reaches_40_but_perimeter_policy_stops_at_32(self):
-        self.assertEqual(COLUMN_SIZE_CAP_IN,40.)
-        self.assertEqual(COLUMN_SIZES_IN[-3:],(36.,38.,40.))
+    def test_general_and_perimeter_ladders_stop_at_36(self):
+        self.assertEqual(COLUMN_SIZE_CAP_IN,36.)
+        self.assertEqual(COLUMN_SIZES_IN[-3:],(32.,34.,36.))
         good=self.state
         for band in ('s01_03','s04_06','s07_09'):
-            good=self.tied(good,band,'sfrs_column',b_in=32.,h_in=32.)
+            good=self.tied(good,band,'sfrs_column',b_in=36.,h_in=36.)
         mg.install(good)
-        bad=self.tied(self.state,'s01_03','sfrs_column',b_in=34.,h_in=34.)
+        bad=self.tied(good,'s01_03','sfrs_column',b_in=38.,h_in=38.)
         with self.assertRaisesRegex(mg.GroupedStateError,'cap'):mg.install(bad)
 
     def test_perimeter_physics_and_gravity_classification_stay_active(self):
@@ -76,7 +76,7 @@ class ThreeStorySystems(unittest.TestCase):
             with self.assertRaisesRegex(mg.GroupedStateError,'upward'):mg.GroupedDesign.from_record(s.to_record())
 
     def test_growth_propagates_down_and_retains_transition_steps(self):
-        # the perimeter-only layout stops at 32 in columns (2026-10-18): the sizes stay within that ladder
+        # Propagation and taper steps remain valid below the 36-in cap.
         s=self.tied(self.state,'s07_09','sfrs_column',b_in=32.,h_in=32.)
         fixed,changes=gs.enforce_column_taper(s)
         self.assertTrue(changes);self.assertEqual(mg.section_order_problems(fixed),[])

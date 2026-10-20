@@ -73,8 +73,8 @@ class SectionGuards(unittest.TestCase):
 
     def test_layout_caps_apply_on_install_and_reload_including_uniform_policies(self):
         for banded in (False, True):
-            for layout, cap in ((mg.SFRS_LAYOUT_PERIMETER, 32.), (mg.SFRS_LAYOUT_PERIMETER_CORE, 40.),
-                                (mg.SFRS_LAYOUT_PERIMETER_CORE_LINES, 40.)):
+            for layout, cap in ((mg.SFRS_LAYOUT_PERIMETER, 36.), (mg.SFRS_LAYOUT_PERIMETER_CORE, 36.),
+                                (mg.SFRS_LAYOUT_PERIMETER_CORE_LINES, 36.)):
                 with self.subTest(layout=layout, banded=banded):
                     state = self.state(mg.layout_policy(layout, banded))
                     good = state.with_tied_designs({tie: replace(d, b_in=cap, h_in=cap)
