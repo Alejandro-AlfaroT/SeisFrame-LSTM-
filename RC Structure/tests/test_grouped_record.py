@@ -29,6 +29,9 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import grouped_fixture as gf                                                     # noqa: E402
 
 RC = Path(__file__).resolve().parents[1]
@@ -131,11 +134,19 @@ class GroupedRecord(unittest.TestCase):
             for key in ("constraints", "quantities", "margins", "sections", "stages", "solves"):
                 self.assertIn(key, candidate["evaluation"])
             self.assertNotIn("evidence", candidate["evaluation"])
-        # no slab layout is established (slab actions are not asserted): total steel is unknown, so no move is adopted
-        self.assertIsNone(self.record["quantities"]["total_steel_in3"])
-        self.assertIsNone(self.record["quantities"]["slab_steel_in3"])
-        self.assertEqual({t["decision"] for t in search["tradeoffs"]}, {"unresolved"})
-        self.assertEqual(self.record["member_groups"]["sha256"], evaluated[0]["evaluation"]["result_identity"])
+        if sp.SLAB_STRUCTURAL_PARTICIPATION:
+            # no slab layout is established (slab actions are not asserted): total steel is unknown, so no move is adopted
+            self.assertIsNone(self.record["quantities"]["total_steel_in3"])
+            self.assertIsNone(self.record["quantities"]["slab_steel_in3"])
+            self.assertEqual({t["decision"] for t in search["tradeoffs"]}, {"unresolved"})
+        else:
+            # NoSlab (2026-10-21): no slab steel in the model, so total steel is the frame steel and every move is decided
+            self.assertEqual(self.record["quantities"]["slab_steel_in3"], 0.0)
+            self.assertEqual(self.record["quantities"]["total_steel_in3"], self.record["quantities"]["frame_steel_in3"])
+            self.assertNotIn("unresolved", {t["decision"] for t in search["tradeoffs"]})
+        # the record is the last candidate the search adopted (a reduction is adopted once total steel is known: NoSlab)
+        adopted = [c for c in evaluated if c["decision"] in ("feasible", "accepted")]
+        self.assertEqual(self.record["member_groups"]["sha256"], adopted[-1]["evaluation"]["result_identity"])
         lines = [json.loads(line) for line in (self.folder / gr.CANDIDATE_LOG_NAME).read_text(encoding="utf-8").splitlines()]
         self.assertEqual([(line["index"], line["decision"]) for line in lines], [(c["index"], c["decision"]) for c in search["candidates"]])
 
@@ -174,9 +185,16 @@ class GroupedRecord(unittest.TestCase):
         qualification = self.record["qualification"]
         self.assertFalse(qualification["accepted"])
         self.assertFalse(self.record["dcr"]["accepted"])
-        for name in ("qualification.strength_model_verification", "demands.vertical_strength_regularity",
-                     "qualification.detailing_model_consistency", "detailing.congestion_and_placement",
-                     "floor.compatibility_idealization_reviewed", "qualification.slab_contribution"):
+        open_reviews = ["qualification.strength_model_verification", "demands.vertical_strength_regularity",
+                        "qualification.detailing_model_consistency", "detailing.congestion_and_placement"]
+        if sp.SLAB_STRUCTURAL_PARTICIPATION:
+            open_reviews += ["floor.compatibility_idealization_reviewed", "qualification.slab_contribution"]
+        else:
+            # NoSlab (2026-10-21): the floor is load and diaphragm by declaration; the slab items are a declared scope
+            self.assertEqual(status_of(qualification, "qualification.slab_contribution"), {"pass"})
+            self.assertEqual(status_of(qualification, "floor.no_slab_participation_scope"), {"pass"})
+            self.assertEqual(status_of(qualification, "floor.compatibility_idealization_reviewed"), set())
+        for name in open_reviews:
             self.assertEqual(status_of(qualification, name), {"not_evaluated"}, name)
         strength = self.record["demand_basis"]["regularity"]["lateral_strength_distribution"]
         self.assertEqual(strength["applicability"]["status"], "provisional")
@@ -523,6 +541,18 @@ class GroupedRecord(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "grouped design"):
             Hybrid_Exporter.compile_hybrid_sample(out)
 
+
+
+@composite_slab
+class GroupedRecordComposite(GroupedRecord):
+    """The grouped record pipeline under the composite slab model (the Verification1 floor model): design, record,
+    qualification and install run on the slab-model arms of the tests above."""
+
+    def test_the_composite_record_keeps_the_verification1_keys_and_installs(self):
+        self.assertNotIn("floor_model", self.record)
+        self.assertNotIn("slab_structural_participation", self.record["floor_loads"])
+        self.assertNotIn("SLAB_STRUCTURAL_PARTICIPATION", self.record["request_identity"]["inputs"])
+        gr.apply_grouped_design(copy.deepcopy(self.record))          # a record without the block is the composite model's
 
 if __name__ == "__main__":
     unittest.main()

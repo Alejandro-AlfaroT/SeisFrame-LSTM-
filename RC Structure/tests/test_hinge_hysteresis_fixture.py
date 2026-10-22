@@ -24,6 +24,9 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import openseespy.opensees as ops                                              # noqa: E402
 import Structure_Parameters as sp                                              # noqa: E402
 from Analysis import Hinge_Hysteresis_Diagnostic as hd                         # noqa: E402
@@ -34,6 +37,7 @@ from Loads.Gravity_Loads import apply_gravity_loads                            #
 from Model.IMK_Hinges import hinge_registry                                     # noqa: E402
 
 
+@composite_slab
 class CyclicMeasurementFixture(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

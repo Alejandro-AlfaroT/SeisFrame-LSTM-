@@ -18,6 +18,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import openseespy.opensees as ops  # noqa: E402
 
 import Structure_Parameters as sp  # noqa: E402
@@ -104,6 +107,7 @@ class FixedBeamCoupleTests(unittest.TestCase):
         self.assertEqual(loads._bending_couple_pair(0.3, 0., 240.), [])
 
 
+@composite_slab
 class FrameReferenceTests(unittest.TestCase):
     def setUp(self):
         self.stack = contextlib.ExitStack()

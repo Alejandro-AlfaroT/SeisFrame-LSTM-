@@ -585,6 +585,41 @@ SLAB_REINFORCEMENT = None
 SLAB_ACTIONS = None
 
 
+# Floor model (NoSlab branch, user decision 2026-10-21): the floor is a gravity load (its self-weight from the
+# selected SLAB_THICKNESS_IN, the superimposed dead load and the live load) and a rigid diaphragm carrying the floor
+# mass, but NOT a structural participant. False makes every beam a rectangular section in strength and stiffness
+# (no ACI 6.3.2 flange, no slab mats credited), skips the slab reinforcement design and its strip actions, takes the
+# floor load to the beams by the two-way 45-degree tributary rule instead of the slab plate model, and puts the
+# 'no_slab' basis in the strong-column evidence. True restores the composite slab model of Verification1.
+# SLAB_THICKNESS_IN None is NOT this switch: it is the legacy route (bundled loads, legacy covers and strengths).
+SLAB_STRUCTURAL_PARTICIPATION = False
+FLOOR_MODEL_IDS = {True: "composite_slab_participating_v1", False: "floor_load_and_rigid_diaphragm_only_v1"}
+
+
+def slab_participates():
+    """True when a selected slab takes part in the beams' strength and stiffness (the composite slab model)."""
+    return bool(SLAB_STRUCTURAL_PARTICIPATION) and SLAB_THICKNESS_IN is not None
+
+
+def floor_model_entry():
+    """The record's floor_model block, written only under no-slab: a record without it is the composite model, so a
+    composite-model record keeps the Verification1 key inventory and a Verification1 record is read as composite."""
+    return {} if SLAB_STRUCTURAL_PARTICIPATION else {"floor_model": floor_model_record()}
+
+
+def floor_model_record():
+    """What a design record names about the floor model, so records of the two models never cross-load."""
+    participating = bool(SLAB_STRUCTURAL_PARTICIPATION)
+    return {"id": FLOOR_MODEL_IDS[participating], "slab_structural_participation": participating,
+            "slab_thickness_in": SLAB_THICKNESS_IN,
+            "basis": ("composite slab: ACI 6.3.2 flange and developed slab mats in beam strength and stiffness, slab "
+                      "reinforcement designed, slab plate load transfer" if participating else
+                      "floor as gravity load (slab self-weight from the selected thickness, superimposed dead and live "
+                      "loads) and rigid diaphragm with the floor mass; rectangular beams in strength and stiffness; no slab "
+                      "reinforcement designed; two-way 45-degree tributary load transfer to the beams. A research model "
+                      "scope: the slab's real contribution to beam strength (ACI 318-19 18.7.3.2, 18.8.4) is not counted")}
+
+
 def effective_gravity_load_model():
     return "slab_transfer" if FLOOR_TRANSFER is not None else GRAVITY_LOAD_MODEL
 
@@ -860,6 +895,9 @@ def beam_flexural_section(axis, position):
     if SLAB_THICKNESS_IN is None:
         return {"iy_in4": rect_iy(B_BEAM, H_BEAM), "flange_width_in": B_BEAM, "overhang_in": 0.0,
                 "basis": "rectangular web (no slab in the model)"}
+    if not SLAB_STRUCTURAL_PARTICIPATION:
+        return {"iy_in4": rect_iy(B_BEAM, H_BEAM), "flange_width_in": B_BEAM, "overhang_in": 0.0,
+                "basis": "rectangular web: the floor is load and rigid diaphragm only (no slab participation)"}
     clear_span, clear_web, sides = beam_flange_geometry(axis, position)
     flange_width, overhang = effective_flange_width_in(B_BEAM, SLAB_THICKNESS_IN, clear_span, clear_web, sides)
     return {"iy_in4": t_section_inertia_in4(B_BEAM, H_BEAM, SLAB_THICKNESS_IN, flange_width),
@@ -1521,6 +1559,8 @@ def floor_load_metadata():
     return {
         "load_model": "slab_aware_v1" if selected else "legacy_bundled_v1",
         "slab_thickness_in": SLAB_THICKNESS_IN,
+        # named only under no-slab, so a composite-model output keeps the Verification1 inventory (NTHA resume keys)
+        **({} if SLAB_STRUCTURAL_PARTICIPATION else {"slab_structural_participation": False}),
         "floor_superimposed_dead_load_ksf": FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF if selected else None,
         "slab_self_weight_ksf": slab_self_weight_ksf(),
         "floor_dead_load_ksf": dead,

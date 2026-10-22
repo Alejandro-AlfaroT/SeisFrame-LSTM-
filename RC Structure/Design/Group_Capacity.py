@@ -396,7 +396,7 @@ def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_
             "unevaluated_evidence": classification["unevaluated_evidence"],
             "confined_faces": parallel + perpendicular, "joint_core_in": {"depth": depth, "width": width, "fc_ksi": core.fc_ksi},
             "aj_in2": aj, "vj_kip": vj, "phi": phi, "phi_vn_kip": phi * vn, "passes": vj <= phi * vn,
-            "slab_steel_in_tension_included": True}
+            "slab_steel_in_tension_included": bool(sp.SLAB_STRUCTURAL_PARTICIPATION)}
 
 
 def joint_anchorage(entry, axis, column_hoop_bar):
@@ -555,7 +555,11 @@ def scwb_evidence(inventory, actions, expected_ids, layout_established=None, sta
                         undeveloped = (exterior and basis["exterior_anchorage"] is not None
                                        and not basis["exterior_anchorage"]["developed"])
                         cap.update(mn_kip_in=rectangular, capacity_basis=family["basis"])
-                        if not established:
+                        if not sp.SLAB_STRUCTURAL_PARTICIPATION:
+                            # The floor is load and diaphragm only (NoSlab branch, 2026-10-21): no slab term by the
+                            # declared model; SMRF_Joints compares the rectangular beams.
+                            cap.update(slab_basis="no_slab", slab_mn_kip_in=0.0)
+                        elif not established:
                             cap["slab_reason"] = "Developed beam-plus-slab section compatibility evidence is missing."
                         elif undeveloped:
                             total = family["undeveloped"][flexure]["mn_kip_in"]

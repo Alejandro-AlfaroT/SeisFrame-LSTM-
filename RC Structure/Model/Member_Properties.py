@@ -152,6 +152,9 @@ def beam_flexural_section(member):
     if sp.SLAB_THICKNESS_IN is None:
         return {"iy_in4": sp.rect_iy(design.b_in, design.h_in), "flange_width_in": design.b_in, "overhang_in": 0.0,
                 "overhangs": [], "basis": "rectangular web (no slab in the model)"}
+    if not sp.SLAB_STRUCTURAL_PARTICIPATION:
+        return {"iy_in4": sp.rect_iy(design.b_in, design.h_in), "flange_width_in": design.b_in, "overhang_in": 0.0,
+                "overhangs": [], "basis": "rectangular web: the floor is load and rigid diaphragm only (no slab participation)"}
     flange = effective_flange(member)
     return {"iy_in4": sp.t_section_inertia_in4(design.b_in, design.h_in, sp.SLAB_THICKNESS_IN, flange["flange_width_in"]),
             "flange_width_in": flange["flange_width_in"],
@@ -360,6 +363,7 @@ def floor_load_metadata():
     area_sqft = floor_area_in2() / 144.0
     dead = sp.floor_dead_load_ksf()
     return {"load_model": "slab_aware_v1", "slab_thickness_in": sp.SLAB_THICKNESS_IN,
+            **({} if sp.SLAB_STRUCTURAL_PARTICIPATION else {"slab_structural_participation": False}),
             "floor_superimposed_dead_load_ksf": sp.FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF,
             "slab_self_weight_ksf": sp.slab_self_weight_ksf(), "floor_dead_load_ksf": dead,
             "floor_live_load_ksf": sp.FLOOR_LIVE_LOAD_KSF, "seismic_live_load_fraction": sp.SEISMIC_LIVE_LOAD_FRACTION,
@@ -458,6 +462,10 @@ def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
             "bar_size": design.bar_size, "top_bars": design.top_bars, "bot_bars": design.bot_bars,
             "centroid_offset_in": {face: rows[face]["centroid_in"] for face in ("top", "bottom")}, "layers": rows}
     thickness = sp.SLAB_THICKNESS_IN if slab_thickness_in is None else slab_thickness_in
+    no_slab = not sp.SLAB_STRUCTURAL_PARTICIPATION
+    if no_slab:
+        # The floor is load and diaphragm only: the rectangular section with the actual rows, no flange, no mats.
+        layout, thickness = None, 0.0
     flange = effective_flange(member, thickness)
     family = composite_beam_strengths(beam, {"thickness_in": thickness, "fy_ksi": fy_factor * sp.SLAB_FY_KSI},
                                       layout, None, axis, position, flange=flange)
@@ -475,9 +483,10 @@ def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
                     for end in ("i", "j")}
     return {"hogging": hogging, "sagging": sagging, "family": family, "flange": flange, "bar_rows": rows,
             "basis": {
-                "basis": "beam plus developed slab mats in the ACI 6.3.2 flange" if layout is not None
-                         else ("rectangular beam in hogging; the chosen slab's flange concrete in compression under sagging "
-                               "with no slab mats counted (slab reinforcement not established)"),
+                "basis": ("rectangular beam with its actual top and bottom rows: no slab participation" if no_slab
+                          else "beam plus developed slab mats in the ACI 6.3.2 flange" if layout is not None
+                          else ("rectangular beam in hogging; the chosen slab's flange concrete in compression under sagging "
+                                "with no slab mats counted (slab reinforcement not established)")),
                 "family": f"{axis}_{position}", "group_id": member.group_id,
                 "effective_flange_width_in": family["effective_flange_width_in"],
                 "slab_steel_in_flange_in2": family["slab_steel_in_flange_in2"],

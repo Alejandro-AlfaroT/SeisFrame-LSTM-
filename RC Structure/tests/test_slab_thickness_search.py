@@ -11,6 +11,9 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 
 import Structure_Parameters as sp                                              # noqa: E402
 from Design import Design_Driver as driver                                     # noqa: E402
@@ -107,6 +110,7 @@ class ThicknessLadder(unittest.TestCase):
             self.assertEqual(len(caught.exception.trials), 19)
             self.assertEqual(caught.exception.evidence["next_thickness_unavailable"], caught.exception.reason)
 
+    @composite_slab
     def test_a_refinement_comparison_failure_is_not_a_thickness_matter(self):
         """_update_slab_reinforcement with its solvers mocked: layout None after a passed refinement is the search's
         cue (SlabLayoutError); after a failed comparison it stays the plain error."""
@@ -214,6 +218,7 @@ class FailureEvidence(unittest.TestCase):
         self.assertEqual(explain_unsized_layers(passing), {})
         self.assertEqual(record, design_slab_reinforcement(inputs(), evidence(mu=80.0, vu=40.0)))   # record untouched
 
+    @composite_slab
     def test_a_layout_refusal_carries_the_bar_trials_and_the_explanation(self):
         with tiny_frame():
             cfg = verify.probe_config(PROBE_DATE)

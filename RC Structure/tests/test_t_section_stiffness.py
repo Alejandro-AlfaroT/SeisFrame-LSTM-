@@ -13,6 +13,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 
 import openseespy.opensees as ops  # noqa: E402
 import Structure_Parameters as sp  # noqa: E402
@@ -30,6 +33,7 @@ def rect_iy(b, h):
     return b * h ** 3 / 12.0
 
 
+@composite_slab
 class SectionTests(unittest.TestCase):
     def setUp(self):
         self.stack = contextlib.ExitStack()
@@ -93,6 +97,7 @@ class SectionTests(unittest.TestCase):
         self.assertIn("rectangular", section["basis"])
 
 
+@composite_slab
 class FrameTests(unittest.TestCase):
     SMALL = {"NUM_BAY_X": 2, "NUM_BAY_Y": 2, "NUM_FLOOR": 2, "BAY_X": 180.0, "BAY_Y": 150.0, "STORY_H": 144.0,
              "B_COL": 20.0, "H_COL": 20.0, "B_BEAM": 12.0, "H_BEAM": 20.0, "FC_COL_KSI": 4.0, "FC_BEAM_KSI": 4.0,

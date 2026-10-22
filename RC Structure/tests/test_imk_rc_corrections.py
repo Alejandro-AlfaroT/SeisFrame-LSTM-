@@ -2,6 +2,9 @@ import contextlib, math, sys, unittest
 from pathlib import Path
 from unittest import mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import Structure_Parameters as sp
 from Model import IMK_Hinges as h, IMK_Calibration as c
 import openseespy.opensees as ops
@@ -29,6 +32,7 @@ class RCCorrections(unittest.TestCase):
             self.assertTrue(a['deterioration_beam_extrapolation'])
             self.assertLess(c.deterioration_for_member('beam_x',.5)['lambda_opensees_rad'],a['lambda_opensees_rad'])
 
+    @composite_slab
     def test_installed_edge_spring_and_transformation_constraints(self):
         with contextlib.ExitStack() as st:
             for k,v in {'IMK_MATERIAL_TYPE':'IMKPeakOriented','IMK_HINGE_STIFFNESS_MODE':'member_stiffness_factor','SLAB_THICKNESS_IN':5.,'B_BEAM':10.,'H_BEAM':18.,'NUM_BAY_X':2,'NUM_BAY_Y':6,'BAY_X':120.,'BAY_Y':168.}.items():st.enter_context(mock.patch.object(sp,k,v))

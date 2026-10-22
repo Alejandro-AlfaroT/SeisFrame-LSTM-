@@ -1200,7 +1200,9 @@ def design_column_shear(state, strengths, method=None):
                     m_bottom = min(own["i"], delivered_bottom)
                 split = {"beam_delivery_kip_in": beam_delivery,
                          "beam_delivery_basis": "largest sum of beam probable moments any joint kind delivers in this direction "
-                                                "(hogging plus sagging at an interior joint), slab steel in the flange included",
+                                                "(hogging plus sagging at an interior joint), "
+                                                + ("slab steel in the flange included" if _slab_in_model()
+                                                   else "rectangular beams (no slab participation)"),
                          "top": {"share": top_share, "delivered_kip_in": delivered_top, "column_mpr_kip_in": own["j"],
                                  "moment_kip_in": m_top, "limited_by": "beams" if delivered_top < own["j"] else "column",
                                  "share_source": None if top_is_roof else shares["top"],
@@ -1657,7 +1659,7 @@ def design_joint_shear(state, strengths, column, beams=None):
                          "confined_faces": parallel + perpendicular,
                          "aj_in2": aj, "vj_kip": vj, "phi_vn_kip": PHI_JOINT * vn,
                          "passes": vj <= PHI_JOINT * vn,
-                         "slab_steel_in_tension_included": True}
+                         "slab_steel_in_tension_included": _slab_in_model()}
                 results[entry["id"]] = entry
                 evidence.append(entry)
     # Joint transverse reinforcement (18.8.3.1): the column end-zone hoops
@@ -1693,7 +1695,9 @@ def design_joint_shear(state, strengths, column, beams=None):
             "evidence_complete": all(v["evidence_complete"] for v in results.values()),
             "joint_transverse": joint_transverse,
             "continuity_declaration": continuity,
-            "basis": ("Vj = 1.25 fy (As,top + slab bars in flange) + 1.25 fy As,bot - Vcol; Vcol = sum Mpr / H "
+            "basis": (("Vj = 1.25 fy (As,top + slab bars in flange)" if _slab_in_model() else
+                       "Vj = 1.25 fy As,top (no slab participation)")
+                      + " + 1.25 fy As,bot - Vcol; Vcol = sum Mpr / H "
                       "(2 sum Mpr / H at a terminating roof column); gamma from Table 18.8.4.3 by column continuity "
                       "(15.2.6), beam continuity in the direction of Vj (15.2.7) and confinement by two transverse "
                       "beams (15.2.8), each input on declared evidence; Aj per 15.4.2.4; phi = 0.85")}
@@ -1727,6 +1731,12 @@ def design_anchorage(state):
     return {"directions": results, "all_pass": all(v["passes"] and v["through_bar_passes"] for v in results.values()),
             "basis": ("ldh = fy db / (65 lambda sqrt(fc)) >= max(8db, 6 in); embedment = column depth - cover - hoop; "
                       "through bars need a joint depth of 20 db (normalweight, 18.8.2.3) where an interior joint exists")}
+
+
+def _slab_in_model():
+    """Structure_Parameters.SLAB_STRUCTURAL_PARTICIPATION (False on the NoSlab branch)."""
+    import Structure_Parameters as sp
+    return bool(sp.SLAB_STRUCTURAL_PARTICIPATION)
 
 
 def _sp_through_factor():

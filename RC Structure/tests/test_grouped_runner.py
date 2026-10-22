@@ -13,6 +13,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import Structure_Parameters as sp                                               # noqa: E402  (the runner's own default)
+
 RC_DIR = Path(__file__).resolve().parents[1]
 V2 = "v2_nonlinear_flexure_screening_v1"
 CASE = {"case_id": "case_9002", "num_bay_x": 2, "num_bay_y": 1, "num_floor": 2, "story_height_ft": 12,
@@ -74,9 +77,15 @@ class RunnerFixture(unittest.TestCase):
         self.assertNotIn("sections", self.record)
 
     def test_with_probe_assertions_the_slab_layout_is_selected_and_total_steel_is_known(self):
-        self.assertTrue(self.record["stages"]["slab"]["layout_selected"])
         self.assertIsNotNone(self.record["quantities"]["total_steel_in3"])
-        self.assertEqual(self.result["numerical_completion"]["slab_refinement_status"], "passed")
+        if (self.record.get("floor_model") or {}).get("slab_structural_participation", True):
+            self.assertTrue(self.record["stages"]["slab"]["layout_selected"])
+            self.assertEqual(self.result["numerical_completion"]["slab_refinement_status"], "passed")
+        else:
+            # NoSlab (2026-10-21): no slab reinforcement is designed even under the PROBE assertions
+            self.assertFalse(self.record["stages"]["slab"]["layout_selected"])
+            self.assertEqual(self.record["floor_model"]["id"], "floor_load_and_rigid_diaphragm_only_v1")
+            self.assertEqual(self.result["numerical_completion"]["slab_refinement_status"], "not_applicable_no_slab_participation")
         scwb = [c for c in self.record["qualification"]["checks"] if c["id"] == "scwb"]
         self.assertTrue(scwb)
         self.assertEqual({c["status"] for c in scwb}, {"pass"})                                 # evaluated joint by joint, roof included
@@ -133,10 +142,12 @@ class RunnerFixture(unittest.TestCase):
 
     def test_a_search_without_a_feasible_design_keeps_its_candidates_and_says_how_it_stopped(self):
         target = Path(self.tmp.name) / "attempt_budget_1"
-        # A seed no single trial can make feasible (the fixture's 20 in columns against 14 x 18 beams), yet one that
-        # evaluates. Columns under 20 in stack the crossing cages past mid-depth here (bar_rows, no constraints), so a
-        # lighter column is not the way to an evaluated infeasible seed on this frame (2026-10-17).
-        proc = run(target, "--seed-column", "20", "20", "5", "--seed-beam", "14", "18", "4", feasibility=1, reduction=0, stages=("design",))
+        # A seed no single trial can make feasible, yet one that evaluates (constraints recorded). The runner is a fresh
+        # process on the module default floor model, so the seed follows that default: 14 x 18 beams with the composite
+        # slab (2026-10-17); without slab participation (2026-10-21) the 14 x 18 seed designs and lighter columns stop at
+        # bar rows, while 20 x 20 columns at 5 ksi with 14 x 16 beams at 4 ksi evaluate and fail the capacity design.
+        beam_depth = "18" if sp.SLAB_STRUCTURAL_PARTICIPATION else "16"
+        proc = run(target, "--seed-column", "20", "20", "5", "--seed-beam", "14", beam_depth, "4", feasibility=1, reduction=0, stages=("design",))
         result = load(target / "result.json")
         self.assertEqual(result["status"], "no_feasible_design", proc.stderr[-1500:])
         self.assertEqual(proc.returncode, 0)

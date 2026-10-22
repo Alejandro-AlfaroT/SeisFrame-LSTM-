@@ -108,7 +108,7 @@ def beam_yield_moments(member_type, n_i, n_j):
     exterior = exterior_ends(member_type, span, sp.NUM_BAY_X, sp.NUM_BAY_Y)
     if reversed_connectivity:
         exterior = {"i": exterior["j"], "j": exterior["i"]}
-    layout = (sp.SLAB_REINFORCEMENT or {}).get("layout")
+    layout = (sp.SLAB_REINFORCEMENT or {}).get("layout") if sp.SLAB_STRUCTURAL_PARTICIPATION else None
     beam = {"b_in": sp.B_BEAM, "h_in": sp.H_BEAM, "fc_ksi": sp.FC_BEAM_KSI, "fy_ksi": sp.FY_KSI,
             "bar_size": sp.BEAM_BAR_SIZE, "top_bars": sp.BEAM_TOP_BARS, "bot_bars": sp.BEAM_BOT_BARS,
             # This direction's top/bottom offsets and actual bar rows: the orthogonal cages stack at
@@ -139,9 +139,11 @@ def beam_yield_moments(member_type, n_i, n_j):
     sagging_ends = {end: (family["mn_undeveloped_positive_kip_in"] if (undeveloped and exterior[end]) else sagging)
                     for end in ("i", "j")}
     return hogging, sagging, {
-        "basis": "beam plus developed slab mats in the ACI 6.3.2 flange" if layout is not None
-                 else ("rectangular beam in hogging; the chosen slab's flange concrete in compression under sagging with no "
-                       "slab mats counted (slab reinforcement not established)"),
+        "basis": ("rectangular beam with its actual top and bottom rows: no slab participation"
+                  if not sp.SLAB_STRUCTURAL_PARTICIPATION
+                  else "beam plus developed slab mats in the ACI 6.3.2 flange" if layout is not None
+                  else ("rectangular beam in hogging; the chosen slab's flange concrete in compression under sagging with no "
+                        "slab mats counted (slab reinforcement not established)")),
         "family": f"{axis}_{position}",
         "effective_flange_width_in": family["effective_flange_width_in"],
         "slab_steel_in_flange_in2": family["slab_steel_in_flange_in2"],

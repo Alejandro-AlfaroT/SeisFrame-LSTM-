@@ -154,6 +154,12 @@ def _slab_fy_default():
     return float(sp.SLAB_FY_KSI)
 
 
+def _slab_participation():
+    """Structure_Parameters.SLAB_STRUCTURAL_PARTICIPATION (False on the NoSlab branch)."""
+    import Structure_Parameters as sp
+    return bool(getattr(sp, "SLAB_STRUCTURAL_PARTICIPATION", True))
+
+
 def _slab_layers_from_top(slab_h, layout, axis, flange_width):
     """Slab mats parallel to the beam inside the flange: (depth from slab top, area)."""
     result = []
@@ -205,6 +211,11 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
         return [(o, n * ab) for n, o in near] + [(h - o, n * ab) for n, o in far]
 
     t = slab["thickness_in"]
+    participating = _slab_participation()
+    if not participating:
+        # No slab participation (NoSlab branch, 2026-10-21): every caller gets the rectangular section with its
+        # actual rows, whatever slab thickness or layout it passes (the floor is load and diaphragm only).
+        t, layout = 0.0, None
     if flange is not None:
         clear_span, sides = flange["clear_span_in"], flange["slab_sides"]
         clear_web = min(o["clear_to_adjacent_web_in"] for o in flange["overhangs"])
@@ -216,6 +227,8 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
             clear_span, clear_web = geometry["bay_y_in"] - geometry["b_col_in"], geometry["bay_x_in"] - bw
         sides = 2 if position == "interior" else 1
         bf, overhang = effective_flange_width(bw, t, clear_span, clear_web, sides)
+    if not participating:
+        bf, overhang = bw, 0.0
     top_area, bot_area = beam["top_bars"] * ab, beam["bot_bars"] * ab
     slab_layers = _slab_layers_from_top(t, layout, axis, bf) if layout is not None else []
     slab_area = sum(area for _, area, _ in slab_layers)
@@ -242,6 +255,7 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
         "effective_flange_width_in": bf, "flange_overhang_in": overhang,
         "clear_span_in": clear_span, "clear_to_adjacent_web_in": clear_web,
         "slab_steel_in_flange_in2": slab_area, "slab_steel_fy_ksi": slab_fy,
+        **({} if participating else {"slab_participation": False}),
         "slab_layers_from_top": [{"face": face, "depth_in": y, "area_in2": a} for y, a, face in slab_layers],
         "rectangular": {"positive": rect_pos, "negative": rect_neg},
         "composite": {"positive": comp_pos, "negative": comp_neg},
@@ -255,7 +269,11 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
         "basis": ("ACI 318-19 6.3.2.1 effective flange; 18.7.3.2 slab mats within it as discrete layers; "
                   "22.2 strain compatibility, ecu = 0.003, Whitney block, EPP steel, zero axial force; "
                   "continuous uniform slab mats are developed at interior beam ends by continuity (25.4.2.4 "
-                  "within half the adjacent clear span); exterior ends are credited per the perimeter hook check"),
+                  "within half the adjacent clear span); exterior ends are credited per the perimeter hook check"
+                  if participating else
+                  "rectangular web with its actual top and bottom rows (no slab participation: no effective flange, "
+                  "no slab bars, no flange concrete); 22.2 strain compatibility, ecu = 0.003, Whitney block, EPP "
+                  "steel, zero axial force"),
     }
 
 
@@ -516,6 +534,13 @@ def beam_slab_strengths(record):
         exterior = exterior_ends(kind, span, geometry["num_bay_x"], geometry["num_bay_y"])
         for end in ("i", "j"):
             for sign in ("positive", "negative"):
+                if not _slab_participation():
+                    # The floor is load and diaphragm only (NoSlab branch, 2026-10-21): no slab strength by the
+                    # declared model, so the joint checks compare the rectangular beams (SMRF_Joints 'no_slab').
+                    entries[f"{tag}/{end}/{sign}"] = {"slab_basis": "no_slab", "slab_mn_kip_in": 0.0,
+                                                      "section_compatibility_verified": True,
+                                                      "reason": "no slab participation: declared research model scope"}
+                    continue
                 if layout is None:
                     # A slab exists but its reinforcement is not established:
                     # that is unknown slab strength, never "no slab". Leaving

@@ -113,7 +113,8 @@ def hogging_slab_credit_from_state(cfg: DesignConfig):
     both (Design.SMRF_Beam_Slab_Strength.hogging_slab_credit), so the DCR the
     steel pass converges on is the DCR the record reports.
     """
-    if sp.SLAB_THICKNESS_IN is None or not getattr(cfg.rebar, "beam_slab_steel_in_hogging", False):
+    if (sp.SLAB_THICKNESS_IN is None or not sp.SLAB_STRUCTURAL_PARTICIPATION
+            or not getattr(cfg.rebar, "beam_slab_steel_in_hogging", False)):
         return None
     layout = (sp.SLAB_REINFORCEMENT or {}).get("layout")
     if layout is None:

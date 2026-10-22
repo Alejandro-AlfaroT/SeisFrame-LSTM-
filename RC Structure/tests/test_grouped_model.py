@@ -14,6 +14,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import grouped_fixture as gf                                                     # noqa: E402
 
 import openseespy.opensees as ops                                               # noqa: E402
@@ -145,6 +148,12 @@ class UniformEquivalence(unittest.TestCase):
                 close(self, a, b, 1e-12)
 
 
+@composite_slab
+class UniformEquivalenceComposite(UniformEquivalence):
+    """The same equivalence under the composite slab model (T/L sections, slab mats, composite hinges)."""
+
+
+@composite_slab
 class ChangedGroupPropagation(unittest.TestCase):
     """A3: two changed groups reach every consumer of the model layer."""
 

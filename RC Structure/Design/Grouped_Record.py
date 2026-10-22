@@ -331,14 +331,14 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
     mg.install(state)
     slab = evidence["slab"]
     coupled = None
-    if sp.FLOOR_TRANSFER is not None:
+    if sp.FLOOR_TRANSFER is not None and sp.SLAB_STRUCTURAL_PARTICIPATION:
         from Design.SMRF_Coupled_Comparison import compare_transfer_to_coupled
         if verbose:
             print("[grouped] coupled load-path comparison of the selected design", flush=True)
         coupled = compare_transfer_to_coupled(slab["slab"], combination_actions=evidence["actions"])
     slab_inputs = driver._slab_strength_inputs_from_state(slab["slab"], cfg)
     slab_reinforcement = slab["reinforcement"]
-    if slab_reinforcement is None:
+    if slab_reinforcement is None and sp.SLAB_STRUCTURAL_PARTICIPATION:
         from Design.SMRF_Slab_Reinforcement import design_slab_reinforcement
         slab_reinforcement = design_slab_reinforcement(slab_inputs, None)   # no verified strip actions: stays open
     elf = evidence["elf"] or {}
@@ -353,6 +353,7 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
         "bar_layers": {"groups": {gid: rows for gid, rows in arrangement.items() if gid != "_basis"},
                        "basis": arrangement["_basis"]},
         "slab": slab["slab"],
+        **sp.floor_model_entry(),
         "floor_loads": _floor_loads(),
         "gravity_load_model": sp.effective_gravity_load_model(),
         "floor_sections": slab["description"],
@@ -513,6 +514,10 @@ def apply_grouped_design(record):
     saved = {key: getattr(sp, key, None) for key in _STATE_KEYS}
     try:
         sp.apply_reinforcement_grade(fy_ksi=selected_grade)
+        participation = (record.get("floor_model") or {}).get("slab_structural_participation", True)
+        if participation != bool(sp.SLAB_STRUCTURAL_PARTICIPATION):
+            raise ValueError("The grouped record was designed under another floor model (slab structural participation "
+                             f"{participation}); this source runs with {bool(sp.SLAB_STRUCTURAL_PARTICIPATION)}.")
         slab = _validated_slab(record)
         mg.install(state)
         gd._require_common_grades(state)
@@ -549,6 +554,9 @@ def apply_grouped_design(record):
                 raise ValueError("The grouped record's slab reinforcement belongs to a different slab thickness.")
         sp.SLAB_REINFORCEMENT = strength
         sp.SLAB_ACTIONS = record.get("slab_actions")
+        if participation is False:
+            # The floor is load and diaphragm only: whatever slab reinforcement or actions a record carries are not installed.
+            sp.SLAB_REINFORCEMENT = sp.SLAB_ACTIONS = None
         sp.JOINT_SHEAR_CATEGORIES = None                 # the scissors joint springs are not wired for groups
         rows = bar_layers.arrangement()
         live = _canonical({"groups": {gid: value for gid, value in rows.items() if gid != "_basis"}, "basis": rows["_basis"]})
@@ -760,7 +768,13 @@ def _open_checks(record, capacity):
                       "Bar-placement drawings, mechanical-splice staggering and congestion at joints are not designed."),
     ]
     layout = (record.get("slab_reinforcement") or {}).get("layout")
-    if layout is not None:
+    if (record.get("floor_model") or {}).get("slab_structural_participation", True) is False:
+        checks.append(make_check("qualification.slab_contribution", "Declared research model scope (NoSlab)", 1, 1, "==",
+                                 details={"basis": "no slab participation by the declared floor model: rectangular beams in "
+                                                   "the strong-column rule, joint shear and the hinges. For a building with a "
+                                                   "real slab this understates beam strength (ACI 318-19 18.7.3.2): a model "
+                                                   "scope, not code compliance"}))
+    elif layout is not None:
         checks.append(make_check("qualification.slab_contribution", "ACI 318-19 18.7.3.2 / 6.3.2", 1, 1, "==",
                                  details={"basis": "slab mats within each beam's own effective flange, developed as continuous "
                                                    "mats at interior ends and by the perimeter hook at exterior ends, in the "
@@ -851,8 +865,10 @@ def _qualification_checks(record, state):
         except Exception as exc:                      # noqa: BLE001 -- any failure is a finding, not a pass
             recomputed, found = None, [f"recomputation failed: {type(exc).__name__}: {exc}"]
         checks.append(make_check("qualification.capacity_evidence_recomputed", "Evidence integrity", int(not found), 1, "==",
-                                 details={"basis": "group capacity design rebuilt from the record's member groups, slab layout, "
-                                                   "transfers and saved combination actions and compared with the saved evidence",
+                                 details={"basis": "group capacity design rebuilt from the record's member groups, "
+                                                   + ("slab layout, " if (record.get("floor_model") or {}).get(
+                                                       "slab_structural_participation", True) else "")
+                                                   + "transfers and saved combination actions and compared with the saved evidence",
                                           "differences": found}))
         hoops = None if recomputed is None else capacity_design.hoop_updates(recomputed, state)
         checks.append(make_check("qualification.hoops_match_design", "Evidence integrity",
@@ -939,10 +955,14 @@ def _qualification_checks(record, state):
     found = differences(record.get("beam_end_strengths"), _canonical(beam_end_strengths(state)))
     checks.append(make_check("grouped.beam_end_strengths_recomputed", "Evidence integrity", int(not found), 1, "==",
                              details={"basis": "nominal hogging and sagging strength of every physical beam at each end, on its "
-                                               "own section, bar rows, flange and the common slab layout: what its hinges yield at",
+                                               + ("own section, bar rows, flange and the common slab layout"
+                                                  if (record.get("floor_model") or {}).get("slab_structural_participation", True)
+                                                  else "own rectangular section and bar rows (no slab participation)")
+                                               + ": what its hinges yield at",
                                       "differences": found}))
 
     # 4. Slab, floor load path, beam envelopes.
+    record_participates = (record.get("floor_model") or {}).get("slab_structural_participation", True)
     from Design.SMRF_Slab import evaluate_slab
     checks.extend(evaluate_slab(record.get("slab")))
     if record.get("gravity_load_model") == "slab_transfer" or record.get("floor_transfer") is not None:
@@ -950,13 +970,22 @@ def _qualification_checks(record, state):
                                  "Recomputed frame load inventory and force/moment balance, floor by floor",
                                  int(transfers is not None), 1, "==",
                                  details={"distinct_floors": len((record.get("floor_sections") or {}).get("distinct") or {})}))
-        from Design.SMRF_Coupled_Comparison import evaluate_coupled_comparison
-        checks.extend(evaluate_coupled_comparison(record))
+        if record_participates:
+            from Design.SMRF_Coupled_Comparison import evaluate_coupled_comparison
+            checks.extend(evaluate_coupled_comparison(record))
     from Design.SMRF_Beam_Actions import evaluate_saved_beam_bending
     checks.append(evaluate_saved_beam_bending(record))
+    if not record_participates:
+        # The floor is load and diaphragm only (NoSlab branch, 2026-10-21): the slab strip, reinforcement, action and
+        # coupled-comparison items have no subject. One declared-scope check records the model instead.
+        floor_model = record.get("floor_model") or {}
+        checks.append(make_check("floor.no_slab_participation_scope", "Declared research model scope",
+                                 int(floor_model.get("slab_structural_participation") is False
+                                     and record.get("slab_reinforcement") is None and record.get("slab_actions") is None), 1, "==",
+                                 details={"floor_model": floor_model.get("id"), "basis": floor_model.get("basis")}))
     strength = record.get("slab_reinforcement") or {}
     strength_inputs = strength.get("inputs", {}).get("slab")
-    if strength_inputs is not None or record.get("slab_reinforcement_inputs") is not None:
+    if record_participates and (strength_inputs is not None or record.get("slab_reinforcement_inputs") is not None):
         try:
             from Design.SMRF_Slab_Reinforcement import slab_input_signature
             expected = slab_input_signature(slab_strength_inputs(record))
@@ -967,10 +996,11 @@ def _qualification_checks(record, state):
         checks.append(make_check("slab_strip.frame_input_consistency", "Slab strength / current frame inputs", int(matches), 1, "=="))
         if not matches:
             strength = None
-    from Design.SMRF_Slab_Reinforcement import evaluate_slab_reinforcement
-    checks.extend(evaluate_slab_reinforcement(strength))
-    from Design.SMRF_Slab_Actions import evaluate_slab_actions
-    checks.extend(evaluate_slab_actions((strength or {}).get("inputs", {}).get("demand_evidence") or record.get("slab_actions")))
+    if record_participates:
+        from Design.SMRF_Slab_Reinforcement import evaluate_slab_reinforcement
+        checks.extend(evaluate_slab_reinforcement(strength))
+        from Design.SMRF_Slab_Actions import evaluate_slab_actions
+        checks.extend(evaluate_slab_actions((strength or {}).get("inputs", {}).get("demand_evidence") or record.get("slab_actions")))
 
     # 5. Drift and stability results bound to this frame.
     drift = record.get("drift_screen")

@@ -174,7 +174,8 @@ def verify_installed_design(record):
         # not a layout exists -- with a layout the composite section with its developed mats, without one the
         # bare rectangle in hogging and the flange concrete (no mats) in sagging (SMRF_Beam_Slab_Strength
         # .composite_beam_strengths with layout None, used by Model.IMK_Hinges.beam_yield_moments alike).
-        rule = ("composite family strength with developed slab mats (layout established)" if saved_layout else
+        rule = ("rectangular web in both signs (no slab participation)" if not sp.SLAB_STRUCTURAL_PARTICIPATION else
+                "composite family strength with developed slab mats (layout established)" if saved_layout else
                 "rectangular hogging and flange-concrete sagging with no mats (no layout established)")
         check(f"registry.{fam}.hogging_kip_in", saved_neg, max(data["hogging"]) if data["hogging"] else None, rel=1e-6)
         check(f"registry.{fam}.sagging_kip_in", saved_pos, max(data["sagging"]) if data["sagging"] else None, rel=1e-6)
@@ -198,7 +199,9 @@ def verify_installed_design(record):
                                                 "record stores no independent copy (production hinge_backbone.csv is written from this same registry), so "
                                                 "these are recorded, not verified"},
         "stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", None), "stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
-        "beam_spring_ke_family_note": ("the installed spring Ke is computed from the member's own properties (its line's T-section I, "
+        "beam_spring_ke_family_note": ("the installed spring Ke is computed from the member's own properties (its line's "
+                                       + ("T-section I" if sp.SLAB_STRUCTURAL_PARTICIPATION
+                                          else "rectangular web I (no slab participation)") + ", "
                                        "a column's axial state) since 2026-09-24 (Model.IMK_Hinges._create_end_hinge passes props) and is "
                                        "recorded per member as ke_y/ke_z_kip_in_per_rad; before that the INTERIOR line's I served every "
                                        "family and edge-line springs were stiffer than n x 6EI/L of their own member"),

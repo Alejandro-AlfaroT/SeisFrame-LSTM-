@@ -33,6 +33,9 @@ from Design.SMRF_Floor_Analysis import (METHOD_VERSION_FLEXIBLE, analyze_floor,
                                         transfer_mesh_per_bay)
 
 TRANSFER_SCHEMA = "smrf_floor_transfer_v3_force_and_couple_export"
+# The floor as load only (NoSlab branch, user decision 2026-10-21): no slab plate, the two-way 45-degree tributary rule.
+METHOD_VERSION_TRIBUTARY = "two_way_45_degree_tributary_clear_span_floor_load_transfer_v2"
+TRIBUTARY_POINTS_PER_SPAN = 12          # point loads per beam span, at the load centroids of equal clear-span segments
 # One transfer per mechanically distinct floor of a grouped design (2026-10-02): the container names, for
 # every elevated floor, the signature of its by-line description and holds one v3 transfer per signature.
 BY_FLOOR_SCHEMA = "smrf_floor_transfer_by_floor_v1"
@@ -62,6 +65,207 @@ def _pack_case(result):
             "beams": beams, "columns": columns}
 
 
+def _slab_participates():
+    """Structure_Parameters.SLAB_STRUCTURAL_PARTICIPATION: the slab plate model (True) or the tributary rule (False)."""
+    import Structure_Parameters as sp
+    return bool(getattr(sp, "SLAB_STRUCTURAL_PARTICIPATION", True))
+
+
+def expected_method_version():
+    """The transfer method of the live floor model; the validators refuse any other."""
+    return METHOD_VERSION_FLEXIBLE if _slab_participates() else METHOD_VERSION_TRIBUTARY
+
+
+def _stale_method_message():
+    """The refusal of a transfer whose method is not the live floor model's (the composite text is the one on Verification1)."""
+    if _slab_participates():
+        return "Floor transfer method or load model is stale or unknown."
+    return ("Floor transfer method or load model is stale, unknown, or not the live floor model's "
+            f"(expected {expected_method_version()}).")
+
+
+def _tributary_depth(s, length, cap):
+    """Depth of a panel edge's tributary area at s along it: the 45-degree lines from its corners, capped at half the
+    panel's other side (the trapezoid of a long edge, the triangle of a short one)."""
+    return min(s, length - s, cap)
+
+
+def _tributary_segment(a, b, length, cap):
+    """Exact integral of the tributary depth over [a, b] (it is piecewise linear with kinks at cap, L - cap, L/2)."""
+    points = sorted({a, b} | {p for p in (cap, length - cap, 0.5 * length) if a < p < b})
+    return sum(0.5 * (hi - lo) * (_tributary_depth(lo, length, cap) + _tributary_depth(hi, length, cap))
+               for lo, hi in zip(points, points[1:]))
+
+
+def _tributary_moment(a, b, length, cap):
+    """Exact first moment about s = 0 of the tributary depth over [a, b] (piecewise linear, same kinks)."""
+    points = sorted({a, b} | {p for p in (cap, length - cap, 0.5 * length) if a < p < b})
+    total = 0.0
+    for lo, hi in zip(points, points[1:]):
+        d_lo, d_hi = _tributary_depth(lo, length, cap), _tributary_depth(hi, length, cap)
+        total += (hi - lo) / 6.0 * (lo * (2.0 * d_lo + d_hi) + hi * (d_lo + 2.0 * d_hi))
+    return total
+
+
+def _tributary_faces(sections, axis, line, span):
+    """Centerline-to-face distances at the two ends of a span: half the supporting column's plan dimension along the
+    beam (h along X, b along Y: Model.Member_Properties.column_plan_dimensions); zero where no column is described."""
+    ends = ((span, line), (span + 1, line)) if axis == "x" else ((line, span), (line, span + 1))
+    faces = []
+    for i, j in ends:
+        column = floor_sections.support(sections, i, j)
+        faces.append(0.0 if column is None else 0.5 * (column["h_in"] if axis == "x" else column["b_in"]))
+    return faces
+
+
+def _tributary_span(length, cap, face_i, face_j, points):
+    """One span's unit distribution (pressure 1 kip/in2 on one adjoining panel): the clear span [face_i, L - face_j] in
+    equal segments, each lumped at its own load centroid (the face reactions of the lumped loads are then exact), and the
+    footprint share at each end with its centroid distance from that end's column centerline."""
+    if face_i + face_j >= length:
+        raise ValueError(f"Tributary transfer: the column faces {face_i} + {face_j} in leave no clear span of {length} in.")
+    segment = (length - face_i - face_j) / points
+    bounds = [face_i + k * segment for k in range(points + 1)]
+    integrals, fractions = [], []
+    for lo, hi in zip(bounds, bounds[1:]):
+        area = _tributary_segment(lo, hi, length, cap)
+        integrals.append(area)
+        fractions.append(_tributary_moment(lo, hi, length, cap) / area / length)
+
+    def footprint(lo, hi, end):
+        area = _tributary_segment(lo, hi, length, cap) if hi > lo else 0.0
+        if area <= 0.0:
+            return 0.0, 0.0
+        centroid = _tributary_moment(lo, hi, length, cap) / area
+        return area, (centroid if end == "i" else length - centroid)
+
+    return {"integrals": integrals, "fractions": fractions,
+            "footprint_i": footprint(0.0, face_i, "i"), "footprint_j": footprint(length - face_j, length, "j")}
+
+
+def _tributary_case(geometry, pressure_ksf, panels, descriptor, points, sections=None):
+    """One unit case of the tributary transfer: every beam's clear-span point loads and every column's footprint load.
+
+    The 45-degree areas start at the grid intersections. The part of a span's tributary area within half the supporting
+    column's depth of its centerline (over the column) goes to that column as a direct load, with the couple that keeps
+    the load's own position (so force and both first moments balance exactly); for square columns the direct load is the
+    pressure on the column's footprint. ``sections`` gives the supports (Design.SMRF_Floor_Sections.support); without
+    them the faces are at the centerlines.
+    """
+    nx, ny = geometry["num_bay_x"], geometry["num_bay_y"]
+    lx, ly = geometry["bay_x_in"], geometry["bay_y_in"]
+    q = pressure_ksf / 144.0                                             # kip/in2
+    keys = [("x", j, i) for j in range(ny + 1) for i in range(nx)] + [("y", i, j) for i in range(nx + 1) for j in range(ny)]
+    count = {key: 0 for key in keys}
+    for i, j in panels:
+        for key in (("x", j, i), ("x", j + 1, i), ("y", i, j), ("y", i + 1, j)):
+            count[key] += 1
+    columns = {(i, j): {"grid_i": i, "grid_j": j, "direct_load_kip": 0.0, "couple_global_mx_kip_in": 0.0,
+                        "couple_global_my_kip_in": 0.0, "footprint_share_kip_informational": 0.0}
+               for j in range(ny + 1) for i in range(nx + 1)}
+    beams, beam_total, mx, my = [], 0.0, 0.0, 0.0
+    for axis, line, span in keys:
+        length, cap = (lx, 0.5 * ly) if axis == "x" else (ly, 0.5 * lx)
+        face_i, face_j = _tributary_faces(sections, axis, line, span) if sections is not None else (0.0, 0.0)
+        unit = _tributary_span(length, cap, face_i, face_j, points)
+        scale = q * count[(axis, line, span)]
+        row = [scale * area for area in unit["integrals"]]
+        total = sum(row)
+        for x, p in zip(unit["fractions"], row):
+            mx += p * ((span + x) * lx if axis == "x" else line * lx)
+            my += p * (line * ly if axis == "x" else (span + x) * ly)
+        beams.append({"axis": axis, "line_index": line, "span_index": span,
+                      "node_loads": [[x, p] for x, p in zip(unit["fractions"], row)],
+                      "node_couples": [[x, 0.0, 0.0] for x in unit["fractions"]],
+                      "total_kip": total, "equivalent_uniform_kip_per_in": total / length})
+        beam_total += total
+        ends = ((span, line), (span + 1, line)) if axis == "x" else ((line, span), (line, span + 1))
+        for (gi, gj), (area, arm), toward in zip(ends, (unit["footprint_i"], unit["footprint_j"]), (1.0, -1.0)):
+            force = scale * area
+            if force == 0.0:
+                continue
+            column = columns[(gi, gj)]
+            column["direct_load_kip"] += force
+            column["footprint_share_kip_informational"] += force
+            # Downward P at (x, y): Mx = -P y + couple_x, My = P x + couple_y (the validator's convention).
+            if axis == "x":
+                column["couple_global_my_kip_in"] += force * toward * arm
+            else:
+                column["couple_global_mx_kip_in"] -= force * toward * arm
+    column_rows = [columns[(i, j)] for j in range(ny + 1) for i in range(nx + 1)]
+    direct = sum(c["direct_load_kip"] for c in column_rows)
+    couple_x = sum(c["couple_global_mx_kip_in"] for c in column_rows)
+    couple_y = sum(c["couple_global_my_kip_in"] for c in column_rows)
+    for c in column_rows:
+        mx += c["direct_load_kip"] * c["grid_i"] * lx
+        my += c["direct_load_kip"] * c["grid_j"] * ly
+    applied = q * lx * ly * len(panels)
+    expected_x = sum(q * lx * ly * (i + 0.5) * lx for i, j in panels)
+    expected_y = sum(q * lx * ly * (j + 0.5) * ly for i, j in panels)
+    scale = max(applied, 1e-12)
+    errors = {"relative_error": abs(beam_total + direct - applied) / scale,
+              "x_first_moment_relative_error": abs(mx + couple_y - expected_x) / max(applied * nx * lx, 1e-12),
+              "y_first_moment_relative_error": abs(my - couple_x - expected_y) / max(applied * ny * ly, 1e-12)}
+    equilibrium = {"applied_downward_kip": applied, "beam_node_loads_kip": beam_total, "column_direct_loads_kip": direct,
+                   "column_direct_fraction": direct / scale, **errors,
+                   "numerical_balance_passed": all(value <= 1e-10 for value in errors.values())}
+    return {"loadcase": copy.deepcopy(descriptor), "applied_kip": applied, "beam_kip": beam_total,
+            "column_direct_kip": direct, "column_direct_fraction": direct / scale, "equilibrium": equilibrium,
+            "beams": beams, "columns": column_rows}
+
+
+def build_tributary_floor_transfer(slab_record, geometry, sections, live_load_ksf, live_patterns=(),
+                                   points_per_span=TRIBUTARY_POINTS_PER_SPAN):
+    """The floor load as load only (NoSlab branch, 2026-10-21): the v3 transfer record with the two-way 45-degree
+    tributary distribution. No slab plate is solved; beams and columns need no stiffness. Same cases as the plate
+    transfer: unit dead, unit live and one unit live case per ACI 6.4.2 arrangement."""
+    nx, ny = geometry["num_bay_x"], geometry["num_bay_y"]
+    dead = (slab_record["concrete_unit_weight_kcf"] * slab_record["thickness_in"] / 12.0
+            + slab_record["superimposed_dead_load_ksf"])
+    all_panels = [(i, j) for i in range(nx) for j in range(ny)]
+    cases = {"dead": ({"id": "unit_dead", "dead_factor": 1.0, "live_factor": 0.0, "live_load_ksf": live_load_ksf,
+                       "live_pattern": "none"}, dead, all_panels),
+             "live": ({"id": "unit_live", "dead_factor": 0.0, "live_factor": 1.0, "live_load_ksf": live_load_ksf,
+                       "live_pattern": "all"}, live_load_ksf, all_panels)}
+    for pattern in live_patterns:
+        panels = [tuple(p) for p in pattern["panels"]]
+        cases[f"live_pattern_{pattern['id']}"] = ({"id": f"unit_live_{pattern['id']}", "dead_factor": 0.0, "live_factor": 1.0,
+                                                  "live_load_ksf": live_load_ksf, "live_pattern": [list(p) for p in pattern["panels"]]},
+                                                 live_load_ksf, panels)
+    unit_cases = {}
+    for name, (descriptor, pressure, panels) in cases.items():
+        if name.startswith("live") and live_load_ksf <= 0:
+            unit_cases[name] = None
+            continue
+        case = _tributary_case(geometry, pressure, panels, descriptor, points_per_span, sections)
+        if not case["equilibrium"]["numerical_balance_passed"]:
+            raise RuntimeError(f"Floor transfer {descriptor['id']} failed: the tributary loads do not balance "
+                               f"({case['equilibrium']}).")
+        unit_cases[name] = case
+    return {
+        "schema": TRANSFER_SCHEMA, "method_version": METHOD_VERSION_TRIBUTARY,
+        "load_model": LOAD_MODEL_NAME, "mesh_per_bay": None, "points_per_span": points_per_span,
+        "geometry": {key: geometry[key] for key in ("num_bay_x", "num_bay_y", "bay_x_in", "bay_y_in")},
+        "sections": (copy.deepcopy(sections) if floor_sections.is_by_line(sections) else
+                     {key: sections[key] for key in ("b_beam_in", "h_beam_in", "fc_beam_ksi", "b_col_in", "h_col_in")}),
+        **({"floor_sections_sha256": floor_sections.signature(sections)} if floor_sections.is_by_line(sections) else {}),
+        "slab_thickness_in": slab_record["thickness_in"],
+        "dead_pressure_ksf": dead, "live_pressure_ksf": live_load_ksf,
+        "live_patterns": [{"id": p["id"], "rule": p.get("rule"), "panels": [list(x) for x in p["panels"]]}
+                          for p in live_patterns],
+        "beam_model": {"model": "tributary_two_way_45_degree", "stiffness_used": False,
+                       "points_per_span": points_per_span,
+                       "column_faces": "half the supporting column's plan dimension along the beam (h along X, b along Y)"},
+        "unit_cases": unit_cases,
+        "basis": ("Floor as load only (no slab participation): each panel's load to its four edge beams by the 45-degree "
+                  "lines from its corners (trapezoids on the long edges, triangles on the short ones, ACI R8.10 / the "
+                  "two-way tributary convention). Each span's clear length between the column faces carries point loads "
+                  "at the load centroids of equal segments (no beam couples); the share within half a column depth of a "
+                  "column centerline goes to that column as a direct load with the couple of its eccentricity. Force and "
+                  "both first moments balance exactly. Beam drop and column self-weight are separate frame element loads."),
+    }
+
+
 def global_couple(axis, local_x, local_y):
     """Beam-local (torsion, bending) couple to global (Mx, My): x beams map directly, y beams rotate."""
     return (local_x, local_y) if axis == "x" else (-local_y, local_x)
@@ -80,6 +284,8 @@ def build_floor_transfer(slab_record, geometry, sections, live_load_ksf, mesh_pe
     failure: a missing transfer must never silently fall back to tributary
     loads.
     """
+    if not _slab_participates():
+        return build_tributary_floor_transfer(slab_record, geometry, sections, live_load_ksf, live_patterns=live_patterns)
     mesh = mesh_per_bay or transfer_mesh_per_bay(geometry["num_bay_x"], geometry["num_bay_y"])
     cases = {
         "dead": {"id": "unit_dead", "dead_factor": 1.0, "live_factor": 0.0,
@@ -158,8 +364,8 @@ def validate_floor_transfer(transfer, geometry, sections, slab_thickness_in, exp
     """
     if not isinstance(transfer, dict) or transfer.get("schema") != TRANSFER_SCHEMA:
         raise ValueError("Floor transfer record is missing or has an unknown schema.")
-    if transfer.get("method_version") != METHOD_VERSION_FLEXIBLE or transfer.get("load_model") != LOAD_MODEL_NAME:
-        raise ValueError("Floor transfer method or load model is stale or unknown.")
+    if transfer.get("method_version") != expected_method_version() or transfer.get("load_model") != LOAD_MODEL_NAME:
+        raise ValueError(_stale_method_message())
     for key in ("num_bay_x", "num_bay_y", "bay_x_in", "bay_y_in"):
         if transfer["geometry"].get(key) != geometry[key]:
             raise ValueError(f"Floor transfer geometry.{key} disagrees with the current model.")
@@ -311,7 +517,8 @@ def build_floor_transfers_by_floor(slab_record, geometry, description, live_load
     A failed solve raises, as for the uniform transfer: there is no tributary fallback.
     """
     floor_sections.validate_by_floor(description, geometry["num_bay_x"], geometry["num_bay_y"], geometry["num_floor"])
-    mesh = mesh_per_bay or transfer_mesh_per_bay(geometry["num_bay_x"], geometry["num_bay_y"])
+    participating = _slab_participates()
+    mesh = (mesh_per_bay or transfer_mesh_per_bay(geometry["num_bay_x"], geometry["num_bay_y"])) if participating else None
     patterns = [{"id": p["id"], "rule": p.get("rule"), "panels": [list(x) for x in p["panels"]]} for p in live_patterns]
     kept = (reuse or {}).get("transfers", {}) if is_by_floor(reuse) else {}
     transfers, reused = {}, []
@@ -329,12 +536,15 @@ def build_floor_transfers_by_floor(slab_record, geometry, description, live_load
                                         live_patterns=live_patterns)
         transfer["slab_record_sha256"] = _slab_identity(slab_record)
         transfers[sha] = transfer
-    return {"schema": BY_FLOOR_SCHEMA, "method_version": METHOD_VERSION_FLEXIBLE, "load_model": LOAD_MODEL_NAME,
+    return {"schema": BY_FLOOR_SCHEMA, "method_version": expected_method_version(), "load_model": LOAD_MODEL_NAME,
             "mesh_per_bay": mesh, "floors": dict(description["floors"]), "transfers": transfers,
             "distinct_floor_count": len(transfers), "reused_signatures": reused,
-            "basis": ("One flexible-beam floor solution for every mechanically distinct floor (beam lines, supports, slab, "
-                      "loads, patterns and mesh); floors are matched by the signature of those inputs, never by band or "
-                      "position. Each transfer is the v3 force-and-couple export, validated on its own.")}
+            "basis": (("One flexible-beam floor solution for every mechanically distinct floor (beam lines, supports, slab, "
+                       "loads, patterns and mesh); " if participating else
+                       "One two-way 45-degree tributary record (floor as load only, no slab plate) for every mechanically "
+                       "distinct floor (beam lines, supports, slab, loads and patterns); ")
+                      + "floors are matched by the signature of those inputs, never by band or position. Each transfer is "
+                        "the v3 force-and-couple export, validated on its own.")}
 
 
 def _slab_identity(slab_record):
@@ -358,8 +568,8 @@ def validate_floor_transfers_by_floor(record, geometry, description, slab_thickn
     if not is_by_floor(record):
         raise ValueError("A grouped design needs a floor transfer solved floor by floor; this record is not one "
                          f"(schema {None if not isinstance(record, dict) else record.get('schema')!r}).")
-    if record.get("method_version") != METHOD_VERSION_FLEXIBLE or record.get("load_model") != LOAD_MODEL_NAME:
-        raise ValueError("Floor transfer method or load model is stale or unknown.")
+    if record.get("method_version") != expected_method_version() or record.get("load_model") != LOAD_MODEL_NAME:
+        raise ValueError(_stale_method_message())
     floor_sections.validate_by_floor(description, geometry["num_bay_x"], geometry["num_bay_y"], geometry["num_floor"])
     if record.get("floors") != description["floors"]:
         stale = sorted(k for k in description["floors"] if (record.get("floors") or {}).get(k) != description["floors"][k])

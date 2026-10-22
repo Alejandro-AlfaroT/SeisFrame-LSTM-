@@ -13,6 +13,9 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from Design.Config import DesignConfig, FloorAnalysisConfig, PROBE_SLAB_REFINEMENT, SlabActionAssertions
 from Design.SMRF_Floor_Mesh import graded_face_levels, resolve_recipe_plan, floor_mesh, MAX_EXPLICIT_SHELLS
@@ -194,6 +197,7 @@ class ProbeWorkflowTests(unittest.TestCase):
         self.assertNotEqual(first["sha256"], second["sha256"])
         self.assertEqual(methodology_sha256(first), methodology_sha256(second))
 
+    @composite_slab
     def test_asserted_design_without_a_plan_is_named_before_any_solve(self):
         from Design import Design_Driver as driver
         cfg = DesignConfig(slab_actions=SlabActionAssertions(

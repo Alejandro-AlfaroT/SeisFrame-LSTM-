@@ -193,8 +193,10 @@ def recomputed_evidence(record):
         checks.append(make_check(
             "qualification.capacity_evidence_recomputed", "Evidence integrity",
             int(recomputation["consistent"]), 1, "==",
-            details={"basis": "capacity design rebuilt from the record's sections, bars, slab layout, transfer and "
-                              "saved combination actions; every check, the hoops, joint shear, anchorage and "
+            details={"basis": "capacity design rebuilt from the record's sections, bars, "
+                              + ("slab layout, " if (record.get("floor_model") or {}).get("slab_structural_participation", True)
+                                 else "")
+                              + "transfer and saved combination actions; every check, the hoops, joint shear, anchorage and "
                               "acceptance compared with the saved evidence; the recomputed object is what "
                               "qualification consumes",
                      "differences": recomputation["differences"]}))
@@ -247,8 +249,11 @@ def recomputed_evidence(record):
         checks.append(make_check(
             "qualification.slab_strength_evidence_recomputed", "Evidence integrity",
             int(strength["consistent"]), 1, "==",
-            details={"basis": "beam-plus-slab strengths rebuilt from the record's sections, bars and slab layout and "
-                              "compared entry by entry with the saved ones; the recomputed entries feed the joints",
+            details={"basis": ("beam-plus-slab strengths rebuilt from the record's sections, bars and slab layout and "
+                               if (record.get("floor_model") or {}).get("slab_structural_participation", True) else
+                               "rectangular beam strengths (no slab participation) rebuilt from the record's sections and "
+                               "bars and ")
+                              + "compared entry by entry with the saved ones; the recomputed entries feed the joints",
                      "differences": strength["differences"]}))
         if strength["consistent"]:
             strengths, families = strength["entries"], strength["families"]
@@ -383,7 +388,13 @@ def _apply_capacity_design_evidence(record, checks, evidence):
     established = {"developed_effective_width", "terminated_undeveloped", "flange_concrete_undeveloped_bars"}
     developed = bool(strengths) and layout is not None and all(
         v.get("slab_basis") in established for v in strengths.values())
-    if developed:
+    if (record.get("floor_model") or {}).get("slab_structural_participation", True) is False:
+        replaced["qualification.slab_contribution"] = make_check(
+            "qualification.slab_contribution", "Declared research model scope (NoSlab)", 1, 1, "==",
+            details={"basis": "no slab participation by the declared floor model: rectangular beams in the strong-column "
+                              "rule, joint shear and the hinges. For a building with a real slab this understates beam "
+                              "strength (ACI 318-19 18.7.3.2): a model scope, not code compliance"})
+    elif developed:
         undeveloped_ends = sorted({key.rsplit("/", 1)[0] for key, v in strengths.items()
                                    if v.get("slab_basis") != "developed_effective_width"})
         replaced["qualification.slab_contribution"] = make_check(
@@ -445,6 +456,8 @@ def qualify_design(record):
     # rebuilt from the record's final cage (never against the saved copies).
     checks.extend(evaluate_demand_basis(record, strength_families=recomputed["families"] or None))
     checks.extend(evaluate_slab(record.get("slab")))
+    floor_model = record.get("floor_model") or {}
+    record_participates = floor_model.get("slab_structural_participation", True)
     if record.get("gravity_load_model") == "slab_transfer" or record.get("floor_transfer") is not None:
         from Design.SMRF_Floor_Transfer import validate_floor_transfer
         try:
@@ -458,14 +471,23 @@ def qualify_design(record):
             transfer_error = str(exc)
         checks.append(make_check("floor.transfer_load_integrity", "Recomputed frame load inventory and force/moment balance",
                                  int(transfer_error is None), 1, "==", details={"error": transfer_error}))
-        from Design.SMRF_Coupled_Comparison import evaluate_coupled_comparison
-        checks.extend(evaluate_coupled_comparison(record))
+        if record_participates:
+            from Design.SMRF_Coupled_Comparison import evaluate_coupled_comparison
+            checks.extend(evaluate_coupled_comparison(record))
     from Design.SMRF_Beam_Actions import evaluate_saved_beam_bending
     checks.append(evaluate_saved_beam_bending(record))
     from Design.SMRF_Design_Evidence import slab_strength_inputs, analysis_input_signature
+    if not record_participates:
+        # The floor is load and diaphragm only (NoSlab branch, 2026-10-21): the slab strip, reinforcement, action,
+        # diaphragm and coupled-comparison items have no subject; one declared-scope check records the model.
+        checks.append(make_check("floor.no_slab_participation_scope", "Declared research model scope",
+                                 int(floor_model.get("slab_structural_participation") is False
+                                     and (record.get("slab_reinforcement") or {}).get("layout") is None
+                                     and record.get("slab_actions") is None), 1, "==",
+                                 details={"floor_model": floor_model.get("id"), "basis": floor_model.get("basis")}))
     strength = record.get("slab_reinforcement") or {}
     strength_inputs = strength.get("inputs", {}).get("slab")
-    if strength_inputs is not None or record.get("slab_reinforcement_inputs") is not None:
+    if record_participates and (strength_inputs is not None or record.get("slab_reinforcement_inputs") is not None):
         try:
             from Design.SMRF_Slab_Reinforcement import slab_input_signature
             expected = slab_input_signature(slab_strength_inputs(record))
@@ -478,17 +500,18 @@ def qualify_design(record):
                                  int(matches), 1, "=="))
         if not matches:
             strength = None  # Never display capacities for a different slab as current checks.
-    checks.extend(evaluate_slab_reinforcement(strength))
-    from Design.SMRF_Slab_Actions import evaluate_slab_actions
-    # Asserted evidence lives in the reinforcement inputs (audited by exact
-    # recomputation); the computed evidence is always saved beside it so an
-    # unasserted design still shows what there is to review.
-    checks.extend(evaluate_slab_actions((strength or {}).get("inputs", {}).get("demand_evidence")
-                                        or record.get("slab_actions")))
-    # The slab as the diaphragm (ACI 318-19 18.12 on the ASCE 7-22 12.10.1.1 forces; 2026-10-14): the saved
-    # design is recomputed from its inputs and its inputs are checked against the record.
-    from Design.SMRF_Diaphragm import evaluate_slab_diaphragm
-    checks.extend(evaluate_slab_diaphragm(record))
+    if record_participates:
+        checks.extend(evaluate_slab_reinforcement(strength))
+        from Design.SMRF_Slab_Actions import evaluate_slab_actions
+        # Asserted evidence lives in the reinforcement inputs (audited by exact
+        # recomputation); the computed evidence is always saved beside it so an
+        # unasserted design still shows what there is to review.
+        checks.extend(evaluate_slab_actions((strength or {}).get("inputs", {}).get("demand_evidence")
+                                            or record.get("slab_actions")))
+        # The slab as the diaphragm (ACI 318-19 18.12 on the ASCE 7-22 12.10.1.1 forces; 2026-10-14): the saved
+        # design is recomputed from its inputs and its inputs are checked against the record.
+        from Design.SMRF_Diaphragm import evaluate_slab_diaphragm
+        checks.extend(evaluate_slab_diaphragm(record))
     slab_inputs = (record.get("slab") or {}).get("inputs", {})
     if slab_inputs:
         for group in ("geometry", "sections"):

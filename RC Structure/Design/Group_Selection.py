@@ -232,7 +232,7 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg, representatives=
     dcr = max(mu_pos / strengths["positive"]["phi_mn_kip_in"], mu_neg / strengths["negative"]["phi_mn_kip_in"])
     return {"admissible": True, "threads": threads, "layers": max(rows["top"]["layers"], rows["bottom"]["layers"]),
             "dcr": dcr, "steel_in2": as_top + as_bot, "reason": None,
-            "strength_basis": checks.BEAM_STRENGTH_BASIS if sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
+            "strength_basis": checks.beam_strength_basis() if sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
 
 
 def select_beam_group(state, gid, actions, cfg):
@@ -270,7 +270,7 @@ def select_beam_groups(state, gids, actions, cfg):
     report = {"group_id": gids[0] if len(gids) == 1 else None, "groups": list(gids),
               "demand_mu_positive_kip_in": demand[0], "demand_mu_negative_kip_in": demand[1],
               "candidates_admissible": len(priced), "through_bar_depth_in": through,
-              "strength_basis": checks.BEAM_STRENGTH_BASIS if sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
+              "strength_basis": checks.beam_strength_basis() if sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
     if not priced:
         return current, {**report, "status": "no_admissible_cage", "exhausted": True,
                          "detail": "no cage of the declared domain satisfies the code limits in this section"}

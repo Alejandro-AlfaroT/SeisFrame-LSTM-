@@ -11,6 +11,9 @@ from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 
 from Design.SMRF_Capacity_Design import (build_capacity_design, design_anchorage,  # noqa: E402
                                          design_beam_shear, design_joint_shear,
@@ -81,6 +84,7 @@ class ProbableStrengthTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "layers_about_z"):
             capacity.design_column_shear(state(sections={"b_col_in": 20.}), {})
 
+    @composite_slab
     def test_mpr_uses_1_25_fy_on_the_composite_section(self):
         s = probable_beam_strengths(state(), "interior", "x")
         self.assertGreater(s["mpr_negative_kip_in"], 1.15 * s["mn_negative_kip_in"])

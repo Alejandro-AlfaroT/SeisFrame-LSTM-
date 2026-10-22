@@ -247,6 +247,11 @@ def beam_flexural_strengths(design, rows):
 BEAM_STRENGTH_BASIS = "member_composite_t_l_actual_rows_developed_mats_v1"
 
 
+def beam_strength_basis():
+    """The label of the beam strengths: composite T/L with the slab, the rectangle without slab participation."""
+    return BEAM_STRENGTH_BASIS if sp.SLAB_STRUCTURAL_PARTICIPATION else "rectangular_no_slab"
+
+
 def beam_section_context(member):
     """Geometry/anchorage equivalence key within an installed group's fixed cage and slab layout.
 
@@ -303,7 +308,7 @@ def resolved_beam_flexural_strengths(member, rows):
                             "phi_mn_kip_in": phi * value["mn_kip_in"], "tension_strain": strain,
                             "tension_controlled": value["tension_controlled"]})
         governing = min(choices, key=lambda c: c["phi_mn_kip_in"])
-        result[sign].update({**governing, "basis": BEAM_STRENGTH_BASIS,
+        result[sign].update({**governing, "basis": beam_strength_basis(),
                              "tension_controlled": all(c["tension_controlled"] for c in choices),
                              "effective_flange_width_in": family["effective_flange_width_in"],
                              "slab_sides": family["slab_sides"], "section_capacities": choices})
@@ -348,7 +353,7 @@ def beam_group_strength(design, rows, bar_rows, state=None):
     return {"flexure_positive": best["positive"], "flexure_negative": best["negative"], "shear": best["shear"],
             "strengths": ({sign: by_member[best[sign]["member_tag"]][sign] for sign in ("positive", "negative")}
                           if by_member else strengths), "observations": len(rows),
-            "strength_basis": BEAM_STRENGTH_BASIS if state is not None and sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
+            "strength_basis": beam_strength_basis() if state is not None and sp.SLAB_THICKNESS_IN is not None else "rectangular_no_slab"}
 
 
 def beam_detailing_strengths(member, rows):

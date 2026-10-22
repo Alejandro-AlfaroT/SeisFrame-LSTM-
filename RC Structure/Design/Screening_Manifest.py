@@ -281,7 +281,9 @@ def status_fields(record, probe, probe_date, stages_run, stage_results=None):
             "design": "completed",
             "design_search_stop_reason": search.get("stop_reason"),
             "design_search_budget_exhausted": search.get("stop_reason") == "iteration_budget_exhausted",
-            "slab_refinement_status": refinement.get("status"),
+            "slab_refinement_status": (refinement.get("status")
+                                       if (record.get("floor_model") or {}).get("slab_structural_participation", True)
+                                       else "not_applicable_no_slab_participation"),
             **{name: (stage_results.get(name) or {}).get("status", "not_run") for name in STAGES[1:]},
             "stages_requested": list(stages_run),
             "note": "a stage that ran to its end is completed whatever it found; a stop reason is evidence, not an error",

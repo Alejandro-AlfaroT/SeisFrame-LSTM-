@@ -17,6 +17,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import Structure_Parameters as sp                                            # noqa: E402
 from Design import Design_Driver as driver                                   # noqa: E402
 from Design.SMRF_Capacity_Design import build_capacity_design                # noqa: E402
@@ -29,6 +32,7 @@ def statuses(record):
     return {(c["id"] + ("@" + c["location"] if c.get("location") else "")): c for c in qualify_design(record)["checks"]}
 
 
+@composite_slab
 class FinalQualificationCounterexamples(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -52,6 +56,12 @@ class FinalQualificationCounterexamples(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.stack.close()
+
+    def test_the_composite_record_keeps_the_verification1_keys(self):
+        # NoSlab branch (2026-10-22): under the composite model a record carries nothing the switch added
+        self.assertNotIn("floor_model", self.record)
+        self.assertNotIn("slab_structural_participation", self.record["floor_loads"])
+        self.assertTrue(all("slab_participation" not in family for family in (self.record.get("beam_slab_families") or {}).values()))
 
     def fresh(self):
         return copy.deepcopy(self.record)

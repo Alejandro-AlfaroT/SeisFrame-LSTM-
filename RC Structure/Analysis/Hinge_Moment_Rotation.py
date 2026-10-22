@@ -271,7 +271,11 @@ def assemble(results, registry=None):
             "beam_local_y": "hogging (top in tension) is positive at member end i and negative at member end j",
             "beam_local_z": "weak-axis (in-plan) bending; symmetric strength",
             "column": "both axes are symmetric; the global axis of each spring is in hinge_springs.csv (global_rotation_axis)",
-            "asymmetry": "slab-driven hogging/sagging asymmetry of beam hinges is physical and kept; see yield_moment_positive/negative per spring",
+            "asymmetry": (("slab-driven hogging/sagging asymmetry of beam hinges is physical and kept"
+                           if sp.SLAB_STRUCTURAL_PARTICIPATION else
+                           "hogging/sagging asymmetry of beam hinges comes from unequal top and bottom bars only (no slab "
+                           "participation) and is kept")
+                          + "; see yield_moment_positive/negative per spring"),
             "cyclic_energy": ("per spring in hinge_springs.csv: energy_anchor_policy, the reference moment, the reference energy "
                               "of every deterioration mode and the Lamda installed on the positive input branch"),
             "relation_to_member_end_moment": ("the spring's own conjugate pair is stored; its relation to the elastic member's local "

@@ -197,6 +197,13 @@ def slab_stage(cfg, context):
         context["transfer"] = transfer
         context["floor_solves"] = context.get("floor_solves", 0) + len(transfer["transfers"]) - len(transfer["reused_signatures"])
         sp.FLOOR_TRANSFER = transfer
+        if not sp.SLAB_STRUCTURAL_PARTICIPATION:
+            # The floor is load and diaphragm only (NoSlab branch, 2026-10-21): the tributary transfer above carries
+            # its load; no strip actions, no refinement and no slab reinforcement are designed.
+            sp.SLAB_ACTIONS = sp.SLAB_REINFORCEMENT = None
+            attempt.update(status="no_slab_participation", layout_selected=False)
+            return {"slab": slab, "description": description, "transfer": transfer, "evidence": None, "reinforcement": None,
+                    "attempts": attempts}
         inputs = driver._slab_strength_inputs_from_state(slab, cfg)
         evidence = _slab_evidence(cfg, slab, description, inputs, context)
         sp.SLAB_ACTIONS = evidence
@@ -287,8 +294,10 @@ def story_strength_distribution(cfg):
                                     "basis": "grouped design: sections and cages vary by story band and plan location, so "
                                              "every story is priced on its own beams"},
             "model": ("beam-sway mechanism story strength per frame line, story by story: the sum over the line's spans of "
-                      "(Mn- + Mn+) / story height of the beams installed at that floor, composite with the developed slab "
-                      "where established; center of mass at the plan center. A declared approximation (review item M1): "
+                      "(Mn- + Mn+) / story height of the beams installed at that floor, "
+                      + ("composite with the developed slab where established" if sp.SLAB_STRUCTURAL_PARTICIPATION
+                         else "rectangular web sections (no slab participation)")
+                      + "; center of mass at the plan center. A declared approximation (review item M1): "
                       "column-limited, joint-limited and shear-limited mechanisms, the base and the roof are not priced"),
             "basis": ("ASCE 7-22 Table 12.3-1 Type 1 strength criterion per story and direction; the largest story value "
                       "is reported. The story strengths also feed the weak-story comparison (Table 12.3-2 Types 4a, 4b), "
@@ -644,6 +653,8 @@ def quantities(state=None, slab=None, slab_reinforcement=None, capacity=None):
     slab_volume = slab_t * mp.floor_area_in2() * sp.NUM_FLOOR
     layout = (slab_reinforcement or {}).get("layout") if slab_reinforcement else None
     slab_steel = None
+    if not sp.SLAB_STRUCTURAL_PARTICIPATION:
+        slab_steel = 0.0                 # no slab reinforcement in the model (NoSlab): candidates compare frame steel
     if layout is not None:
         area_in2 = mp.floor_area_in2()
         slab_steel = 0.0
@@ -660,6 +671,9 @@ def quantities(state=None, slab=None, slab_reinforcement=None, capacity=None):
             "transitions_without_priced_confinement": sorted(unpriced), "frame_steel_in3": frame_steel,
             "frame_steel_lb": frame_steel * STEEL_UNIT_WEIGHT_LB_PER_IN3,
             "slab_steel_in3": slab_steel,
+            **({} if sp.SLAB_STRUCTURAL_PARTICIPATION else
+               {"slab_steel_basis": "not modeled: the floor is load and rigid diaphragm only (NoSlab branch); total steel is "
+                                    "the frame steel"}),
             "slab_steel_lb": None if slab_steel is None else slab_steel * STEEL_UNIT_WEIGHT_LB_PER_IN3,
             "total_steel_in3": None if slab_steel is None else frame_steel + slab_steel,
             "distinct_form_sizes": state.distinct_form_sizes(),

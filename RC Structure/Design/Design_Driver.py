@@ -286,7 +286,8 @@ def _update_slab_reinforcement(cfg, slab):
     qualification keeps the slab contribution and SCWB not_evaluated. A slab
     whose ladder is exhausted under asserted evidence is a design failure.
     """
-    if not cfg.floor_analysis.transfer_to_frame:
+    if not cfg.floor_analysis.transfer_to_frame or not sp.SLAB_STRUCTURAL_PARTICIPATION:
+        # No slab participation (NoSlab branch, 2026-10-21): no strip actions and no slab reinforcement.
         sp.SLAB_REINFORCEMENT = None
         sp.SLAB_ACTIONS = None
         return None
@@ -413,7 +414,9 @@ def _slab_thickness_search(cfg, slab):
             continue
         return slab, {"thickness_in": slab["thickness_in"], "steps": len(trials), "trials": trials,
                       "basis": ("thickness stepped up the declared ladder until a four-layer layout passes; "
-                                "a refinement comparison failure is not retried")}
+                                "a refinement comparison failure is not retried" if sp.SLAB_STRUCTURAL_PARTICIPATION else
+                                "thickness from the ACI 8.3.1.2 screen only: it sets the floor self-weight; no slab layout "
+                                "is designed (no slab participation)")}
 
 
 def _slab_search(cfg, beams, beam_index, minimum_thickness_in=None):
@@ -737,8 +740,9 @@ def _lateral_strength_distribution(cfg=None):
               "families": {name: {"mn_negative_kip_in": families[name]["mn_negative_kip_in"],
                                   "mn_positive_kip_in": families[name]["mn_positive_kip_in"]} for name in STRENGTH_FAMILIES},
               "source": ("Design.SMRF_Beam_Slab_Strength.beam_slab_strengths on the installed sections, longitudinal cage and "
-                         "slab (composite with the established layout, flange concrete only without one); the rebuild "
-                         "qualification repeats from the record")}
+                         + ("slab (composite with the established layout, flange concrete only without one)"
+                            if sp.SLAB_STRUCTURAL_PARTICIPATION else "rectangular webs (no slab participation)")
+                         + "; the rebuild qualification repeats from the record")}
     geometry = _slab_geometry()
     by_direction, worst = {}, 0.0
     for direction in ("x", "y"):
@@ -755,8 +759,10 @@ def _lateral_strength_distribution(cfg=None):
                                               "strengths; the archetype's construction, checked by the record's single "
                                               "section and reinforcement blocks")},
             "model": ("beam-sway mechanism story strength per frame line: bays x (Mn- + Mn+) / story height of the line's "
-                      "beam family (edge family on the two perimeter lines, interior family elsewhere), composite with the "
-                      "developed slab where established, flange-concrete section otherwise; identical columns on every "
+                      "beam family (edge family on the two perimeter lines, interior family elsewhere), "
+                      + ("composite with the developed slab where established, flange-concrete section otherwise"
+                         if sp.SLAB_STRUCTURAL_PARTICIPATION else "rectangular web section (no slab participation)")
+                      + "; identical columns on every "
                       "line; uniform over height; center of mass at the plan center; priced on the installed cage. A "
                       "declared approximation awaiting the scientific review's hand calculation (column base, roof and "
                       "column-limited mechanisms, shear limits): not a verified resistance model"),
@@ -1227,8 +1233,10 @@ def _joint_scwb_state(actions, expected_ids):
         "ratio_required": sp.SCWB_RATIO_MIN,
         "excepted_18_7_3_1": excepted,
         "basis": ("per-joint nominal joint-face strengths on the installed cage; column Mn enveloped over "
-                  "every factored combination and both compression faces; beam Mn with the developed slab "
-                  "where established; the 18.7.3.1 exception where the column is discontinuous above and "
+                  "every factored combination and both compression faces; "
+                  + ("beam Mn with the developed slab where established" if sp.SLAB_STRUCTURAL_PARTICIPATION
+                     else "beam Mn of the rectangular web (no slab participation)")
+                  + "; the 18.7.3.1 exception where the column is discontinuous above and "
                   "Pu < Ag f'c / 10 (min_ratio_provided is over the connections the rule applies to)"),
         "failed_checks": [{key: check.get(key) for key in ("id", "location", "status", "demand", "capacity", "units")}
                           for check, _sway, _axis in failing],
@@ -2667,7 +2675,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
                               and scwb_ok and capacity["accepted"]
                               and drift_screen["accepted"] and slab_screen["accepted"])
         candidate_comparison = None
-        if otherwise_accepted and sp.FLOOR_TRANSFER is not None:
+        if otherwise_accepted and sp.FLOOR_TRANSFER is not None and sp.SLAB_STRUCTURAL_PARTICIPATION:
             from Design.SMRF_Coupled_Comparison import compare_transfer_to_coupled
             _notify_progress(progress, "phase_started", "candidate.coupled_comparison", iteration=iteration)
             candidate_comparison = compare_transfer_to_coupled(slab, combination_actions=combination_actions)
@@ -2834,7 +2842,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     # Load-path check of the selected frame: the bare frame with its transfer
     # against the monolithic coupled model, same slab, sections and loads.
     coupled_comparison = final.get("coupled_comparison")
-    if coupled_comparison is None and sp.FLOOR_TRANSFER is not None:
+    if coupled_comparison is None and sp.FLOOR_TRANSFER is not None and sp.SLAB_STRUCTURAL_PARTICIPATION:
         _notify_progress(progress, "phase_started", "design.coupled_comparison")
         from Design.SMRF_Coupled_Comparison import compare_transfer_to_coupled
         coupled_comparison = compare_transfer_to_coupled(final["slab"],
@@ -2883,6 +2891,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     record = {
         "schema_version": DESIGN_SCHEMA_VERSION,
         "slab": final["slab"],
+        **sp.floor_model_entry(),
         "floor_loads": sp.floor_load_metadata(),
         "gravity_load_model": sp.effective_gravity_load_model(),
         "floor_transfer": sp.FLOOR_TRANSFER,
@@ -3043,6 +3052,13 @@ def apply_design(record):
     missing = [key for key in required if key not in rebar]
     if missing:
         raise ValueError(f"Cached design lacks {missing}; cannot reproduce its reinforcement.")
+    # The floor model the design was made under (NoSlab branch, 2026-10-21): only a no-slab record carries the
+    # floor_model block, so a record without it is the composite model (as in Grouped_Record.apply_grouped_design).
+    # A record of the other model is refused before any assignment.
+    participation = (record.get("floor_model") or {}).get("slab_structural_participation", True)
+    if bool(participation) != bool(sp.SLAB_STRUCTURAL_PARTICIPATION):
+        raise ValueError("The cached design was made under another floor model (slab structural participation "
+                         f"{participation}); this source runs with {bool(sp.SLAB_STRUCTURAL_PARTICIPATION)}.")
     # Validate the whole state before the first assignment. A missing field
     # halfway through restoration must not leave a partially changed model.
     for key in ("b_col_in", "h_col_in", "fc_col_ksi", "b_beam_in", "h_beam_in", "fc_beam_ksi"):
@@ -3158,7 +3174,8 @@ def apply_design(record):
             raise ValueError("Cached slab reinforcement does not reproduce.")
         if strength["inputs"]["slab"]["thickness_in"] != sp.SLAB_THICKNESS_IN:
             raise ValueError("Cached slab reinforcement belongs to a different slab thickness.")
-    sp.SLAB_REINFORCEMENT = strength
+    # Without slab participation no slab reinforcement is installed, whatever the record carries.
+    sp.SLAB_REINFORCEMENT = strength if sp.SLAB_STRUCTURAL_PARTICIPATION else None
     # The saved joint-shear categories (gamma, Aj, Vn per level/kind/axis) feed the joint springs
     # of the nonlinear frame (Model/Joint_Springs); a record without them gets the framing fallback.
     sp.JOINT_SHEAR_CATEGORIES = ((record.get("capacity_design") or {}).get("joints") or {}).get("joints")
@@ -3223,6 +3240,9 @@ def design_request_identity(cfg=None):
             "GRAVITY_LOAD_MODEL", "ASCE_SDS", "ASCE_SD1", "ASCE_S1", "ASCE_R", "ASCE_RISK_CATEGORY", "ASCE_IE",
             "ASCE_CU", "ASCE_TL", "FY_KSI", "ES_KSI", "COVER")
     inputs = {key: getattr(sp, key) for key in keys}
+    if not sp.SLAB_STRUCTURAL_PARTICIPATION:
+        # named only under no-slab, so a composite-model request keeps the Verification1 input inventory
+        inputs["SLAB_STRUCTURAL_PARTICIPATION"] = False
     policy = asdict(cfg)
     # The nonlinear-model profile the design is made for (Model/Analysis_Profile): part of the
     # policy so the methodology hash and the cache check both refuse a design made under another

@@ -13,6 +13,9 @@ from pathlib import Path
 
 RC_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RC_DIR))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 
 import Structure_Parameters as sp                                              # noqa: E402
 from Model import Member_Groups as mg                                           # noqa: E402
@@ -42,6 +45,7 @@ def close(test, a, b, rel=1e-12):
 
 
 class UniformEquivalence(unittest.TestCase):
+    @composite_slab
     def test_every_member_property_equals_the_one_section_helper(self):
         for slab in (None, 7.0):
             with frame(slab):
@@ -157,6 +161,7 @@ class GroupedHandTotals(unittest.TestCase):
         close(self, mp.beam_self_weight_kip_per_in(beam), gamma * 18.0 * 21.0 * (240.0 - 26.0) / 240.0)
         self.assertEqual(mp.JOINT_CORE_CONVENTION, "joint_core_takes_the_column_below_v1")
 
+    @composite_slab
     def test_flange_uses_the_actual_neighbouring_webs(self):
         # floor 1: the edge Y beams (i = 0, 2) are 24 in wide, the interior Y beam (i = 1) is 18 in wide
         interior = mg.beam_at("beam_y", 1, 1, 0)

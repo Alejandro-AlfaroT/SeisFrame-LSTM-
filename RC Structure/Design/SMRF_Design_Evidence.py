@@ -347,13 +347,22 @@ def floor_diagnostics(record, config):
 
 
 def attach_design_evidence(record, cfg):
+    # The floor model of the record (NoSlab branch, 2026-10-21): without slab participation no slab reinforcement record
+    # is made and no slab plate is solved; a record without the block keeps the composite behaviour.
+    participates = (record.get("floor_model") or {}).get("slab_structural_participation", True)
     record["slab_reinforcement_inputs"] = slab_strength_inputs(record)
-    if record.get("slab_reinforcement") is None:
+    if record.get("slab_reinforcement") is None and participates:
         # Legacy path (transfer disabled): no verified strip actions exist.
         record["slab_reinforcement"] = design_slab_reinforcement(record["slab_reinforcement_inputs"], None)
     from Design.SMRF_Beam_Slab_Strength import beam_slab_strengths
     record["beam_slab_strengths"], record["beam_slab_families"] = beam_slab_strengths(record)
     record["joint_evidence"] = joint_evidence(record)
+    if not participates:
+        record["floor_analysis"] = {"status": "not_applicable_no_slab_participation", "verified": False, "cases": [],
+                                    "checks": [],
+                                    "reason": ("The floor is load and rigid diaphragm only: the beam loads come from the two-way "
+                                               "tributary transfer in record['floor_transfer']; no slab plate is solved.")}
+        return record
     record["floor_analysis"] = floor_diagnostics(record, cfg.floor_analysis)
     record["floor_analysis"]["checks"] = [not_evaluated(
         "floor.qualified_slab_actions", "ACI 318-19 Chapters 6 and 8",

@@ -8,6 +8,9 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 
 import Structure_Parameters as sp  # noqa: E402
 from Design import Section_Design  # noqa: E402
@@ -215,6 +218,7 @@ class ThreadingScreen(unittest.TestCase):
 
 
 class RecordRoundTrip(unittest.TestCase):
+    @composite_slab
     def test_apply_design_restores_the_stacking_and_rejects_a_mismatch(self):
         path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "outputs", "dv_local_gm_20260926", "case_0002", "design.json")

@@ -7,6 +7,9 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 from Design.SMRF_Slab_Refinement import refinement_diagnostics
 from test_slab_thickness_search import tiny_frame, verify, driver, PROBE_DATE
 
@@ -62,6 +65,7 @@ class FailureDiagnostics(unittest.TestCase):
         self.assertIn("identities unavailable", r["detail"])
         self.assertIn("undefined (zero-to-nonzero)", r["detail"])
 
+    @composite_slab
     def test_driver_serializes_failed_solve_and_does_not_step_thickness(self):
         with tiny_frame():
             cfg = verify.probe_config(PROBE_DATE)
@@ -81,6 +85,7 @@ class FailureDiagnostics(unittest.TestCase):
             self.assertEqual(r["failed_levels"][0]["requested_mesh"]["subdivisions_per_bay"], 60)
             self.assertIn("[24, 48]", str(caught.exception))
 
+    @composite_slab
     def test_sized_but_failed_completion_enters_layout_repair(self):
         with tiny_frame():
             cfg = verify.probe_config(PROBE_DATE)

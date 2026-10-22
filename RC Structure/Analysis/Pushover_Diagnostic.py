@@ -360,8 +360,10 @@ def model_audit(inventory, hinges):
                                             "time; the same value serves both bending axes (my = mz); not updated with the solved axial force",
                           "theta_p_range": ([min(e["theta_p"] for e in columns), max(e["theta_p"] for e in columns)] if columns else None)},
         "represented": ["installed final cage (sections, bars) and hoops through rho_sh",
-                        "developed slab mats in the ACI 6.3.2 flange in beam hinge strengths and T/L stiffness, per family, "
-                        "with undeveloped exterior ends where the perimeter anchorage fails",
+                        ("developed slab mats in the ACI 6.3.2 flange in beam hinge strengths and T/L stiffness, per family, "
+                         "with undeveloped exterior ends where the perimeter anchorage fails" if sp.SLAB_STRUCTURAL_PARTICIPATION
+                         else "rectangular beams in hinge strength and stiffness; the floor as gravity load and rigid "
+                              "diaphragm only (no slab participation)"),
                         "beam hinge asymmetry (hogging / sagging) per end", "P-Delta on the columns", "rigid diaphragms",
                         "column hinge strength from the nominal P-M surface at an estimated gravity axial load"],
         "not_represented": ["probable (1.25 fy) member strengths: hinges yield at nominal Mn and harden to FmaxFy x Mn",

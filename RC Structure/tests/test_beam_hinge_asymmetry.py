@@ -14,6 +14,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import openseespy.opensees as ops  # noqa: E402
 
 import Structure_Parameters as sp  # noqa: E402
@@ -110,6 +113,7 @@ class BeamHingeAsymmetryTests(unittest.TestCase):
 
 
 class BeamYieldMomentSourceTests(unittest.TestCase):
+    @composite_slab
     def test_slab_aware_beam_uses_composite_family_strengths(self):
         from Design.SMRF_Beam_Slab_Strength import composite_beam_strengths
         layout = {"layers": {

@@ -4,6 +4,9 @@ import unittest
 from pathlib import Path
 from dataclasses import replace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import grouped_fixture as gf
 import Structure_Parameters as sp
 from Model import Member_Groups as mg, Member_Properties as mp, Member_Bar_Layers as bl
@@ -19,6 +22,7 @@ def slab_layout(size=3, spacing=12.):
         for axis in ("x","y") for face in ("top","bottom")}}
 
 
+@composite_slab
 class CompositeGroupedStrength(unittest.TestCase):
     def setUp(self):
         self.frame=gf.frame(BEAM_BAR_STACKING="x_over_y")

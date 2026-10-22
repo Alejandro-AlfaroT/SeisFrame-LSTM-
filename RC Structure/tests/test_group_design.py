@@ -16,6 +16,9 @@ from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import grouped_fixture as gf                                                     # noqa: E402
 
 import Structure_Parameters as sp                                               # noqa: E402
@@ -264,6 +267,11 @@ class UniformEquivalence(unittest.TestCase):
             state, _report = selection.select_reinforcement(self.state, self.actions, self.cfg, scwb_margin=margin)
             return sum(d.longitudinal_area_in2 * len(state.groups[gid]["member_tags"]) for gid, d in state.designs.items() if d.is_column)
         self.assertGreaterEqual(column_steel(1.3) + 1e-9, column_steel(1.0))
+
+
+@composite_slab
+class UniformEquivalenceComposite(UniformEquivalence):
+    """The same equivalence under the composite slab model (T/L sections, slab mats, composite hinges)."""
 
 
 class ChangedGroupAtABandBoundary(unittest.TestCase):

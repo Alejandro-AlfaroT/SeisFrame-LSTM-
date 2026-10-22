@@ -8,6 +8,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import openseespy.opensees as ops  # noqa: E402
 import Structure_Parameters as sp  # noqa: E402
 from Design.SMRF_Beam_Slab_Strength import (hook_development_length_in, perimeter_slab_bar_anchorage,  # noqa: E402
@@ -64,6 +67,7 @@ def record(bar=4, area=0.20, beam_width=10.0):
             "slab_reinforcement": {"layout": layout(bar, area)}}
 
 
+@composite_slab
 class ExteriorEndCreditTests(unittest.TestCase):
     def test_developed_mats_are_credited_everywhere_with_the_hook_recorded(self):
         entries, families = beam_slab_strengths(record(4))

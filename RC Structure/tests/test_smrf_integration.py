@@ -9,6 +9,9 @@ from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import Structure_Parameters as sp
 from Design import Design_Driver as driver
 from Design.Config import DesignConfig
@@ -43,7 +46,7 @@ def artifact():
                           "fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FY_KSI, "es_ksi": sp.ES_KSI,
                           "normalweight": True, "reinforcement_specification": sp.REINFORCEMENT_SPECIFICATION,
                           "exposure": sp.MATERIAL_EXPOSURE},
-            "dcr": {"beam": 0.2, "column": 0.4, "accepted": True}}
+            "dcr": {"beam": 0.2, "column": 0.4, "accepted": True}, **sp.floor_model_entry()}
     saved["slab"] = choose_slab(saved["geometry"], saved["sections"], {})
     for prefix in ("beam", "col"):
         bars = saved["reinforcement"]
@@ -236,6 +239,7 @@ class IntegrationTests(unittest.TestCase):
         design.assert_not_called()
         run.assert_not_called()
 
+    @composite_slab
     def test_tampered_saved_evidence_is_detected_and_not_assertable(self):
         """Reviewer reproductions: stale summaries and altered hoops must fail, whatever is asserted."""
         sp.NUM_BAY_X = sp.NUM_BAY_Y = sp.NUM_FLOOR = 1
@@ -330,6 +334,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result["qualification.hoops_match_design"], "pass")
         self.assertEqual(result["floor.coupled_summary_consistent"], "pass")
 
+    @composite_slab
     def test_in_memory_candidate_pipeline_reports_incomplete(self):
         # Bounded design-only smoke check. No plan, case files or GM analysis.
         sp.NUM_BAY_X = sp.NUM_BAY_Y = sp.NUM_FLOOR = 1
@@ -663,6 +668,7 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(len(result["errors"]), 6)
             self.assertFalse(result["verified"])
 
+    @composite_slab
     def test_slab_strength_metadata_must_match_current_frame(self):
         from Design.SMRF_Design_Evidence import slab_strength_inputs
         from Design.SMRF_Slab_Reinforcement import design_slab_reinforcement

@@ -15,6 +15,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os                                                                    # noqa: E402
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from slab_model import composite_slab                                              # noqa: E402  (slab-model tests, NoSlab branch)
 import openseespy.opensees as ops  # noqa: E402
 
 import Structure_Parameters as sp  # noqa: E402
@@ -153,6 +156,7 @@ class FlexibleFloorModelTests(unittest.TestCase):
         self.assertFalse(ops.getNodeTags())
 
 
+@composite_slab
 class TransferRecordTests(unittest.TestCase):
     def test_builder_accepts_asymmetric_patterns_and_validation_catches_a_tampered_couple(self):
         record = build_floor_transfer(SLAB, GEOMETRY, SECTIONS, .05, mesh_per_bay=8,
@@ -246,6 +250,7 @@ class TransferRecordTests(unittest.TestCase):
             validate_floor_transfer(broken, GEOMETRY, SECTIONS, 5.0, dead, live)
 
 
+@composite_slab
 class FrameApplicationTests(unittest.TestCase):
     def setUp(self):
         self.stack = contextlib.ExitStack()

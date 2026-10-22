@@ -172,7 +172,7 @@ class GradeRetryTests(unittest.TestCase):
     def test_failed_install_restores_grade60(self):
         record = self.retry_record()
         record.update(schema_version=gr.SCHEMA, design_mode="grouped", geometry=gr.driver._slab_geometry(),
-                      member_groups=self.seed.to_record())
+                      member_groups=self.seed.to_record(), floor_model=sp.floor_model_record())
         record["materials"].update(es_ksi=sp.ES_KSI, fyt_ksi=60., aggregate_size_in=.75,
                                    beam_clear_cover_in=1.5, col_clear_cover_in=1.5,
                                    reinforcement_specification=sp.REINFORCEMENT_SPECIFICATION_BY_GRADE[80.])
