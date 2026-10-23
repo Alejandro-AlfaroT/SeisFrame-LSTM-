@@ -18,26 +18,34 @@ These mappings organize the interface. They are not claims about what those brai
 
 ## Running it
 
-Requirements: Python 3.12 and Node.js 20 or newer. Commands are run from `cortex/`.
+### Setting up a Windows machine
 
-One-time setup:
+From the repository root, in the PyCharm terminal with the OpPy environment (any Python 3.11+):
 
 ```
-py -3.12 -m venv backend/.venv
-backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
-cd frontend && npm install && cd ..
+python cortex/setup_cortex.py
 ```
 
-Build the UI once (`cd frontend && npm run build`). After that, double-click `Start CORTEX.cmd`
-(or a desktop shortcut to it, using `assets/cortex.ico` as its icon). It starts the server in a minimized
-"CORTEX server" window unless one is already running, waits for it, and opens http://127.0.0.1:8420
-in your default browser. Close the "CORTEX server" window to stop it. The same by hand:
+It creates `backend/.venv`, installs and builds the interface (offering to install Node.js
+with winget if it is missing), imports the SeisFrame vault from OneDrive, puts a CORTEX shortcut
+on the desktop and in the Start menu, and starts CORTEX. Running it again is safe: it refreshes the
+build and re-imports only notes that changed. Options: `--vault "<folder>"` if the vault is not in
+OneDrive, `--skip-import`, `--no-shortcut`, `--no-start`, `--yes`.
+
+### Day to day
+
+Double-click CORTEX on the desktop (or search for it in Start). `Start CORTEX.cmd` starts the
+server in a minimized "CORTEX server" window unless one is already running, waits for it, and opens
+http://127.0.0.1:8420 in the default browser. Close the "CORTEX server" window to stop it. By hand,
+from `cortex/`:
 
 ```
 backend/.venv/Scripts/python.exe backend/run.py serve
-``` For UI development, run the API as above and `npm run dev`
-in `frontend/` instead, then open http://127.0.0.1:5173 (Vite proxies `/api` to port 8420).
-`.claude/launch.json` in the repository has `cortex-api` and `cortex-ui` entries for the same two servers.
+```
+
+For UI development, run the API as above and `npm run dev` in `frontend/` instead, then open
+http://127.0.0.1:5173 (Vite proxies `/api` to port 8420). `.claude/launch.json` in the repository has
+`cortex-api` and `cortex-ui` entries for the same two servers.
 
 The database lives at `cortex/data/cortex.db` (ignored by git, as are its backups). Use `--db <file>`
 or `CORTEX_DB` for another one.
@@ -45,12 +53,12 @@ or `CORTEX_DB` for another one.
 ## Importing the SeisFrame vault
 
 ```
-backend/.venv/Scripts/python.exe backend/run.py import-md "C:/Users/andro/OneDrive/ResearchProject/SeisFrame-Obsidian-Starter" --route by_type --project "SeisFrame V6" --dry-run
+backend/.venv/Scripts/python.exe backend/run.py import-md "C:/Users/andro/OneDrive/SeisFrame-Obsidian-Starter" --route by_type --project "SeisFrame V6" --dry-run
 ```
 
-Drop `--dry-run` to write. The current database was built with exactly this command (103 notes,
-533 resolved wikilinks; `Templates/` skipped). The UI's Import panel does the same for picked files
-or a picked folder, always previewing first.
+Drop `--dry-run` to write. `setup_cortex.py` runs this command (without `--dry-run`) on the vault
+it finds in OneDrive; `Templates/` is skipped. The UI's Import panel does the same for picked files
+or a picked folder, always previewing first. Each machine keeps its own database, so import on each.
 
 - `--route inbox` (default) puts every note in the Inbox with a suggested category, for triage.
   `--route by_type` files notes directly using their frontmatter `type` (decision → Projects,
@@ -84,10 +92,11 @@ or a picked folder, always previewing first.
 - **Conflict detection** proposes candidates; it never edits a record. It flags facts with the
   same subject and predicate but different values, and near-identical statements in different
   records that differ in a number, a negation, or an opposing term (increase / decrease,
-  retains / removes, …). To keep templated notes quiet, it does not compare statements that
-  mention different identifiers (dates, IDs, link targets), numbers in records dated on different
-  days, or lines that recur in four or more records. On the SeisFrame vault it currently finds no
-  candidates. In review you prefer one side, keep both, or dismiss; preferring a side adds a
+  retains / removes, …). To avoid false alarms, it does not compare statements that name
+  different sources or things (dates, IDs, link targets, URLs, file paths, inline code, citation
+  years like "(2024)"), numbers in records dated on different days, or lines that recur in four or
+  more records. On the SeisFrame vault (176 notes as of 2026-10-23) it finds no candidates. In
+  review you prefer one side, keep both, or dismiss; preferring a side adds a
   `supersedes` link and a marker on the other record, and reopening undoes both.
 - **Dashboard**: total records, verified facts, active projects, sessions, open conflicts, inbox
   size, and recent activity.
