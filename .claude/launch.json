@@ -6,6 +6,18 @@
       "runtimeExecutable": "C:/Users/andro/anaconda3/envs/OpPy/python.exe",
       "runtimeArgs": ["-m", "http.server", "8765", "--directory", "code_map"],
       "port": 8765
+    },
+    {
+      "name": "cortex-api",
+      "runtimeExecutable": "cortex/backend/.venv/Scripts/python.exe",
+      "runtimeArgs": ["cortex/backend/run.py", "serve", "--port", "8420"],
+      "port": 8420
+    },
+    {
+      "name": "cortex-ui",
+      "runtimeExecutable": "C:/Program Files/nodejs/node.exe",
+      "runtimeArgs": ["cortex/frontend/node_modules/vite/bin/vite.js", "cortex/frontend"],
+      "port": 5173
     }
   ]
 }
