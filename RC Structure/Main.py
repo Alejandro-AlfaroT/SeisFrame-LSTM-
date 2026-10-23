@@ -1,1573 +1,454 @@
-import os
-import inspect
-import sys
+"""Design one building with the current methodology and check it on the nonlinear model (rewritten 2026-10-23).
+
+Main.py designs a single structure on the grouped two-system route that the design batches use: perimeter special
+moment frames are the seismic force-resisting system and every other beam and column is a gravity member. Members are
+grouped by three-story band and plan location, and the groups of one system tie (special-frame or gravity, column or
+beam) in a band share one design. The slab acts compositely with the beams (T and L sections, slab reinforcement
+designed). The search starts from a seed and iterates candidate designs: a feasibility phase, then a reduction phase,
+with the Grade 80 retry and the core-layout ladder (perimeter + core ring, then core lines) when a phase finds nothing.
+The selected design is then built as the nonlinear IMK model and run through gravity and modal analysis.
+
+Progress is printed live: the search prints one line per candidate as it is decided, and a heartbeat line every
+``--heartbeat-seconds`` gives the elapsed time, the stage and the number of candidates decided so far.
+
+    & "$env:USERPROFILE\\anaconda3\\envs\\OpPy\\python.exe" -X utf8 -B Main.py
+    & "$env:USERPROFILE\\anaconda3\\envs\\OpPy\\python.exe" -X utf8 -B Main.py --bays-x 5 --bays-y 4 --floors 6 `
+        --story-height-ft 13 --bay-x-ft 24 --bay-y-ft 22 --site sdc_d_low
+    & "$env:USERPROFILE\\anaconda3\\envs\\OpPy\\python.exe" -X utf8 -B Main.py --plan-only
+
+Run from the RC Structure folder. Without arguments it designs the building in CASE below. Every run writes a new
+folder outputs/main/<geometry name>__<YYYYmmdd_HHMMSS>/ and never touches an earlier one:
+  grouped_design.json        the design record (schema rc_smrf_grouped_candidate_v1) with its qualification checklist
+  grouped_candidates*.jsonl  every candidate the search evaluated, appended as each is decided
+  grouped_search_failed.json the search result when no feasible design was found within the budgets
+  grouped_steel_grade_trial.json  the Grade 80 retry decision, when that retry was considered
+  grouped_summary.md         sections and cages by group, quantities, margins, systems, the candidate table
+  gravity_modal.json         gravity, modal and installed-model checks of the selected design; gravity_modal/ the hinge export
+  result.json, log.txt       the result row and the console log
+
+The design engine is Design/Grouped_Runner.run, called with the seed rule, budgets and grouping of
+tools/run_grouped_batch.py and the analysis profile of the screening manifests (tools/build_lhs_pilot.py), so a run
+here makes the same design request as a batch case of the same building. The assertion blocks are filled with PROBE
+values dated today, as in every grouped batch: they let the slab-reinforcement and joint-evaluation path run and
+verify nothing.
+
+No ground motion is selected and no time-history analysis runs. Saving the time-history results of a grouped design
+with a slab stops in Graph_Exporter.collect_reinforcement_geometry (GroupedStateError: it reads one stirrup size for
+every member while writing global_parameters.json); the two time-history tests of tests/test_grouped_record.py error
+on it. The hybrid training sample (Hybrid_Exporter) and the uniform driver Ground_Motion_Main.main also refuse grouped
+designs.
+
+The legacy single-building route is gone: Main.py no longer reads Structure_Parameters.ANALYSIS_METHOD, the NTHA_*
+record settings or the RC_* environment geometry (Geometry_Overrides.apply_geometry_from_environment), and it no longer
+runs the pushover redesign loop or writes the fixed-name files directly in outputs/. The building comes from CASE or
+the command-line options below. The earlier Main.py is in the git history (commit f5734c5c and before).
+"""
+from __future__ import annotations
+
+import argparse
 import json
+import math
+import os
+import sys
+import threading
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
-# Ensure the terminal can render Unicode (φ, etc.) on Windows
+# The Intel Fortran runtime built into openseespywin/opensees.pyd installs a console Ctrl+C handler that aborts the
+# process ("forrtl: error (200)") before Python sees the interrupt, so no finally block runs (result.json, log.txt and
+# the design lock). The runtime reads this variable when OpenSees is first imported (inside the design run); with the
+# handler off, Ctrl+C raises KeyboardInterrupt.
+os.environ.setdefault("FOR_DISABLE_CONSOLE_CTRL_HANDLER", "1")
+
+# Render the design summaries on Windows, and print every line as it is written (live progress also when piped).
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
-import openseespy.opensees as ops
+RC_DIR = Path(__file__).resolve().parent
+for _path in (RC_DIR, RC_DIR / "Data_Generation", RC_DIR / "tools"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
-import Structure_Parameters as sp
-from Geometry_Overrides import apply_geometry_from_environment
-from Analysis.Gravity import run_gravity_analysis
-from Analysis.Modal import run_modal_analysis
-from Analysis.Pushover import run_pushover
-from Analysis.NTHA import run_ntha
-from Analysis.Diagnostics import print_failed_element_diagnostics
-from Data_Generation.Graph_Exporter import save_analysis_sample
-from Loads.Gravity_Loads import apply_gravity_loads
-from Loads.Seismic_ELF import apply_lateral_loads
-from Loads.Ground_Motion import (
-    ground_motion_catalog_summary,
-    load_ground_motion_pair_by_result_id,
-    load_ground_motion_pairs,
-    load_ground_motion_record,
-)
-from Ground_Motion_Main import (
-    analysis_run_name,
-    save_ntha_outputs,
-    validate_ntha_output_compatibility,
-)
-from Model.Build_Model import build_model
-from Plotting.Plot_Results import (
-    plot_pushover_curve,
-    plot_roof_drift_curve,
-    save_pushover_curve,
-)
-from Design.Config import DesignConfig
-from RC_Design_Check import get_element_tags, print_summary, run_checks
-from Redesign import apply_updates, run_iterative_redesign
+# The building designed when Main.py runs without arguments: a mid-size member of the V2 population
+# (Data_Generation/Generate_Parameterized_Dataset.RANGES). Lengths in feet; the site is a label of
+# Structure_Parameters.SEISMIC_SITE_OPTIONS. Edit these values, or pass the matching command-line options.
+CASE = {"num_bay_x": 4, "num_bay_y": 3, "num_floor": 5, "story_height_ft": 14.0,
+        "bay_x_width_ft": 29.5, "bay_y_width_ft": 21.5, "seismic_site": "sdc_c"}
+# Analysis profile the design is made under (the screening manifests' default): IMKPeakOriented hinges on beams and
+# columns, rigid centerline joints, hinge histories at every step. A grouped design builds only under a V2 profile.
+PROFILE_ID = "v2_nonlinear_flexure_screening_v1"
+# Search budgets of tools/run_grouped_batch.py: complete candidate evaluations per phase (part of the request identity).
+MAX_FEASIBILITY_TRIALS = 16
+MAX_REDUCTION_TRIALS = 6
+HEARTBEAT_SECONDS = 30.0
+OUTPUT_ROOT = RC_DIR / "outputs" / "main"
+FINISHED_STATUSES = ("designed", "plan_only", "no_feasible_design")
 
 
-FAILURE_ARTIFACTS = (
-    "failed_element_diagnostics.json",
-    "pushover_failure_snapshot.json",
-)
+def _clock(seconds):
+    seconds = int(max(0.0, seconds))
+    return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
 
 
-def should_show_plots():
-    value = os.environ.get("RC_SHOW_PLOTS", "0").strip().lower()
-    return value in {"1", "true", "yes", "on"}
+def _feet(value):
+    return f"{float(value):g}"
 
 
-def clear_failure_artifacts(outputs_dir):
-    for filename in FAILURE_ARTIFACTS:
-        path = outputs_dir / filename
-        if path.exists():
-            path.unlink()
+def geometry_name(case):
+    """Folder-safe name of the building, in the form of the screening manifests (tools/build_lhs_pilot.py)."""
+    name = (f"main_bx{case['num_bay_x']}_by{case['num_bay_y']}_s{case['num_floor']}_sh{_feet(case['story_height_ft'])}"
+            f"_bwx{_feet(case['bay_x_width_ft'])}_bwy{_feet(case['bay_y_width_ft'])}_{case['seismic_site']}")
+    return name.replace(".", "p")
 
 
-def model_summary():
-    return {
-        "analysis_method": selected_analysis_method(),
-        "geometry_variant": getattr(sp, "GEOMETRY_VARIANT_NAME", "baseline"),
-        "asce_period_estimate": sp.asce_fundamental_period_check(),
-        "num_bay_x": sp.NUM_BAY_X,
-        "num_bay_y": sp.NUM_BAY_Y,
-        "num_stories": sp.NUM_FLOOR,
-        "num_floor": sp.NUM_FLOOR,
-        "bay_x_in": sp.BAY_X,
-        "bay_y_in": sp.BAY_Y,
-        "story_height_in": sp.STORY_H,
-        "total_height_in": sp.NUM_FLOOR * sp.STORY_H,
-        "column_geometry": {
-            "width_in": sp.B_COL,
-            "depth_in": sp.H_COL,
-            "area_in2": sp.rect_area(sp.B_COL, sp.H_COL),
-            "iy_in4": sp.rect_iy(sp.B_COL, sp.H_COL),
-            "iz_in4": sp.rect_iz(sp.B_COL, sp.H_COL),
-        },
-        "beam_geometry": {
-            "width_in": sp.B_BEAM,
-            "depth_in": sp.H_BEAM,
-            "area_in2": sp.rect_area(sp.B_BEAM, sp.H_BEAM),
-            "iy_in4": sp.rect_iy(sp.B_BEAM, sp.H_BEAM),
-            "iz_in4": sp.rect_iz(sp.B_BEAM, sp.H_BEAM),
-        },
-    }
+def build_case(args):
+    """The case in the form Design/Verify_Designs.configure_case applies (feet, bay counts, site label)."""
+    case = {"case_id": "main", "num_bay_x": args.bays_x, "num_bay_y": args.bays_y, "num_floor": args.floors,
+            "story_height_ft": float(args.story_height_ft), "bay_x_width_ft": float(args.bay_x_ft),
+            "bay_y_width_ft": float(args.bay_y_ft), "seismic_site": args.site}
+    case["geometry_name"] = geometry_name(case)
+    return case
 
 
-def print_model_summary(summary):
-    print("\nModel summary:")
-    print(f"  Analysis method: {summary.get('analysis_method', 'pushover')}")
-    print(f"  Geometry variant: {summary.get('geometry_variant', 'baseline')}")
-    print(
-        f"  Plan: {summary['num_bay_x']} bay(s) in X @ {summary['bay_x_in']:g} in, "
-        f"{summary['num_bay_y']} bay(s) in Y @ {summary['bay_y_in']:g} in"
-    )
-    print(
-        f"  Vertical: {summary['num_stories']} storie(s) @ "
-        f"{summary['story_height_in']:g} in = {summary['total_height_in']:g} in total"
-    )
-    col = summary["column_geometry"]
-    beam = summary["beam_geometry"]
-    print(
-        f"  Columns: {col['width_in']:g} in x {col['depth_in']:g} in "
-        f"(A={col['area_in2']:.2f} in^2)"
-    )
-    print(
-        f"  Beams: {beam['width_in']:g} in x {beam['depth_in']:g} in "
-        f"(A={beam['area_in2']:.2f} in^2)"
-    )
-    asce_check = summary.get("asce_period_estimate", {})
-    if asce_check:
-        print(
-            f"  ASCE approximate Ta: {asce_check['asce_ta_sec']:.4f} sec "
-            f"for h_n={asce_check['height_ft']:.2f} ft "
-            f"({asce_check['equation']})"
-        )
+def population_notes(case):
+    """Why the case lies outside the V2 population, or an empty list when it is a member
+    (Generate_Parameterized_Dataset: RANGES, SEISMIC_SITES and the height-to-width cap). A case outside it still runs."""
+    saved_path, saved_dir = list(sys.path), os.environ.pop("RC_STRUCTURE_DIR", None)
+    try:
+        # The module puts RC_STRUCTURE_DIR first on the import path; read this checkout's population, then restore both.
+        import Generate_Parameterized_Dataset as population
+    finally:
+        sys.path[:] = saved_path
+        if saved_dir is not None:
+            os.environ["RC_STRUCTURE_DIR"] = saved_dir
+    notes = []
+    for key, levels in population.RANGES.items():
+        if float(case[key]) not in [float(level) for level in levels]:
+            notes.append(f"{key} = {case[key]:g} is not a population level ({levels[0]:g} to {levels[-1]:g}"
+                         + (")" if key.startswith("num_") else " in 0.5 ft steps)"))
+    ratio = population.height_to_width_ratio(**{key: case[key] for key in population.RANGES})
+    if ratio > population.MAX_HEIGHT_TO_WIDTH_RATIO + 1e-12:
+        notes.append(f"height / least plan width = {ratio:.2f} exceeds {population.MAX_HEIGHT_TO_WIDTH_RATIO:g}")
+    if case["seismic_site"] not in population.SEISMIC_SITES:
+        notes.append(f"site {case['seismic_site']} is not one of {', '.join(population.SEISMIC_SITES)}")
+    return notes
 
 
-def print_gravity_results(results):
-    print("Static gravity analysis succeeded")
-    print("\nGravity-only roof control node displacement:")
-    print(f"Ux = {results['ux']:.6e} in")
-    print(f"Uy = {results['uy']:.6e} in")
-    print(f"Uz = {results['uz']:.6e} in (diaphragm master UZ is constrained)")
-    print("\nGravity-only physical roof floor vertical displacement:")
-    print(f"Uz min = {results['roof_floor_uz_min']:.6e} in")
-    print(f"Uz max = {results['roof_floor_uz_max']:.6e} in")
-    print(f"Uz avg = {results['roof_floor_uz_avg']:.6e} in")
+def batch_seed(case):
+    """Where the search starts: the seed rule of tools/run_grouped_batch.py (lever order of 2026-10-16)."""
+    from run_grouped_batch import seed_for
+    return seed_for(case)
 
 
-def print_modal_results(modes):
-    print("\nModal Properties:")
-    for item in modes:
-        if not item["valid"]:
-            print(
-                f"Mode {item['mode']}: "
-                f"skipped invalid eigenvalue lambda = {item['lambda']:.12e}"
-            )
+def runner_arguments(args, case, seed_column, seed_beam, out_dir):
+    """The Design/Grouped_Runner arguments of this run, parsed by the runner's own parser."""
+    from Design import Grouped_Runner as runner
+    argv = ["--case-json", json.dumps(case), "--profile", args.profile,
+            "--seed-column", *(f"{value:g}" for value in seed_column), "--seed-beam", *(f"{value:g}" for value in seed_beam),
+            "--grouping", args.grouping,
+            "--max-feasibility-trials", str(args.max_feasibility_trials),
+            "--max-reduction-trials", str(args.max_reduction_trials),
+            "--probe-assertions", "--probe-date", args.probe_date,
+            "--stages", "design", *([] if args.design_only else ["gravity_modal"])]
+    if args.no_grade80_retry:
+        argv.append("--no-grade80-retry")
+    argv += ["--plan-only"] if args.plan_only else ["--output-dir", str(out_dir)]
+    return runner.build_parser().parse_args(argv)
+
+
+def new_output_dir(args, case):
+    """A new, empty folder for this run (the runner keeps one attempt per folder)."""
+    if args.output_dir:
+        out_dir = Path(args.output_dir).resolve()
+        if out_dir.exists() and any(out_dir.iterdir()):
+            raise SystemExit(f"{out_dir} is not empty; give a new folder (or leave --output-dir out for a dated one).")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    for attempt in range(100):
+        out_dir = OUTPUT_ROOT / (f"{case['geometry_name']}__{stamp}" + (f"_{attempt}" if attempt else ""))
+        try:
+            out_dir.mkdir(parents=True, exist_ok=False)
+            return out_dir
+        except FileExistsError:
             continue
+    raise SystemExit(f"Could not create a new output folder under {OUTPUT_ROOT}.")
 
-        print(
-            f"Mode {item['mode']}: "
-            f"T = {item['period']:.6f} sec, "
-            f"omega = {item['omega']:.6f} rad/sec, "
-            f"f = {item['frequency']:.6f} Hz"
-        )
 
+class Heartbeat:
+    """Prints the elapsed time, the stage and the number of decided candidates every ``interval`` seconds.
 
+    The count is read from the candidate logs the search appends to (grouped_candidates*.jsonl), so nothing inside
+    the design engine is touched. Lines go to the console only (sys.__stdout__), not into the run's log.txt.
+    """
 
-def first_valid_modal_period(modes):
-    for item in modes:
-        if item.get("valid") and item.get("period") is not None:
-            return item["period"]
-    return None
+    def __init__(self, out_dir, interval, started):
+        self.out_dir, self.interval, self.started = Path(out_dir), float(interval), started
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="main-heartbeat", daemon=True)
 
+    def __enter__(self):
+        if self.interval > 0:
+            self._thread.start()
+        return self
 
-def asce_period_check_from_modal_results(modes, modal_source):
-    return sp.asce_fundamental_period_check(
-        model_period_sec=first_valid_modal_period(modes),
-        modal_source=modal_source,
-    )
-
-
-def print_asce_period_check(check):
-    print("\nASCE approximate fundamental period check:")
-    print(
-        f"  Ta = {check['asce_ta_sec']:.4f} sec "
-        f"({check['equation']}, Ct={check['ct']}, x={check['exponent']}, "
-        f"h_n={check['height_ft']:.2f} ft)"
-    )
-    if check.get("model_period_sec") is None:
-        print("  Model period: not available yet")
-        return
-
-    print(
-        f"  Model T1 = {check['model_period_sec']:.4f} sec "
-        f"from {check.get('modal_source') or 'unknown source'}"
-    )
-    print(f"  T1 / Ta = {check['period_ratio_to_asce_ta']:.3f}")
-    if check.get("warning"):
-        print(f"  [WARNING] {check['warning']}")
-
-def print_pushover_results(results, gravity_results):
-    status = results["status"]
-    print(f"\nPushover completed {status['completed_steps']} steps")
-
-    if status["failed"]:
-        print(f"Pushover failed at step {status['failed_step']}")
-        if status.get("failed_element_tags"):
-            print(f"Failed element tags: {status['failed_element_tags']}")
-        print_failed_element_diagnostics(results.get("failed_element_diagnostics", []))
-
-    ux, uy, uz = results["final_disp"]
-    print("\nGravity + lateral roof control node displacement:")
-    print(f"Ux = {ux:.6e} in")
-    print(f"Uy = {uy:.6e} in")
-    print(f"Uz = {uz:.6e} in (diaphragm master UZ is constrained)")
-
-    print("\nIncrement due to lateral load:")
-    print(f"dUx = {ux - gravity_results['ux']:.6e} in")
-    print(f"dUy = {uy - gravity_results['uy']:.6e} in")
-    print(f"dUz = {uz - gravity_results['uz']:.6e} in")
-
-    mechanism = results.get("mechanism_diagnostics", {}).get("summary", {})
-    if mechanism:
-        print("\nMechanism diagnostics:")
-        for target, snapshot in mechanism.get("story_drift_targets", {}).items():
-            print(
-                f"Roof drift {target}: max story drift = "
-                f"{100.0 * snapshot['max_abs_story_drift_ratio']:.3f}% "
-                f"between floors {snapshot['max_floor_pair']} "
-                f"(story {snapshot['max_story']})"
-            )
-            ranking = snapshot.get("story_drift_ranking", [])
-            if ranking:
-                comparison = ", ".join(
-                    f"{row['floor_pair']}: "
-                    f"{100.0 * row['abs_story_drift_ratio']:.3f}%"
-                    for row in ranking
-                )
-                print(f"  Interstory drift ranking: {comparison}")
-
-        for target in mechanism.get("unreached_story_drift_targets", []):
-            print(f"Roof drift {target}: not reached in this analysis")
-
-        max_interstory = mechanism.get("max_interstory_drift_overall")
-        if max_interstory:
-            print(
-                "Peak interstory drift over pushover: "
-                f"{100.0 * max_interstory['abs_story_drift_ratio']:.3f}% "
-                f"between floors {max_interstory['floor_pair']} "
-                f"at roof drift {100.0 * max_interstory['roof_drift_ratio']:.3f}%"
-            )
-
-        first_cap = mechanism.get("first_hinge_cap")
-        if first_cap:
-            first_cap_group = mechanism.get("first_hinge_cap_group", [])
-            print(
-                "First hinge cap: "
-                f"element {first_cap['physical_ele_tag']} "
-                f"end {first_cap['end']} {first_cap['rot_dir']} "
-                f"at roof drift {100.0 * first_cap['roof_drift_ratio']:.3f}% "
-                f"({len(first_cap_group)} hinges at this step)"
-            )
-        else:
-            print("First hinge cap: none reached")
-
-        first_column = mechanism.get("first_column_nominal_yield")
-        if first_column:
-            print(
-                "First column nominal yield: "
-                f"element {first_column['ele_tag']} "
-                f"end {first_column['end']} "
-                f"at roof drift {100.0 * first_column['roof_drift_ratio']:.3f}%"
-            )
-        else:
-            print("First column nominal yield: none detected")
-
-        first_ultimate = mechanism.get("first_hinge_ultimate_exceedance")
-        if first_ultimate:
-            print(
-                "First theta_u exceedance: "
-                f"element {first_ultimate['physical_ele_tag']} "
-                f"end {first_ultimate['end']} {first_ultimate['rot_dir']} "
-                f"at roof drift {100.0 * first_ultimate['roof_drift_ratio']:.3f}%"
-            )
-        else:
-            print("Theta_u exceedance: none detected")
-
-        print(
-            "Beam-sway before column mechanism indicator: "
-            f"{mechanism.get('beam_sway_before_column_mechanism_indicator')}"
-        )
-
-
-def design_results_to_jsonable(design_results):
-    return {str(k): v for k, v in design_results.items()}
-
-
-def write_design_results(path, design_results):
-    with path.open("w") as file:
-        json.dump(design_results_to_jsonable(design_results), file, indent=2)
-
-
-def summarize_design_results(
-    design_results,
-    phase,
-    redesign_ok=None,
-    n_iter=None,
-    notes=None,
-):
-    values = list(design_results.values())
-    columns = [row for row in values if row["type"] == "column"]
-    beams = [row for row in values if row["type"] == "beam"]
-    failures = [int(tag) for tag, row in design_results.items() if not row["ok"]]
-
-    def max_value(rows, key, default=0.0):
-        return max((row[key] for row in rows), default=default)
-
-    beam_flex_max = max(
-        (max(row["dcr_pos"], row["dcr_neg"]) for row in beams),
-        default=0.0,
-    )
-
-    status = {
-        "model": model_summary(),
-        "phase": phase,
-        "all_design_checks_pass": len(failures) == 0,
-        "num_failed_elements": len(failures),
-        "failed_element_tags": failures,
-        "max_column_pm_dcr": max_value(columns, "dcr_PM"),
-        "max_column_shear_dcr": max_value(columns, "dcr_V"),
-        "max_beam_flexure_dcr": beam_flex_max,
-        "max_beam_shear_dcr": max_value(beams, "dcr_V"),
-        "final_column_reinforcement": {
-            "bar_size": sp.COL_BAR_SIZE,
-            "top_bars": sp.COL_TOP_BARS,
-            "bottom_bars": sp.COL_BOT_BARS,
-            "side_bars_per_face": sp.COL_SIDE_BARS,
-            "bar_area_in2": sp.COL_BAR_AREA,
-            "stirrup_bar_size": sp.COL_STIRRUP_BAR_SIZE,
-            "stirrup_legs": sp.COL_STIRRUP_LEGS,
-            "stirrup_spacing_in": sp.COL_STIRRUP_SPACING,
-            "stirrup_area_in2": sp.COL_STIRRUP_LEGS * sp.rebar_area(sp.COL_STIRRUP_BAR_SIZE),
-        },
-        "final_beam_reinforcement": {
-            "bar_size": sp.BEAM_BAR_SIZE,
-            "top_bars": sp.BEAM_TOP_BARS,
-            "bottom_bars": sp.BEAM_BOT_BARS,
-            "bar_area_in2": sp.BEAM_BAR_AREA,
-            "stirrup_bar_size": sp.BEAM_STIRRUP_BAR_SIZE,
-            "stirrup_legs": sp.BEAM_STIRRUP_LEGS,
-            "stirrup_spacing_in": sp.BEAM_STIRRUP_SPACING,
-            "stirrup_area_in2": sp.BEAM_STIRRUP_LEGS * sp.rebar_area(sp.BEAM_STIRRUP_BAR_SIZE),
-        },
-    }
-
-    if redesign_ok is not None:
-        status["redesign_converged"] = redesign_ok
-    if n_iter is not None:
-        status["redesign_iterations"] = n_iter
-    if notes is not None:
-        status["notes"] = notes
-
-    return status
-
-
-def combine_design_statuses(
-    gravity_status,
-    pushover_final_status,
-    pushover_envelope_status=None,
-    pushover_redesign_history=None,
-):
-    lateral_status = pushover_envelope_status or pushover_final_status
-    lateral_phase = lateral_status.get("phase")
-    status = {
-        "model": model_summary(),
-        "all_design_checks_pass": (
-            gravity_status["all_design_checks_pass"]
-            and lateral_status["all_design_checks_pass"]
-        ),
-        "gravity": gravity_status,
-        "pushover_final": pushover_final_status,
-        "final_column_reinforcement": pushover_final_status["final_column_reinforcement"],
-        "final_beam_reinforcement": pushover_final_status["final_beam_reinforcement"],
-        "notes": [
-            "Gravity checks use the post-redesign gravity-analysis state.",
-            "Pushover-final checks use element forces at the final converged pushover state.",
-            (
-                "The configured target roof-drift DCR snapshot is used for lateral design acceptance; the full 60 in pushover envelope is retained for ultimate/collapse behavior."
-                if lateral_phase == "pushover_target_roof_drift"
-                else "When available, pushover-envelope checks are used for lateral design acceptance instead of the final-state snapshot."
-            ),
-            "Shear DCRs are included in pass/fail status, but the current redesign loop only changes longitudinal bars.",
-        ],
-    }
-
-    if pushover_envelope_status is not None:
-        status["pushover_lateral_design"] = pushover_envelope_status
-        if lateral_phase == "pushover_target_roof_drift":
-            status["pushover_2pct_drift"] = pushover_envelope_status
-            full_envelope = pushover_envelope_status.get("full_history_envelope_summary")
-            if full_envelope is not None:
-                status["pushover_envelope"] = full_envelope
-                status["ultimate_envelope_pass"] = full_envelope.get(
-                    "all_design_checks_pass"
-                )
-                status["ultimate_envelope_num_failed_elements"] = full_envelope.get(
-                    "num_failed_elements"
-                )
-                status["ultimate_envelope_failed_element_tags"] = full_envelope.get(
-                    "failed_element_tags", []
-                )
-                status["ultimate_envelope_num_failed_columns"] = full_envelope.get(
-                    "num_failed_columns"
-                )
-                status["ultimate_envelope_failed_column_tags"] = full_envelope.get(
-                    "failed_column_tags", []
-                )
-                status["ultimate_envelope_num_failed_beams"] = full_envelope.get(
-                    "num_failed_beams"
-                )
-                status["ultimate_envelope_failed_beam_tags"] = full_envelope.get(
-                    "failed_beam_tags", []
-                )
-                status["ultimate_envelope_max_column_pm_dcr"] = full_envelope.get(
-                    "max_column_pm_dcr"
-                )
-                status["ultimate_envelope_max_column_shear_dcr"] = full_envelope.get(
-                    "max_column_shear_dcr"
-                )
-                status["ultimate_envelope_max_beam_flexure_dcr"] = full_envelope.get(
-                    "max_beam_flexure_dcr"
-                )
-                status["ultimate_envelope_max_beam_shear_dcr"] = full_envelope.get(
-                    "max_beam_shear_dcr"
-                )
-                status["notes"].append(
-                    "Ultimate-envelope checks summarize the full 60 in pushover history and are reported separately from overall acceptance."
-                )
-        else:
-            status["pushover_envelope"] = pushover_envelope_status
-
-    if pushover_redesign_history is not None:
-        status["pushover_redesign_history"] = pushover_redesign_history
-        final_attempt = pushover_redesign_history[-1] if pushover_redesign_history else {}
-        final_failed_drift = final_attempt.get("failed_roof_drift_ratio")
-        min_required_drift = final_attempt.get(
-            "minimum_acceptable_roof_drift_ratio",
-            sp.PUSHOVER_MIN_ACCEPTABLE_DRIFT_RATIO,
-        )
-        pushover_drift_pass = (
-            not final_attempt.get("failed", False)
-            or (
-                final_failed_drift is not None
-                and final_failed_drift >= min_required_drift
-            )
-        )
-        status["pushover_minimum_drift_pass"] = pushover_drift_pass
-        status["minimum_acceptable_roof_drift_ratio"] = min_required_drift
-        status["overall_acceptance_pass"] = (
-            status["all_design_checks_pass"]
-            and pushover_drift_pass
-        )
-        if not pushover_drift_pass:
-            status["notes"].append(
-                "Pushover failed before the configured minimum roof drift; the design checks pass, but the nonlinear drift acceptance target does not."
-            )
-
-    return status
-
-
-def run_pushover_envelope_design_check(outputs_dir, pushover_results):
-    envelope = pushover_results.get("design_envelope", {})
-    if not envelope.get("tracked"):
-        return None, None
-
-    status = envelope.get("summary", {})
-    elements = envelope.get("elements", {})
-    target_snapshot = envelope.get("target_dcr_snapshot")
-
-    print("\nPeak-over-history pushover design envelope:")
-    print(
-        f"  Samples checked: {status.get('num_samples', 0)} "
-        f"(every {status.get('sample_every', '?')} step(s))"
-    )
-    print(
-        f"  Column P-M max DCR : {status.get('max_column_pm_dcr', 0.0):.3f}"
-    )
-    print(
-        f"  Column shear max DCR: {status.get('max_column_shear_dcr', 0.0):.3f}"
-    )
-    print(
-        f"  Beam flexure max DCR: {status.get('max_beam_flexure_dcr', 0.0):.3f}"
-    )
-    print(
-        f"  Beam shear max DCR  : {status.get('max_beam_shear_dcr', 0.0):.3f}"
-    )
-    print(
-        f"  Envelope failures   : {status.get('num_failed_elements', 0)}"
-    )
-    print(
-        f"    Columns failing   : {status.get('num_failed_columns', 0)}"
-    )
-    if status.get("failed_column_tags"):
-        print(f"      Column tags     : {status['failed_column_tags']}")
-    print(
-        f"    Beams failing     : {status.get('num_failed_beams', 0)}"
-    )
-    if status.get("failed_beam_tags"):
-        print(f"      Beam tags       : {status['failed_beam_tags']}")
-
-    with (outputs_dir / "design_check_pushover_envelope.json").open("w") as file:
-        json.dump(elements, file, indent=2)
-
-    acceptance_status = status
-    acceptance_results = elements
-
-    if target_snapshot:
-        target_status = target_snapshot.get("summary", {})
-        target_results = target_snapshot.get("results", {})
-        target_status["full_history_envelope_summary"] = status
-
-        print(
-            "\nPushover DCR snapshot at "
-            f"{100.0 * target_status.get('target_roof_drift_ratio', 0.0):.1f}% "
-            "roof drift:"
-        )
-        print(
-            f"  Target roof displacement: "
-            f"{target_status.get('target_roof_disp_in', 0.0):.3f} in"
-        )
-        print(
-            f"  Actual snapshot: step {target_status.get('step')} | "
-            f"Uroof={target_status.get('actual_roof_disp_in', 0.0):.3f} in | "
-            f"drift={100.0 * target_status.get('actual_roof_drift_ratio', 0.0):.3f}% | "
-            f"Vbase={target_status.get('base_shear_kip', 0.0):.3f} kip"
-        )
-        print(
-            f"  Column P-M max DCR : "
-            f"{target_status.get('max_column_pm_dcr', 0.0):.3f}"
-        )
-        print(
-            f"  Column shear max DCR: "
-            f"{target_status.get('max_column_shear_dcr', 0.0):.3f}"
-        )
-        print(
-            f"  Beam flexure max DCR: "
-            f"{target_status.get('max_beam_flexure_dcr', 0.0):.3f}"
-        )
-        print(
-            f"  Beam shear max DCR  : "
-            f"{target_status.get('max_beam_shear_dcr', 0.0):.3f}"
-        )
-        print(
-            f"  Target-drift failures: "
-            f"{target_status.get('num_failed_elements', 0)}"
-        )
-        print(
-            f"    Columns failing: "
-            f"{target_status.get('num_failed_columns', 0)}"
-        )
-        if target_status.get("failed_column_tags"):
-            print(f"      Column tags: {target_status['failed_column_tags']}")
-        print(
-            f"    Beams failing  : "
-            f"{target_status.get('num_failed_beams', 0)}"
-        )
-        if target_status.get("failed_beam_tags"):
-            print(f"      Beam tags: {target_status['failed_beam_tags']}")
-
-        with (outputs_dir / "design_check_pushover_2pct_drift.json").open("w") as file:
-            json.dump(target_snapshot, file, indent=2)
-
-        if getattr(sp, "PUSHOVER_USE_TARGET_DCR_FOR_REDESIGN", True):
-            acceptance_status = target_status
-            acceptance_results = target_results
-
-    return acceptance_status, acceptance_results
-
-
-def run_final_pushover_design_check(outputs_dir, pushover_failed=False):
-    col_tags, beam_x_tags, beam_y_tags = get_element_tags()
-    design_results = run_checks(col_tags, beam_x_tags + beam_y_tags)
-
-    print("\nFinal-state design check at end of pushover:")
-    print_summary(design_results, verbose=False)
-
-    write_design_results(outputs_dir / "design_check_pushover_final.json", design_results)
-
-    notes = [
-        "Demand snapshot taken from the final converged pushover state.",
-        "This is a final-state check only, not a peak-over-history envelope.",
-    ]
-    if pushover_failed:
-        notes.append(
-            "Pushover did not converge to the requested target; this check is a failed-state snapshot and should not be treated as a valid final lateral design envelope."
-        )
-
-    status = summarize_design_results(
-        design_results,
-        phase="pushover_final",
-        notes=notes,
-    )
-
-    return status, design_results
-
-
-def reinforcement_snapshot():
-    return {
-        "column": {
-            "bar_size": sp.COL_BAR_SIZE,
-            "top_bars": sp.COL_TOP_BARS,
-            "bottom_bars": sp.COL_BOT_BARS,
-            "side_bars_per_face": sp.COL_SIDE_BARS,
-            "bar_area_in2": sp.COL_BAR_AREA,
-            "stirrup_bar_size": sp.COL_STIRRUP_BAR_SIZE,
-            "stirrup_legs": sp.COL_STIRRUP_LEGS,
-            "stirrup_spacing_in": sp.COL_STIRRUP_SPACING,
-            "stirrup_area_in2": sp.COL_STIRRUP_LEGS * sp.rebar_area(sp.COL_STIRRUP_BAR_SIZE),
-        },
-        "beam": {
-            "bar_size": sp.BEAM_BAR_SIZE,
-            "top_bars": sp.BEAM_TOP_BARS,
-            "bottom_bars": sp.BEAM_BOT_BARS,
-            "bar_area_in2": sp.BEAM_BAR_AREA,
-            "stirrup_bar_size": sp.BEAM_STIRRUP_BAR_SIZE,
-            "stirrup_legs": sp.BEAM_STIRRUP_LEGS,
-            "stirrup_spacing_in": sp.BEAM_STIRRUP_SPACING,
-            "stirrup_area_in2": sp.BEAM_STIRRUP_LEGS * sp.rebar_area(sp.BEAM_STIRRUP_BAR_SIZE),
-        },
-    }
-
-
-def _next_value(current, values):
-    for value in sorted(set(values)):
-        if value > current:
-            return value
-    return None
-
-
-def _next_count(current, bounds):
-    _, upper = bounds
-    if current < upper:
-        return current + 1
-    return None
-
-
-def _failed_member_classes(failed_element_tags):
-    if not failed_element_tags:
-        return {"column", "beam"}
-
-    col_tags, beam_x_tags, beam_y_tags = get_element_tags()
-    columns = set(col_tags)
-    beams = set(beam_x_tags + beam_y_tags)
-    classes = set()
-
-    for tag in failed_element_tags:
-        if tag in columns:
-            classes.add("column")
-        elif tag in beams:
-            classes.add("beam")
-
-    return classes or {"column", "beam"}
-
-
-def _column_reinforcement_ratio(update):
-    total_bars = update["n_top"] + update["n_bot"] + 2 * update["n_side"]
-    return total_bars * sp.rebar_area(update["bar_size"]) / (sp.B_COL * sp.H_COL)
-
-
-def _column_total_steel_area(update):
-    total_bars = update["n_top"] + update["n_bot"] + 2 * update["n_side"]
-    return total_bars * sp.rebar_area(update["bar_size"])
-
-
-def _first_valid_column_update(candidates, cfg):
-    for update in candidates:
-        if _column_reinforcement_ratio(update) <= cfg.rebar.rho_col_max:
-            return update
-    return None
-
-
-def _column_strengthening_update(cfg, prefer_bar_count=False):
-    candidates = []
-
-    next_top = _next_count(sp.COL_TOP_BARS, cfg.rebar.col_n_top_range)
-    if next_top is not None:
-        candidates.append({
-            "bar_size": sp.COL_BAR_SIZE,
-            "n_top": next_top,
-            "n_bot": next_top,
-            "n_side": sp.COL_SIDE_BARS,
-        })
-
-    next_side = _next_value(sp.COL_SIDE_BARS, cfg.rebar.col_n_side_options)
-    if next_side is not None:
-        candidates.append({
-            "bar_size": sp.COL_BAR_SIZE,
-            "n_top": sp.COL_TOP_BARS,
-            "n_bot": sp.COL_BOT_BARS,
-            "n_side": next_side,
-        })
-
-    next_bar = _next_value(sp.COL_BAR_SIZE, cfg.rebar.bar_sizes_col)
-    if next_bar is not None:
-        candidates.append({
-            "bar_size": next_bar,
-            "n_top": sp.COL_TOP_BARS,
-            "n_bot": sp.COL_BOT_BARS,
-            "n_side": sp.COL_SIDE_BARS,
-        })
-
-    if not prefer_bar_count and candidates:
-        candidates = candidates[-1:] + candidates[:-1]
-
-    return _first_valid_column_update(candidates, cfg)
-
-
-def _column_envelope_strengthening_update(cfg, envelope_summary):
-    current = {
-        "bar_size": sp.COL_BAR_SIZE,
-        "n_top": sp.COL_TOP_BARS,
-        "n_bot": sp.COL_BOT_BARS,
-        "n_side": sp.COL_SIDE_BARS,
-    }
-    current_ast = _column_total_steel_area(current)
-    governing_dcr = max(
-        envelope_summary.get("max_column_pm_dcr") or 0.0,
-        envelope_summary.get("max_column_shear_dcr") or 0.0,
-    )
-    target_dcr = max(0.1, getattr(cfg.dcr, "dcr_band_hi", 0.95))
-    required_ast = current_ast * max(1.0, governing_dcr / target_dcr)
-
-    candidates = []
-    _, max_top = cfg.rebar.col_n_top_range
-
-    for bar_size in sorted(set(cfg.rebar.bar_sizes_col)):
-        if bar_size < sp.COL_BAR_SIZE:
-            continue
-
-        for n_top in range(sp.COL_TOP_BARS, max_top + 1):
-            for n_side in sorted(set(cfg.rebar.col_n_side_options)):
-                if n_side < sp.COL_SIDE_BARS:
-                    continue
-
-                update = {
-                    "bar_size": bar_size,
-                    "n_top": n_top,
-                    "n_bot": n_top,
-                    "n_side": n_side,
-                }
-                ast = _column_total_steel_area(update)
-
-                if ast <= current_ast + 1.0e-9:
-                    continue
-                if _column_reinforcement_ratio(update) > cfg.rebar.rho_col_max:
-                    continue
-
-                candidates.append((ast, -n_top, n_side, bar_size, update))
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda item: item[:4])
-
-    for ast, _, _, _, update in candidates:
-        if ast >= required_ast:
-            return update
-
-    return candidates[-1][4]
-
-
-def _beam_strengthening_update(cfg):
-    next_bar = _next_value(sp.BEAM_BAR_SIZE, cfg.rebar.bar_sizes_beam)
-    if next_bar is not None:
-        return {
-            "bar_size": next_bar,
-            "n_top": sp.BEAM_TOP_BARS,
-            "n_bot": sp.BEAM_BOT_BARS,
-        }
-
-    next_top = _next_count(sp.BEAM_TOP_BARS, cfg.rebar.beam_n_range)
-    next_bot = _next_count(sp.BEAM_BOT_BARS, cfg.rebar.beam_n_range)
-    if next_top is not None or next_bot is not None:
-        return {
-            "bar_size": sp.BEAM_BAR_SIZE,
-            "n_top": next_top if next_top is not None else sp.BEAM_TOP_BARS,
-            "n_bot": next_bot if next_bot is not None else sp.BEAM_BOT_BARS,
-        }
-
-    return None
-
-
-def apply_pushover_failure_redesign(pushover_results, cfg):
-    failed_tags = pushover_results["status"].get("failed_element_tags", [])
-    classes = _failed_member_classes(failed_tags)
-    before = reinforcement_snapshot()
-    col_update = (
-        _column_strengthening_update(cfg, prefer_bar_count=True)
-        if "column" in classes
-        else None
-    )
-    beam_update = _beam_strengthening_update(cfg) if "beam" in classes else None
-
-    if col_update is None and beam_update is None:
-        return {
-            "changed": False,
-            "reason": "No stronger longitudinal reinforcement option is available in the configured search space.",
-            "failed_member_classes": sorted(classes),
-            "before": before,
-            "after": before,
-        }
-
-    apply_updates(col_update, beam_update)
-    after = reinforcement_snapshot()
-
-    return {
-        "changed": before != after,
-        "reason": "Pushover failed before the minimum acceptable roof drift; strengthened affected member class(es).",
-        "failed_member_classes": sorted(classes),
-        "column_update": col_update,
-        "beam_update": beam_update,
-        "before": before,
-        "after": after,
-    }
-
-
-def _pushover_envelope_summary(pushover_results):
-    return (
-        pushover_results
-        .get("design_envelope", {})
-        .get("summary", {})
-    )
-
-
-def _pushover_target_dcr_snapshot(pushover_results):
-    return (
-        pushover_results
-        .get("design_envelope", {})
-        .get("target_dcr_snapshot")
-    )
-
-
-def _pushover_lateral_design_summary(pushover_results):
-    target_snapshot = _pushover_target_dcr_snapshot(pushover_results)
-    if (
-        getattr(sp, "PUSHOVER_USE_TARGET_DCR_FOR_REDESIGN", True)
-        and target_snapshot
-        and target_snapshot.get("summary")
-    ):
-        return target_snapshot["summary"]
-
-    return _pushover_envelope_summary(pushover_results)
-
-
-def needs_pushover_envelope_redesign(pushover_results):
-    if pushover_results["status"].get("failed"):
+    def __exit__(self, *_exc):
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=5.0)
         return False
 
-    summary = _pushover_lateral_design_summary(pushover_results)
-    if not summary.get("tracked", False):
-        # Target-drift snapshots do not carry a "tracked" flag.
-        if summary.get("phase") != "pushover_target_roof_drift":
-            return False
-
-    return summary.get("all_design_checks_pass") is False
-
-
-def _envelope_governing_dcr(summary):
-    if not summary:
-        return 0.0
-
-    return max(
-        summary.get("max_column_pm_dcr") or 0.0,
-        summary.get("max_column_shear_dcr") or 0.0,
-        summary.get("max_beam_flexure_dcr") or 0.0,
-        summary.get("max_beam_shear_dcr") or 0.0,
-    )
-
-
-def pushover_envelope_redesign_stalled(redesign_history):
-    if not getattr(sp, "PUSHOVER_ENVELOPE_STOP_ON_STALLED_DCR", True):
-        return None
-
-    records = []
-    for record in redesign_history:
-        summary = (
-            record.get("pushover_target_dcr", {})
-            if getattr(sp, "PUSHOVER_USE_TARGET_DCR_FOR_REDESIGN", True)
-            else record.get("pushover_envelope", {})
-        )
-        if not summary:
-            summary = record.get("pushover_envelope", {})
-        if summary.get("all_design_checks_pass") is False:
-            records.append(
-                {
-                    "attempt_index": record.get("attempt_index"),
-                    "governing_dcr": _envelope_governing_dcr(summary),
-                    "num_failed_elements": summary.get("num_failed_elements"),
-                    "failed_element_tags": summary.get("failed_element_tags", []),
-                }
-            )
-
-    min_reruns = max(
-        1,
-        int(getattr(sp, "PUSHOVER_ENVELOPE_STALL_MIN_RERUNS", 2)),
-    )
-    if len(records) <= min_reruns:
-        return None
-
-    current = records[-1]
-    prior_best = min(
-        records[:-1],
-        key=lambda row: row["governing_dcr"],
-    )
-    tol = max(
-        0.0,
-        float(getattr(sp, "PUSHOVER_ENVELOPE_STALL_DCR_TOL", 0.01)),
-    )
-
-    if current["governing_dcr"] >= prior_best["governing_dcr"] * (1.0 - tol):
-        return {
-            "stalled": True,
-            "reason": (
-                "Pushover envelope redesign stopped because the governing "
-                "DCR did not improve enough after additional reinforcement."
-            ),
-            "current": current,
-            "best_previous": prior_best,
-            "relative_improvement_tolerance": tol,
-            "completed_envelope_reruns": len(records) - 1,
-        }
-
-    return None
-
-
-def apply_pushover_envelope_redesign(pushover_results, cfg):
-    summary = _pushover_lateral_design_summary(pushover_results)
-    failed_tags = summary.get("failed_element_tags", [])
-    classes = _failed_member_classes(failed_tags)
-    before = reinforcement_snapshot()
-    col_update = (
-        _column_envelope_strengthening_update(cfg, summary)
-        if "column" in classes
-        else None
-    )
-    beam_update = _beam_strengthening_update(cfg) if "beam" in classes else None
-
-    if col_update is None and beam_update is None:
-        return {
-            "changed": False,
-            "reason": "Pushover envelope failed, but no stronger longitudinal reinforcement option is available in the configured search space.",
-            "failed_member_classes": sorted(classes),
-            "envelope_summary": summary,
-            "before": before,
-            "after": before,
-        }
-
-    apply_updates(col_update, beam_update)
-    after = reinforcement_snapshot()
-
-    return {
-        "changed": before != after,
-        "reason": "Pushover envelope design checks failed; strengthened affected member class(es).",
-        "failed_member_classes": sorted(classes),
-        "column_update": col_update,
-        "beam_update": beam_update,
-        "envelope_summary": summary,
-        "before": before,
-        "after": after,
-    }
-
-
-def _pushover_failure_roof_drift(pushover_results):
-    status = pushover_results["status"]
-    if status.get("failed_roof_disp") is not None:
-        return status["failed_roof_disp"] / (sp.NUM_FLOOR * sp.STORY_H)
-    if pushover_results["roof_drift"]:
-        return pushover_results["roof_drift"][-1]
-    return 0.0
-
-
-def needs_pushover_failure_redesign(pushover_results):
-    status = pushover_results["status"]
-    if not status.get("failed"):
-        return False
-    return _pushover_failure_roof_drift(pushover_results) < sp.PUSHOVER_MIN_ACCEPTABLE_DRIFT_RATIO
-
-
-def pushover_attempt_record(attempt_index, pushover_results):
-    record = {
-        "attempt_index": attempt_index,
-        "reinforcement": reinforcement_snapshot(),
-        "completed_steps": pushover_results["status"]["completed_steps"],
-        "failed": pushover_results["status"]["failed"],
-        "failed_step": pushover_results["status"]["failed_step"],
-        "failed_roof_drift_ratio": (
-            _pushover_failure_roof_drift(pushover_results)
-            if pushover_results["status"]["failed"]
-            else None
-        ),
-        "minimum_acceptable_roof_drift_ratio": sp.PUSHOVER_MIN_ACCEPTABLE_DRIFT_RATIO,
-        "failed_element_tags": pushover_results["status"].get("failed_element_tags", []),
-    }
-
-    envelope_summary = _pushover_envelope_summary(pushover_results)
-    if envelope_summary:
-        record["pushover_envelope"] = {
-            "tracked": envelope_summary.get("tracked", False),
-            "all_design_checks_pass": envelope_summary.get("all_design_checks_pass"),
-            "num_failed_elements": envelope_summary.get("num_failed_elements"),
-            "failed_element_tags": envelope_summary.get("failed_element_tags", []),
-            "num_failed_columns": envelope_summary.get("num_failed_columns"),
-            "failed_column_tags": envelope_summary.get("failed_column_tags", []),
-            "num_failed_beams": envelope_summary.get("num_failed_beams"),
-            "failed_beam_tags": envelope_summary.get("failed_beam_tags", []),
-            "max_column_pm_dcr": envelope_summary.get("max_column_pm_dcr"),
-            "max_column_shear_dcr": envelope_summary.get("max_column_shear_dcr"),
-            "max_beam_flexure_dcr": envelope_summary.get("max_beam_flexure_dcr"),
-            "max_beam_shear_dcr": envelope_summary.get("max_beam_shear_dcr"),
-        }
-
-    target_snapshot = _pushover_target_dcr_snapshot(pushover_results)
-    if target_snapshot and target_snapshot.get("summary"):
-        target_summary = target_snapshot["summary"]
-        record["pushover_target_dcr"] = {
-            "phase": target_summary.get("phase"),
-            "target_roof_drift_ratio": target_summary.get("target_roof_drift_ratio"),
-            "target_roof_disp_in": target_summary.get("target_roof_disp_in"),
-            "actual_roof_drift_ratio": target_summary.get("actual_roof_drift_ratio"),
-            "actual_roof_disp_in": target_summary.get("actual_roof_disp_in"),
-            "step": target_summary.get("step"),
-            "all_design_checks_pass": target_summary.get("all_design_checks_pass"),
-            "num_failed_elements": target_summary.get("num_failed_elements"),
-            "failed_element_tags": target_summary.get("failed_element_tags", []),
-            "num_failed_columns": target_summary.get("num_failed_columns"),
-            "failed_column_tags": target_summary.get("failed_column_tags", []),
-            "num_failed_beams": target_summary.get("num_failed_beams"),
-            "failed_beam_tags": target_summary.get("failed_beam_tags", []),
-            "max_column_pm_dcr": target_summary.get("max_column_pm_dcr"),
-            "max_column_shear_dcr": target_summary.get("max_column_shear_dcr"),
-            "max_beam_flexure_dcr": target_summary.get("max_beam_flexure_dcr"),
-            "max_beam_shear_dcr": target_summary.get("max_beam_shear_dcr"),
-        }
-
-    return record
-
-
-def pushover_log_path(outputs_dir, attempt_index):
-    return outputs_dir / f"opensees_pushover_attempt_{attempt_index}.log"
-
-
-def run_modal_and_pushover(outputs_dir, attempt_index):
-    build_model()
-    print("\nModel rebuilt with final steel for modal/pushover.")
-
-    apply_gravity_loads()
-    gravity_results = run_gravity_analysis()
-
-    modal_results = run_modal_analysis()
-    print_modal_results(modal_results)
-    pushover_period_check = asce_period_check_from_modal_results(
-        modal_results,
-        f"post_gravity_tangent_pushover_attempt_{attempt_index}",
-    )
-    print_asce_period_check(pushover_period_check)
-    with (outputs_dir / f"asce_period_check_pushover_attempt_{attempt_index}.json").open("w", encoding="utf-8") as file:
-        json.dump(pushover_period_check, file, indent=2)
-
-    apply_lateral_loads()
-    pushover_results = run_pushover(log_path=pushover_log_path(outputs_dir, attempt_index))
-    print_pushover_results(pushover_results, gravity_results)
-
-    return gravity_results, modal_results, pushover_results
-
-
-def selected_analysis_method():
-    return (
-        getattr(sp, "ANALYSIS_METHOD", "pushover")
-        .strip()
-        .lower()
-        .replace("-", "_")
-    )
-
-
-def is_ntha_method(method):
-    return method in {"ntha", "nltha", "time_history", "ground_motion"}
-
-
-def is_pushover_method(method):
-    return method in {"pushover", "static_pushover"}
-
-
-def _safe_output_name(value):
-    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in value)
-
-
-def _ntha_story_drift_rows(results):
-    rows = []
-    for story, (dx, dy) in enumerate(
-        zip(results["peak_story_drift_x"], results["peak_story_drift_y"]),
-        start=1,
-    ):
-        resultant = (dx * dx + dy * dy) ** 0.5
-        rows.append(
-            {
-                "story": story,
-                "floor_pair": f"{story - 1}-{story}",
-                "peak_drift_x_ratio": dx,
-                "peak_drift_y_ratio": dy,
-                "peak_drift_x_percent": 100.0 * dx,
-                "peak_drift_y_percent": 100.0 * dy,
-                "peak_drift_resultant_ratio": resultant,
-                "peak_drift_resultant_percent": 100.0 * resultant,
-            }
-        )
-    return rows
-
-
-def summarize_ntha_results(results, output_dir, elapsed_sec, file_counts):
-    drift_rows = _ntha_story_drift_rows(results)
-    max_drift_x = max(drift_rows, key=lambda row: row["peak_drift_x_ratio"])
-    max_drift_y = max(drift_rows, key=lambda row: row["peak_drift_y_ratio"])
-    max_drift_resultant = max(
-        drift_rows,
-        key=lambda row: row["peak_drift_resultant_ratio"],
-    )
-
-    roof_x = results["roof_disp_x"]
-    roof_y = results["roof_disp_y"]
-
-    summary = {
-        "analysis_method": "ntha",
-        "status": results["status"],
-        "record_summary_x": results["record_summary_x"],
-        "record_summary_y": results["record_summary_y"],
-        "damping_ratio": results["damping_ratio"],
-        "rayleigh_a0": results["rayleigh_a0"],
-        "rayleigh_a1": results["rayleigh_a1"],
-        "elapsed_sec": elapsed_sec,
-        "max_abs_roof_disp_x_in": max((abs(v) for v in roof_x), default=0.0),
-        "max_abs_roof_disp_y_in": max((abs(v) for v in roof_y), default=0.0),
-        "max_story_drift_x": max_drift_x,
-        "max_story_drift_y": max_drift_y,
-        "max_story_drift_resultant": max_drift_resultant,
-        "output_dir": str(output_dir),
-    }
-    summary.update(file_counts)
-    return summary
-
-
-def select_ntha_records_from_config():
-    scale_factor = getattr(sp, "NTHA_SCALE_FACTOR", None)
-
-    record_id_x = getattr(sp, "NTHA_RECORD_ID_X", None)
-    if record_id_x:
-        record_x = load_ground_motion_record(
-            record_id_x,
-            scale_factor=scale_factor,
-        )
-        record_y = None
-        record_id_y = getattr(sp, "NTHA_RECORD_ID_Y", None)
-        if record_id_y and not getattr(sp, "NTHA_X_ONLY", False):
-            record_y = load_ground_motion_record(
-                record_id_y,
-                scale_factor=scale_factor,
-            )
-        return f"manual:{record_x.record_id}", record_x, record_y
-
-    result_id = getattr(sp, "NTHA_RESULT_ID", None)
-    if result_id is not None:
-        key, record_x, record_y = load_ground_motion_pair_by_result_id(
-            result_id,
-            set_name=getattr(sp, "NTHA_SET_NAME", "peer_mle_all"),
-            split=getattr(sp, "NTHA_SPLIT", None),
-            scale_factor=scale_factor,
-        )
-        if getattr(sp, "NTHA_X_ONLY", False):
-            record_y = None
-        return key, record_x, record_y
-
-    pairs = load_ground_motion_pairs(
-        set_name=getattr(sp, "NTHA_SET_NAME", "peer_mle_all"),
-        split=getattr(sp, "NTHA_SPLIT", None),
-        limit=1,
-        scale_factor=scale_factor,
-    )
-    if not pairs:
-        raise RuntimeError("No ground-motion pair found for NTHA.")
-
-    key, record_x, record_y = pairs[0]
-    if getattr(sp, "NTHA_X_ONLY", False):
-        record_y = None
-    return key, record_x, record_y
-
-
-def print_ntha_results(results):
-    status = results["status"]
-    drift_rows = _ntha_story_drift_rows(results)
-    max_drift = max(drift_rows, key=lambda row: row["peak_drift_resultant_ratio"])
-
-    print("\nNTHA results:")
-    print(
-        f"  Completed {status['completed_steps']} / "
-        f"{status['npts_requested']} transient steps"
-    )
-    print(f"  Failed: {status['failed']}")
-    print(f"  Recovery steps: {len(status.get('convergence_log', []))}")
-    print(
-        f"  Max roof |Ux| = "
-        f"{max((abs(v) for v in results['roof_disp_x']), default=0.0):.6e} in"
-    )
-    print(
-        f"  Max roof |Uy| = "
-        f"{max((abs(v) for v in results['roof_disp_y']), default=0.0):.6e} in"
-    )
-    print(
-        "  Peak resultant story drift = "
-        f"{max_drift['peak_drift_resultant_percent']:.3f}% "
-        f"at story {max_drift['story']} "
-        f"(floors {max_drift['floor_pair']})"
-    )
-
-
-def run_modal_and_ntha(outputs_dir):
-    build_model()
-    print("\nModel rebuilt with final steel for modal/NTHA.")
-
-    reference_modal_results = run_modal_analysis()
-    print("\nElastic/reference modal properties for Rayleigh damping:")
-    print_modal_results(reference_modal_results)
-    reference_period_check = asce_period_check_from_modal_results(
-        reference_modal_results,
-        "elastic_reference_before_gravity",
-    )
-    print_asce_period_check(reference_period_check)
-
-    apply_gravity_loads()
-    gravity_results = run_gravity_analysis()
-
-    modal_results = run_modal_analysis()
-    print("\nPost-gravity tangent modal properties (diagnostic only):")
-    print_modal_results(modal_results)
-    tangent_period_check = asce_period_check_from_modal_results(
-        modal_results,
-        "post_gravity_tangent_diagnostic",
-    )
-    print_asce_period_check(tangent_period_check)
-
-    if getattr(sp, "NTHA_PRINT_CATALOG_SUMMARY", True):
-        print("\nGround-motion catalog summary:")
-        print(json.dumps(ground_motion_catalog_summary(), indent=2))
-
-    pair_key, record_x, record_y = select_ntha_records_from_config()
-    run_name = analysis_run_name(
-        _safe_output_name(pair_key.replace("peer_result_id:", "peer_")),
-        x_only=record_y is None,
-        scale_factor=record_x.scale_factor,
-        damping_ratio=getattr(sp, "NTHA_DAMPING_RATIO", 0.05),
-        rayleigh_mode_i=getattr(sp, "NTHA_RAYLEIGH_MODE_I", 0),
-        rayleigh_mode_j=getattr(sp, "NTHA_RAYLEIGH_MODE_J", 2),
-        dt_factor=getattr(sp, "NTHA_DT_FACTOR", 1.0),
-    )
-    ntha_output_dir = outputs_dir / "ntha" / run_name
-    validate_ntha_output_compatibility(ntha_output_dir)
-
-    print(
-        "\nRunning NTHA with "
-        f"X={record_x.record_id}"
-        f"{', Y=' + record_y.record_id if record_y else ', X-only'}"
-    )
-    print(f"NTHA output directory: {ntha_output_dir}")
-
-    ntha_kwargs = {
-        "record_y": record_y,
-        "damping_ratio": getattr(sp, "NTHA_DAMPING_RATIO", 0.05),
-        "modal_results": reference_modal_results,
-        "rayleigh_mode_i": getattr(sp, "NTHA_RAYLEIGH_MODE_I", 0),
-        "rayleigh_mode_j": getattr(sp, "NTHA_RAYLEIGH_MODE_J", 2),
-        "dt_factor": getattr(sp, "NTHA_DT_FACTOR", 1.0),
-        "log_path": ntha_output_dir / "opensees_ntha.log",
-    }
-
-    run_ntha_signature = inspect.signature(run_ntha)
-    if "progress_path" in run_ntha_signature.parameters:
-        ntha_kwargs["progress_path"] = ntha_output_dir / "progress.json"
-    if "progress_every" in run_ntha_signature.parameters:
-        ntha_kwargs["progress_every"] = getattr(sp, "NTHA_PROGRESS_EVERY", 100)
-
-    start = time.perf_counter()
-    ntha_results = run_ntha(record_x, **ntha_kwargs)
-    elapsed = time.perf_counter() - start
-
-    file_counts = save_ntha_outputs(
-        ntha_output_dir,
-        ntha_results,
-        gravity_results,
-        reference_modal_results,
-    )
-    with (ntha_output_dir / "modal_results_elastic_reference.json").open("w", encoding="utf-8") as file:
-        json.dump(reference_modal_results, file, indent=2)
-    with (ntha_output_dir / "modal_results_post_gravity_tangent.json").open("w", encoding="utf-8") as file:
-        json.dump(modal_results, file, indent=2)
-    reference_valid_modes = [mode for mode in reference_modal_results if mode.get("valid")]
-    tangent_valid_modes = [mode for mode in modal_results if mode.get("valid")]
-    modal_diagnostics = {
-        "rayleigh_modal_source": "elastic_reference_before_gravity",
-        "elastic_reference_period_mode_1_sec": reference_valid_modes[0]["period"] if len(reference_valid_modes) > 0 else None,
-        "elastic_reference_period_mode_2_sec": reference_valid_modes[1]["period"] if len(reference_valid_modes) > 1 else None,
-        "post_gravity_tangent_period_mode_1_sec": tangent_valid_modes[0]["period"] if len(tangent_valid_modes) > 0 else None,
-        "post_gravity_tangent_period_mode_2_sec": tangent_valid_modes[1]["period"] if len(tangent_valid_modes) > 1 else None,
-        "gravity_roof_ux_in": gravity_results.get("ux"),
-        "gravity_roof_uy_in": gravity_results.get("uy"),
-        "asce_reference_period_check": reference_period_check,
-        "asce_post_gravity_period_check": tangent_period_check,
-    }
-    with (ntha_output_dir / "modal_diagnostics.json").open("w", encoding="utf-8") as file:
-        json.dump(modal_diagnostics, file, indent=2)
-
-    summary = summarize_ntha_results(
-        ntha_results,
-        ntha_output_dir,
-        elapsed,
-        file_counts,
-    )
-    summary.update(modal_diagnostics)
-    with (ntha_output_dir / "summary.json").open("w", encoding="utf-8") as file:
-        json.dump(summary, file, indent=2)
-
-    print_ntha_results(ntha_results)
-    print(f"Saved NTHA summary: {ntha_output_dir / 'summary.json'}")
-
-    return gravity_results, reference_modal_results, ntha_results, summary
-
-
-def main():
-    t_start = time.perf_counter()
-    print(f"Run started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    apply_geometry_from_environment()
-
-    project_dir = Path(__file__).resolve().parent
-    outputs_dir = project_dir / "outputs"
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    clear_failure_artifacts(outputs_dir)
-    current_model_summary = model_summary()
-    print_model_summary(current_model_summary)
-    with (outputs_dir / "model_summary.json").open("w") as file:
-        json.dump(current_model_summary, file, indent=2)
-    with (outputs_dir / "asce_period_estimate.json").open("w", encoding="utf-8") as file:
-        json.dump(current_model_summary["asce_period_estimate"], file, indent=2)
-
-    # ── Iterative steel redesign (gravity-driven inner loop) ─────────────────
-    cfg = DesignConfig.from_structure_parameters()
-    redesign_ok, n_iter, gravity_results, design_results = run_iterative_redesign(
-        cfg=cfg, max_iter=10, verbose=True
-    )
-    if not redesign_ok:
-        print(f"\n[WARNING] Steel redesign did not converge in {n_iter} iterations. "
-              "Proceeding with last iteration's design.")
-    print_gravity_results(gravity_results)
-
-    # Design check after convergence
-    col_fail, beam_fail = print_summary(design_results, verbose=False)
-    gravity_design_status = summarize_design_results(
-        design_results,
-        phase="gravity",
-        redesign_ok=redesign_ok,
-        n_iter=n_iter,
-        notes=[
-            "Demand snapshot taken from the gravity-analysis state after iterative redesign.",
-            "Shear DCRs are included in pass/fail status, but the current redesign loop only changes longitudinal bars.",
-        ],
-    )
-    write_design_results(outputs_dir / "design_check_gravity.json", design_results)
-    write_design_results(outputs_dir / "design_check.json", design_results)
-    with (outputs_dir / "design_status_gravity.json").open("w") as file:
-        json.dump(gravity_design_status, file, indent=2)
-
-    if not gravity_design_status["all_design_checks_pass"]:
-        print(
-            "[WARNING] Gravity design checks still fail: "
-            f"{gravity_design_status['num_failed_elements']} element(s), "
-            f"max column shear DCR={gravity_design_status['max_column_shear_dcr']:.3f}, "
-            f"max column P-M DCR={gravity_design_status['max_column_pm_dcr']:.3f}, "
-            f"max beam flexure DCR={gravity_design_status['max_beam_flexure_dcr']:.3f}."
-        )
-
-    # ── One-time modal + pushover after steel has converged ──────────────────
-
-    analysis_method = selected_analysis_method()
-    print(f"\nSelected analysis method: {analysis_method}")
-
-    if is_ntha_method(analysis_method):
-        gravity_results, modal_results, ntha_results, ntha_summary = run_modal_and_ntha(
-            outputs_dir
-        )
-        analysis_status = {
-            "analysis_method": "ntha",
-            "gravity_design_status": gravity_design_status,
-            "ntha_summary": ntha_summary,
-        }
-        with (outputs_dir / "analysis_status.json").open("w", encoding="utf-8") as file:
-            json.dump(analysis_status, file, indent=2)
-
-        ops.wipe()
-        elapsed = time.perf_counter() - t_start
-        print(f"\nTotal runtime: {elapsed:.1f}s ({elapsed/60:.1f} min)")
-        return
-
-    if not is_pushover_method(analysis_method):
-        raise ValueError(
-            "Unsupported ANALYSIS_METHOD. Use 'ntha' or 'pushover', "
-            f"got {analysis_method!r}."
-        )
-
-    # rebuild model with final steel configuration (run_iterative_redesign leaves
-    # the OpenSees domain in a post-gravity state; rebuild cleanly for pushover)
-    build_model()
-    print("\nModel rebuilt with final steel for modal/pushover.")
-
-    apply_gravity_loads()
-    gravity_results = run_gravity_analysis()
-
-    modal_results = run_modal_analysis()
-    print_modal_results(modal_results)
-    initial_pushover_period_check = asce_period_check_from_modal_results(
-        modal_results,
-        "post_gravity_tangent_pushover_initial",
-    )
-    print_asce_period_check(initial_pushover_period_check)
-    with (outputs_dir / "asce_period_check_pushover_initial.json").open("w", encoding="utf-8") as file:
-        json.dump(initial_pushover_period_check, file, indent=2)
-
-    apply_lateral_loads()
-    pushover_results = run_pushover(log_path=pushover_log_path(outputs_dir, 0))
-    print_pushover_results(pushover_results, gravity_results)
-    pushover_redesign_history = [pushover_attempt_record(0, pushover_results)]
-    failure_redesign_attempts = 0
-    envelope_redesign_attempts = 0
-
-    while True:
-        if needs_pushover_failure_redesign(pushover_results):
-            if failure_redesign_attempts >= sp.PUSHOVER_REDESIGN_MAX_ATTEMPTS:
-                print(
-                    "[WARNING] Pushover still failed before "
-                    f"{100.0 * sp.PUSHOVER_MIN_ACCEPTABLE_DRIFT_RATIO:.1f}% roof drift "
-                    f"after {sp.PUSHOVER_REDESIGN_MAX_ATTEMPTS} failure redesign attempt(s)."
-                )
-                break
-
-            redesign_update = apply_pushover_failure_redesign(pushover_results, cfg)
-            pushover_redesign_history[-1]["failure_redesign_update"] = redesign_update
-            retry_reason = "pushover-failure redesign"
-            failure_redesign_attempts += 1
-
-        elif needs_pushover_envelope_redesign(pushover_results):
-            stalled = pushover_envelope_redesign_stalled(pushover_redesign_history)
-            if stalled:
-                pushover_redesign_history[-1]["envelope_redesign_stalled"] = stalled
-                print(
-                    "[WARNING] "
-                    f"{stalled['reason']} "
-                    f"Current DCR={stalled['current']['governing_dcr']:.3f}; "
-                    f"best previous DCR={stalled['best_previous']['governing_dcr']:.3f}."
-                )
-                break
-
-            if envelope_redesign_attempts >= sp.PUSHOVER_ENVELOPE_REDESIGN_MAX_ATTEMPTS:
-                print(
-                    "[WARNING] Pushover envelope checks still fail "
-                    f"after {sp.PUSHOVER_ENVELOPE_REDESIGN_MAX_ATTEMPTS} envelope redesign attempt(s)."
-                )
-                break
-
-            redesign_update = apply_pushover_envelope_redesign(pushover_results, cfg)
-            pushover_redesign_history[-1]["envelope_redesign_update"] = redesign_update
-            retry_reason = "pushover-envelope redesign"
-            envelope_redesign_attempts += 1
-
+    def candidates(self):
+        total = 0
+        for path in self.out_dir.glob("grouped_candidates*.jsonl"):
+            try:
+                with path.open("rb") as handle:
+                    total += sum(1 for _line in handle)
+            except OSError:
+                pass
+        return total
+
+    def stage(self):
+        if (self.out_dir / "grouped_design.json").exists():
+            return "gravity and modal analysis of the selected design"
+        if (self.out_dir / "grouped_search_failed.json").exists():
+            return "writing the failed-search record"
+        return "design search"
+
+    def line(self):
+        return (f"[main] {_clock(time.perf_counter() - self.started)} elapsed | {self.stage()} | "
+                f"{self.candidates()} candidate(s) decided")
+
+    def _run(self):
+        stream = sys.__stdout__ or sys.stdout
+        while not self._stop.wait(self.interval):
+            try:
+                stream.write(self.line() + "\n")
+                stream.flush()
+            except (OSError, ValueError):
+                return
+
+
+def method_text(grouping):
+    """What the grouping policy designs, for the banner (Model/Member_Groups policies)."""
+    from Model import Member_Groups as mg
+    policy_id = mg.default_system_policy() if grouping == "auto" else grouping
+    if not mg.is_system_policy(policy_id):
+        return "grouped single-system design (legacy band policy: every frame special, no gravity system)"
+    frames = {mg.SFRS_LAYOUT_PERIMETER: "perimeter special moment frames",
+              mg.SFRS_LAYOUT_PERIMETER_CORE: "perimeter + core-ring special moment frames",
+              mg.SFRS_LAYOUT_PERIMETER_CORE_LINES: "perimeter + core-line special moment frames"}[mg.layout_of(policy_id)]
+    bands = "three-story bands" if mg.is_banded_policy(policy_id) else "one band over the height"
+    return f"grouped two-system design: {frames} + interior gravity system; one design per system tie, {bands}"
+
+
+def print_banner(args, case, seed_column, seed_beam, out_dir, notes):
+    import Structure_Parameters as sp
+    site = {label: (sds, sd1, s1) for label, sds, sd1, s1 in sp.SEISMIC_SITE_OPTIONS}[case["seismic_site"]]
+    height = case["num_floor"] * case["story_height_ft"]
+    plan_x, plan_y = case["num_bay_x"] * case["bay_x_width_ft"], case["num_bay_y"] * case["bay_y_width_ft"]
+    slab = ("composite slab: T and L beams, slab reinforcement designed"
+            if getattr(sp, "SLAB_STRUCTURAL_PARTICIPATION", True) else "no slab participation: rectangular beams")
+    print("=" * 100)
+    print(f"SeisFrame Main.py -- one building, current design methodology   {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 100)
+    print(f"Building    {case['num_bay_x']} x {case['num_bay_y']} bays, {case['num_floor']} floors; story {_feet(case['story_height_ft'])} ft; "
+          f"bays {_feet(case['bay_x_width_ft'])} ft (X) x {_feet(case['bay_y_width_ft'])} ft (Y)")
+    print(f"            height {height:g} ft; plan {plan_x:g} x {plan_y:g} ft; height / least plan width {height / min(plan_x, plan_y):.2f}")
+    print(f"Hazard      {case['seismic_site']} (SDS {site[0]:g} g, SD1 {site[1]:g} g, S1 {site[2]:g} g); "
+          f"Risk Category {sp.ASCE_RISK_CATEGORY}")
+    print(f"Method      {method_text(args.grouping)}")
+    print(f"            {slab}; grouping {args.grouping}; analysis profile {args.profile}")
+    print(f"Search      seed column {seed_column[0]:g} x {seed_column[1]:g} in, fc {seed_column[2]:g} ksi; "
+          f"seed beam {seed_beam[0]:g} x {seed_beam[1]:g} in, fc {seed_beam[2]:g} ksi")
+    print(f"            budgets {args.max_feasibility_trials} feasibility and {args.max_reduction_trials} reduction evaluations"
+          + ("; Grade 80 retry off" if args.no_grade80_retry else ""))
+    print(f"Assertions  PROBE values dated {args.probe_date} (let the slab and joint design path run; verify nothing)")
+    print(f"Stages      design{'' if args.design_only else ' -> gravity and modal analysis on the nonlinear model'}")
+    print(f"Population  " + ("member of the V2 population" if not notes else "outside the V2 population: " + "; ".join(notes)))
+    print(f"Output      {out_dir if out_dir else '(plan only: nothing is written)'}")
+    if not args.plan_only and args.heartbeat_seconds > 0:
+        print(f"Progress    one [grouped] line per decided candidate; a [main] heartbeat every {args.heartbeat_seconds:g} s")
+    print("=" * 100, flush=True)
+
+
+def print_report(result, out_dir):
+    """The end-of-run summary on the console; result.json and grouped_summary.md hold the full record."""
+    status = result.get("status")
+    print()
+    print("=" * 100)
+    print(f"Result      {status} after {_clock(result.get('elapsed_s') or 0.0)}")
+    if status == "plan_only":
+        print(f"Request     {result.get('request_sha256')} ({result.get('group_count')} groups, grouping {result.get('grouping_policy')})")
+    elif status == "error":
+        print(f"Error       {result.get('error')}")
+        if out_dir and (Path(out_dir) / "log.txt").exists():
+            print(f"            the traceback is in {Path(out_dir) / 'log.txt'}; candidates evaluated before the error are in "
+                  "grouped_candidates*.jsonl")
         else:
-            break
+            print("            the run stopped while configuring the case, before its folder was used; the traceback is above")
+    elif status == "no_feasible_design":
+        stop = result.get("search_stop") or {}
+        print(f"Search      no feasible design: {stop.get('reason')} ({stop.get('detail', '')}); counts {result.get('search_counts')}")
+        print("            every candidate and its failed constraints are in grouped_candidates*.jsonl and grouped_search_failed.json")
+    elif status == "designed":
+        search = result.get("search") or {}
+        print(f"Search      stop {search.get('stop_reason')}: {search.get('stop_detail')}")
+        grade = result.get("longitudinal_grade_ksi")
+        print(f"            counts {search.get('counts')}; grouping selected {result.get('grouping_policy_selected')}; "
+              f"longitudinal bars fy {'?' if grade is None else format(grade, 'g')} ksi")
+        print(f"Checklist   accepted by checklist: {result.get('accepted')}; counts {result.get('counts')}")
+        print(f"            failed: {', '.join(result.get('fail_ids') or []) or 'none'}; "
+              f"not evaluated: {', '.join(result.get('not_evaluated_ids') or []) or 'none'}")
+        production = result.get("production_acceptance") or {}
+        print(f"Production  accepted: {production.get('accepted')} ({production.get('reason')})")
+        ties = (result.get("systems") or {}).get("ties") or {}
+        if ties:
+            print("Ties        tie                             b x h (in)     fc (ksi)")
+            for tie, (b, h, fc) in sorted(ties.items()):
+                print(f"            {tie:<31} {b:g} x {h:g}{'':<8} {fc:g}")
+        groups = result.get("sections_by_group") or {}
+        print(f"Groups      {len(groups)} member groups (sections and cages by group in grouped_summary.md)")
+        quantities = result.get("quantities") or {}
+        if quantities:
+            print(f"Quantities  concrete {quantities.get('concrete_total_yd3', float('nan')):.1f} yd3; "
+                  f"frame steel {quantities.get('frame_steel_lb', float('nan')) / 2000.0:.1f} t; "
+                  f"distinct form sizes {quantities.get('distinct_form_size_count')}")
+        period = result.get("model_period_sec")
+        print(f"Period      design model {'?' if period is None else format(period, '.3f')} s")
+        stage = (result.get("stage_results") or {}).get("gravity_modal")
+        if stage:
+            print(f"Gravity     stage {stage.get('status')}; all checks pass: {stage.get('all_checks_pass')}; {stage.get('checks')}"
+                  + (f"; error {stage.get('error')}" if stage.get("error") else ""))
+            modal = stage.get("modal") or {}
+            if modal:
+                periods = ", ".join(f"{p:.3f}" for p in modal.get("periods_elastic_reference_sec") or [])
+                tangent = ", ".join(f"{p:.3f}" for p in modal.get("periods_post_gravity_tangent_sec") or [])
+                print(f"Modal       nonlinear model, elastic reference periods {periods} s; post-gravity tangent {tangent} s")
+    if out_dir and status != "plan_only":
+        print(f"Files       {out_dir}")
+    print("=" * 100, flush=True)
 
-        if not redesign_update["changed"]:
-            print(f"[WARNING] {redesign_update['reason']}")
-            break
 
-        attempt_index = pushover_redesign_history[-1]["attempt_index"] + 1
-        print(
-            f"\nRetrying modal/pushover after {retry_reason} "
-            f"(attempt {attempt_index + 1})."
-        )
-        gravity_results, modal_results, pushover_results = run_modal_and_pushover(
-            outputs_dir,
-            attempt_index,
-        )
-        pushover_redesign_history.append(
-            pushover_attempt_record(attempt_index, pushover_results)
-        )
-    (
-        pushover_final_design_status,
-        pushover_final_design_results,
-    ) = run_final_pushover_design_check(
-        outputs_dir,
-        pushover_failed=pushover_results["status"]["failed"],
-    )
-    (
-        pushover_envelope_design_status,
-        pushover_envelope_design_results,
-    ) = run_pushover_envelope_design_check(outputs_dir, pushover_results)
-    design_status = combine_design_statuses(
-        gravity_design_status,
-        pushover_final_design_status,
-        pushover_envelope_status=pushover_envelope_design_status,
-        pushover_redesign_history=pushover_redesign_history,
-    )
+def report_interrupt(out_dir, elapsed):
+    """Ctrl+C: say what the folder holds and leave interrupted.json beside the runner's result.json.
 
-    with (outputs_dir / "design_status.json").open("w") as file:
-        json.dump(design_status, file, indent=2)
+    The runner's finally block still writes result.json and log.txt. Its status is 'started' when the interrupt came
+    during the search, but 'designed' when it came during the gravity and modal stage (that stage then has no result),
+    so the marker records which stage was cut short."""
+    if out_dir is None:
+        print(f"\n[main] interrupted after {_clock(elapsed)} (plan only: nothing was written).")
+        return
+    out_dir = Path(out_dir)
+    stage = "gravity and modal analysis" if (out_dir / "grouped_design.json").exists() else "design search"
+    try:
+        (out_dir / "interrupted.json").write_text(json.dumps(
+            {"status": "interrupted", "interrupted_during": stage, "elapsed_s": elapsed,
+             "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+             "note": "the run did not finish; result.json in this folder describes the state when it stopped"},
+            indent=1), encoding="utf-8")
+    except OSError:
+        pass
+    print(f"\n[main] interrupted during the {stage} after {_clock(elapsed)}. The run did not finish (interrupted.json); "
+          f"{out_dir} keeps the candidates decided so far (grouped_candidates*.jsonl), log.txt and result.json"
+          + ("; grouped_design.json holds the selected design, its gravity and modal stage did not finish."
+             if stage == "gravity and modal analysis" else ". Start a new run in a new folder."))
 
-    if not pushover_results["status"]["failed"]:
-        clear_failure_artifacts(outputs_dir)
 
-    with (outputs_dir / "pushover_status.json").open("w") as file:
-        json.dump(pushover_results["status"], file, indent=2)
+def build_parser():
+    import Structure_Parameters as sp
+    from Design import Grouped_Runner as runner
+    from Model.Analysis_Profile import PROFILES
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    building = parser.add_argument_group("building (defaults from CASE in Main.py)")
+    building.add_argument("--bays-x", type=int, default=CASE["num_bay_x"], help="Bays in X.")
+    building.add_argument("--bays-y", type=int, default=CASE["num_bay_y"], help="Bays in Y.")
+    building.add_argument("--floors", type=int, default=CASE["num_floor"], help="Number of floors.")
+    building.add_argument("--story-height-ft", type=float, default=CASE["story_height_ft"], help="Story height (ft).")
+    building.add_argument("--bay-x-ft", type=float, default=CASE["bay_x_width_ft"], help="Bay width in X (ft).")
+    building.add_argument("--bay-y-ft", type=float, default=CASE["bay_y_width_ft"], help="Bay width in Y (ft).")
+    building.add_argument("--site", default=CASE["seismic_site"], choices=[option[0] for option in sp.SEISMIC_SITE_OPTIONS],
+                          help="Design hazard site label (Structure_Parameters.SEISMIC_SITE_OPTIONS).")
+    method = parser.add_argument_group("design method")
+    method.add_argument("--profile", default=PROFILE_ID, choices=sorted(PROFILES),
+                        help="Analysis profile the design is made under (Model/Analysis_Profile.PROFILES).")
+    method.add_argument("--grouping", default=runner.DEFAULT_GROUPING, choices=runner.GROUPINGS,
+                        help="Grouping policy (default: three-story system bands, as in the batches).")
+    method.add_argument("--max-feasibility-trials", type=int, default=MAX_FEASIBILITY_TRIALS,
+                        help="Candidate evaluations the feasibility phase may spend.")
+    method.add_argument("--max-reduction-trials", type=int, default=MAX_REDUCTION_TRIALS,
+                        help="Candidate evaluations the reduction phase may spend.")
+    method.add_argument("--seed-column", nargs=3, type=float, metavar=("B", "H", "FC"), default=None,
+                        help="Start the search from this square column section (in, in, ksi) instead of the batch seed rule.")
+    method.add_argument("--seed-beam", nargs=3, type=float, metavar=("B", "H", "FC"), default=None,
+                        help="Start the search from this beam section (in, in, ksi) instead of the batch seed rule.")
+    method.add_argument("--no-grade80-retry", action="store_true", help="Disable the Grade 80 retry of the search.")
+    method.add_argument("--probe-date", default=date.today().isoformat(),
+                        help="YYYY-MM-DD date stamped on the PROBE assertions (default: today).")
+    run = parser.add_argument_group("run")
+    run.add_argument("--design-only", action="store_true", help="Stop after the design; skip the gravity and modal stage.")
+    run.add_argument("--output-dir", default=None,
+                     help="A new or empty folder for this run (default: outputs/main/<geometry name>__<date_time>).")
+    run.add_argument("--heartbeat-seconds", type=float, default=HEARTBEAT_SECONDS,
+                     help="Seconds between progress heartbeats (0 turns them off).")
+    run.add_argument("--plan-only", action="store_true",
+                     help="Print the configured request (case, seed, budgets, identity) and write nothing.")
+    return parser
 
-    with (outputs_dir / "mechanism_diagnostics.json").open("w") as file:
-        json.dump(pushover_results["mechanism_diagnostics"], file, indent=2)
 
-    csv_path = save_pushover_curve(
-        pushover_results,
-        outputs_dir / "pushover_curve.csv",
-    )
-    fig, _ = plot_pushover_curve(pushover_results, show=False)
-    fig.savefig(outputs_dir / "pushover_curve.png", dpi=200)
-    drift_fig, _ = plot_roof_drift_curve(pushover_results, show=False)
-    drift_fig.savefig(outputs_dir / "pushover_drift_curve.png", dpi=200)
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    try:
+        if date.fromisoformat(args.probe_date).isoformat() != args.probe_date:
+            raise ValueError
+    except ValueError:
+        raise SystemExit(f"--probe-date must be YYYY-MM-DD, got {args.probe_date!r}.")
+    if args.max_feasibility_trials < 1 or args.max_reduction_trials < 0:
+        raise SystemExit("--max-feasibility-trials must be at least 1 and --max-reduction-trials at least 0.")
+    if min(args.bays_x, args.bays_y, args.floors) < 1:
+        raise SystemExit("--bays-x, --bays-y and --floors must each be at least 1.")
+    if not all(math.isfinite(value) and value > 0 for value in (args.story_height_ft, args.bay_x_ft, args.bay_y_ft)):
+        raise SystemExit("--story-height-ft, --bay-x-ft and --bay-y-ft must be positive numbers of feet.")
+    if (args.seed_column is None) != (args.seed_beam is None):
+        raise SystemExit("Give both --seed-column and --seed-beam, or neither (the batch seed rule).")
+    if args.seed_column is not None:
+        for name, values in (("--seed-column", args.seed_column), ("--seed-beam", args.seed_beam)):
+            if not all(math.isfinite(value) and value > 0 for value in values):
+                raise SystemExit(f"{name} values must be positive numbers, got {values}.")
+        if args.seed_column[0] != args.seed_column[1]:
+            raise SystemExit(f"Columns are square in the grouped search; --seed-column is "
+                             f"{args.seed_column[0]:g} x {args.seed_column[1]:g}.")
+    case = build_case(args)
+    notes = population_notes(case)
+    if args.seed_column is not None:
+        seed_column, seed_beam = tuple(args.seed_column), tuple(args.seed_beam)
+    else:
+        try:
+            seed_column, seed_beam = batch_seed(case)
+        except ValueError as exc:
+            raise SystemExit(f"The batch seed rule has no seed for this building ({exc}); give --seed-column and --seed-beam.")
+    out_dir = None if args.plan_only else new_output_dir(args, case)
+    print_banner(args, case, seed_column, seed_beam, out_dir, notes)
 
-    design_check_export = {
-        "gravity": design_results,
-        "pushover_final": pushover_final_design_results,
-    }
-    if pushover_envelope_design_results is not None:
-        lateral_check_name = (
-            "pushover_2pct_drift"
-            if (
-                pushover_envelope_design_status
-                and pushover_envelope_design_status.get("phase")
-                == "pushover_target_roof_drift"
-            )
-            else "pushover_envelope"
-        )
-        design_check_export[lateral_check_name] = pushover_envelope_design_results
-
-    sample_summary = save_analysis_sample(
-        outputs_dir / "samples" / "baseline_frame",
-        gravity_results,
-        modal_results,
-        pushover_results,
-        design_status=design_status,
-        design_check_results=design_check_export,
-    )
-
-    print(f"\nSaved pushover curve CSV: {csv_path}")
-    print(f"Saved pushover curve plot: {outputs_dir / 'pushover_curve.png'}")
-    print(f"Saved pushover drift plot: {outputs_dir / 'pushover_drift_curve.png'}")
-    print(
-        "Saved graph sample: "
-        f"{outputs_dir / 'samples' / 'baseline_frame'} "
-        f"({sample_summary['num_nodes']} nodes, "
-        f"{sample_summary['num_elements']} elements, "
-        f"{sample_summary['num_element_end_force_rows']} element-end force rows)"
-    )
-
-    if should_show_plots():
-        plot_pushover_curve(pushover_results, show=True)
-        plot_roof_drift_curve(pushover_results, show=True)
-
-    ops.wipe()
-
-    elapsed = time.perf_counter() - t_start
-    print(f"\nTotal runtime: {elapsed:.1f}s ({elapsed/60:.1f} min)")
+    from Design import Grouped_Runner as runner
+    runner_args = runner_arguments(args, case, seed_column, seed_beam, out_dir)
+    started = time.perf_counter()
+    try:
+        if args.plan_only:
+            result = runner.run(runner_args)
+        else:
+            with Heartbeat(out_dir, args.heartbeat_seconds, started):
+                result = runner.run(runner_args)
+    except KeyboardInterrupt:
+        report_interrupt(out_dir, time.perf_counter() - started)
+        return 130
+    if out_dir is not None and result.get("status") == "error" and not any(out_dir.iterdir()):
+        out_dir.rmdir()                     # the run stopped before using its folder; leave no empty folder behind
+        out_dir = None
+    print_report(result, out_dir)
+    return 0 if result.get("status") in FINISHED_STATUSES else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
