@@ -45,6 +45,22 @@ def test_unrelated_or_differently_identified_statements_are_not_flagged(conn) ->
     assert reasons(conn) == []
 
 
+def test_citations_and_file_paths_name_sources_not_values(conn) -> None:
+    make(conn, title="Earlier sources", content="Chou, Y.-T., Kuo, P.-C., Li, K.-Y., Chang, W.-T., & Chen, C.-S. (2025).")
+    make(conn, title="Expanded sources", content="Kuo, P.-C., Chou, Y.-T., Li, K.-Y., Chang, W.-T., & Chen, C.-S. (2024).")
+    make(conn, title="Bond slip", content="Original: `C:\\Users\\me\\ResearchProject\\2005-bond-slip-in-reinforced-concrete-elements.pdf`")
+    make(conn, title="Deformations", content="Original: `C:\\Users\\me\\ResearchProject\\235489023-deformations-of-reinforced-concrete-members.pdf`")
+    cf.detect(conn)
+    assert reasons(conn) == []
+
+
+def test_plain_years_in_prose_are_still_compared(conn) -> None:
+    make(conn, title="A", content="The harbor light was first lit in 1871 by the commission.")
+    make(conn, title="B", content="The harbor light was first lit in 1874 by the commission.")
+    cf.detect(conn)
+    assert reasons(conn) == ["numeric"]
+
+
 def test_numbers_in_records_dated_on_different_days_are_progress_not_conflict(conn) -> None:
     make(conn, title="Day 1", category="sessions", occurred_at="2026-10-21",
          content="User-confirmed source tasks completed today: 0 of 4 with evidence.")
