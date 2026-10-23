@@ -22,6 +22,7 @@ simulation cost. See `abstract_draft.md` for the research abstract.
 | `structural-analysis-kit/` | A portable analysis workspace for inspecting and comparing generated datasets across devices, with per-device profiles kept out of git. See its `README.md`. |
 | `projector_share/` | A TensorFlow Embedding Projector bundle of surrogate embeddings for the 3,800-case dataset. |
 | `code_map/` | One node per script and one edge per import; `python code_map/build_code_map.py` regenerates it. |
+| `cortex/` | CORTEX, a local knowledge base for the project's notes, facts, decisions and sessions (FastAPI + SQLite FTS5, React + Three.js brain view), seeded from the SeisFrame Obsidian vault. See its `README.md`. |
 | `abstract_draft.md` | Research abstract. |
 | `run_rc_structure.ps1` | Windows launcher that runs `RC Structure/Main.py` in the `OpPy` conda environment. |
 
