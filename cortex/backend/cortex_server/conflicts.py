@@ -62,6 +62,11 @@ _DATE = r"\d{4}-\d{2}-\d{2}"
 _CODE = r"(?:[A-Za-z]+[\w\-]*\d[\w\-]*|\d+[A-Za-z][\w\-]*)"
 _IDENT_RE = re.compile(rf"\b(?:{_DATE}|{_CODE}|\d+(?:/\d+)+)\b")
 _URL_RE = re.compile(r"https?://\S+")
+# Things that name a source rather than state a value: inline code, file paths, and citation
+# years such as "(2025)" or "(2024a)". Different ones mean different sources, not a disagreement.
+_CODE_SPAN_RE = re.compile(r"`([^`]+)`")
+_PATH_RE = re.compile(r"(?:[A-Za-z]:\\|\\\\)[^\s`]+|\S+\.(?:pdf|md|py|json|csv|txt|png|jpe?g|xlsx?|docx?|zip|tcl|out)\b", re.I)
+_CITATION_YEAR_RE = re.compile(r"\((?:19|20)\d{2}[a-z]?\)")
 _VALUE_RE = re.compile(r"(?<![\w.])(-?\d+(?:\.\d+)?)(?:\s*(%|[A-Za-z]+\.?))?")
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
 
@@ -116,7 +121,11 @@ def analyze(record_id: str, raw: str) -> Statement | None:
     for match in WIKILINK_RE.finditer(raw):
         target = (match.group(1) or "") + (match.group(2) or "")
         idents.update(m.lower() for m in _IDENT_RE.findall(target))
-    text = plain_text(raw)
+    stripped = raw
+    for pattern in (_CODE_SPAN_RE, _PATH_RE, _CITATION_YEAR_RE):
+        idents.update(m.lower() for m in pattern.findall(stripped))
+        stripped = pattern.sub(" ", stripped)
+    text = plain_text(stripped)
     idents.update(u.rstrip(".,;)").lower() for u in _URL_RE.findall(text))
     text = _URL_RE.sub(" ", text)
     idents.update(m.lower() for m in _IDENT_RE.findall(text))
