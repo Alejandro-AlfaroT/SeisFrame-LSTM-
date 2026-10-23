@@ -28,14 +28,14 @@ backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
 cd frontend && npm install && cd ..
 ```
 
-Day-to-day, build the UI once and let the API serve it:
+Build the UI once (`cd frontend && npm run build`). After that, double-click `Start CORTEX.cmd`
+(or a desktop shortcut to it, using `assets/cortex.ico` as its icon). It starts the server in a minimized
+"CORTEX server" window unless one is already running, waits for it, and opens http://127.0.0.1:8420
+in your default browser. Close the "CORTEX server" window to stop it. The same by hand:
 
 ```
-cd frontend && npm run build && cd ..
 backend/.venv/Scripts/python.exe backend/run.py serve
-```
-
-Then open http://127.0.0.1:8420. For UI development, run the API as above and `npm run dev`
+``` For UI development, run the API as above and `npm run dev`
 in `frontend/` instead, then open http://127.0.0.1:5173 (Vite proxies `/api` to port 8420).
 `.claude/launch.json` in the repository has `cortex-api` and `cortex-ui` entries for the same two servers.
 
