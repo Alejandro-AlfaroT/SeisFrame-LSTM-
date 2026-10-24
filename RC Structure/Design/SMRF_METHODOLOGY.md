@@ -1358,6 +1358,25 @@ and the drift/ELF assumptions. Items:
   drift forces at the Cu Ta-capped period (conservative), Cd = 5.5, P-Delta,
   full D+L gravity state, derived SDC for the limits.
 
+Period basis (2026-10-24, user decisions): the calculated period T of
+ASCE 7-22 12.8.2 is the first elastic mode of the entire structure, every
+beam and column of the continuous frame, under every grouping policy
+(`Design_Driver.PERIOD_MODEL`): the period is not separated by system.
+Before, the two-system route took it from the released perimeter-SFRS model
+(interior beam ends released), 1.2 to 1.4 times longer on the two 2026-10-23
+Main.py buildings. T is capped at Cu Ta, Ta = Ct hn^x (Eq. 12.8-8, concrete
+moment frames, Table 12.8-2), with Cu from Table 12.8-1 at the site's SD1,
+interpolated linearly between rows (`Structure_Parameters.asce_cu`; the table
+states no rule between rows). A fixed Cu = 1.4 was used before, the table's
+value only for SD1 >= 0.3 g; of the site presets only `sdc_c` (SD1 0.19 g,
+Cu 1.52) changes. One period still serves both directions. The torsion,
+strength and drift solves keep the lateral design model of the policy. The
+record's `period_basis` carries `cu`, `cu_rule` and `period_model`; the request
+identity carries the table, the rule, the site's Cu and the period model.
+Effect on the two saved buildings, same members: SDC C base shear x0.92 (Cu),
+SDC D low x1.20 (the shorter period of the entire structure, uncapped)
+(`outputs/evidence/period_basis_20261024/`).
+
 ## Beam-plus-slab strengths
 
 Where the slab ends: at a beam's exterior end the slab bars in its flange run

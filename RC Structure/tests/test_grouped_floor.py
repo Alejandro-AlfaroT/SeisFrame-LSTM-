@@ -461,6 +461,41 @@ class CoupledReference(unittest.TestCase):
         with self.assertRaises(ValueError):                       # a floor missing from the description
             self.solve({**sections, "floors": sections["floors"][:-1]})
 
+    def test_each_column_takes_its_own_group_grade(self):
+        """Columns of different grades (special-frame and gravity columns, 2026-10-23): each support's column is built at
+        its own group's f'c ([floor][j][i], the column of story k below floor k); a malformed grid is refused."""
+        from unittest import mock
+        from dataclasses import replace
+        from Design import SMRF_Coupled_Analysis as coupled
+        gid = "s03_04__column__interior"
+        uniform = gf.uniform_state()
+        state = uniform.with_designs({gid: replace(uniform.designs[gid], fc_ksi=7.0)})
+        sections = self.by_member(state)
+        self.assertIsNone(sections["fc_col_ksi"])
+        members = [m for m in state.members("column")]
+        for m in members:
+            self.assertEqual(sections["column_fc_ksi_by_floor"][m.story_or_floor - 1][m.grid_j][m.grid_i], m.design.fc_ksi)
+        self.assertEqual({fc for floor in sections["column_fc_ksi_by_floor"] for row in floor for fc in row},
+                         {gf.COLUMN.fc_ksi, 7.0})
+        self.assertEqual(self.by_member(uniform)["fc_col_ksi"], gf.COLUMN.fc_ksi)    # one shared grade is still named
+        calls = []
+        original = coupled._rectangle
+
+        def traced(b, h, fc, modifier, nu):
+            calls.append(fc)
+            return original(b, h, fc, modifier, nu)
+
+        with mock.patch.object(coupled, "_rectangle", side_effect=traced):
+            result = self.solve(sections)
+        self.assertTrue(result["equilibrium"]["numerical_balance_passed"])
+        # columns are the only 5 and 7 ksi sections (the webs are 4 ksi): each column's grade in proportion to its members
+        at_7 = len(state.groups[gid]["member_tags"])
+        self.assertGreater(calls.count(7.0), 0)
+        self.assertEqual(calls.count(7.0) * (len(members) - at_7), calls.count(gf.COLUMN.fc_ksi) * at_7)
+        bad = {**sections, "column_fc_ksi_by_floor": sections["column_fc_ksi_by_floor"][:-1]}
+        with self.assertRaisesRegex(ValueError, "column_fc_ksi_by_floor"):
+            self.solve(bad)
+
     def test_the_frame_with_its_per_floor_transfer_carries_the_coupled_models_total(self):
         from Design.SMRF_Coupled_Comparison import compare_transfer_to_coupled
         with gf.frame():

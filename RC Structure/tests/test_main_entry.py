@@ -3,7 +3,9 @@
 Fast checks of the plumbing only: the case it builds, the population check, the arguments it hands to
 Design.Grouped_Runner (the batch seed rule, budgets, grouping, PROBE assertions and stages), the new-folder rule,
 the heartbeat's candidate count and stage, the input checks, the interrupt and error paths, the end-of-run report,
-and a plan-only run that writes nothing. The design search itself is covered by test_grouped_runner and the grouped
+the ASCE 7-22 approximate period of the banner (Ta, Cu Ta with Cu from Table 12.8-1, the 0.1 N alternative) and
+the period the design record used, and a plan-only run that writes nothing. The design search itself is covered
+by test_grouped_runner and the grouped
 search tests. The runner is replaced by a stub wherever a test would otherwise design a building.
 """
 import contextlib
@@ -275,6 +277,91 @@ class Report(unittest.TestCase):
         self.assertIn("grouped_search_failed.json", text)
 
 
+class ApproximatePeriod(unittest.TestCase):
+    """ASCE 7-22 12.8.2 of the entire structure: Ta = Ct hn^x (Eq. 12.8-8, Table 12.8-2), Cu from Table 12.8-1 at the
+    site's SD1 (Structure_Parameters.asce_cu, tested in test_period_basis), Ta = 0.1 N (Eq. 12.8-9)."""
+
+    def test_the_period_of_the_member_building(self):
+        period = Main.approximate_period(Main.build_case(parse(*MEMBER)))        # 5 floors of 14 ft, sdc_c (SD1 0.19 g)
+        self.assertEqual(period["hn_ft"], 70.0)
+        self.assertAlmostEqual(period["ta_sec"], 0.016 * 70.0 ** 0.9, places=12)  # 0.732 s
+        self.assertAlmostEqual(period["cu"], 1.52, places=12)                    # Table 12.8-1, between 0.15 and 0.2 g
+        self.assertAlmostEqual(period["cu_ta_sec"], 1.52 * period["ta_sec"], places=12)
+        self.assertAlmostEqual(period["ta_0p1n_sec"], 0.5, places=12)
+        text = "\n".join(Main.period_lines(period))
+        for expected in ("Ta = Ct hn^x = 0.016 x 70^0.9 = 0.732 s", "entire structure, concrete moment frames",
+                         "Cu Ta = 1.52 x 0.732 = 1.113 s", "Cu from Table 12.8-1 at SD1 0.19 g (between the 0.15 g (1.6)",
+                         "Ta = 0.1 N = 0.50 s (Eq. 12.8-9) is permitted"):
+            self.assertIn(expected, text)
+
+    def test_the_alternative_needs_twelve_stories_or_fewer_of_at_least_ten_feet(self):
+        # MEMBER first (argparse keeps the last value): each case changes one geometry limit, at the sdc_d_high site,
+        # whatever CASE in Main.py holds.
+        for argv, permitted in (((*MEMBER, "--floors", "12", "--site", "sdc_d_high"), True),
+                                ((*MEMBER, "--story-height-ft", "10", "--site", "sdc_d_high"), True),
+                                ((*MEMBER, "--floors", "13", "--site", "sdc_d_high"), False),
+                                ((*MEMBER, "--story-height-ft", "9.5", "--site", "sdc_d_high"), False)):
+            with self.subTest(argv=argv[len(MEMBER):]):
+                period = Main.approximate_period(Main.build_case(parse(*argv)))
+                self.assertEqual(period["ta_0p1n_sec"] is not None, permitted)
+                lines = Main.period_lines(period)
+                self.assertEqual(any("Eq. 12.8-9" in line for line in lines), permitted)
+                self.assertTrue(any("Cu from Table 12.8-1 at SD1 0.6 g (SD1 >= 0.4 g)" in line for line in lines))
+
+    @staticmethod
+    def report_with(record, result=None):
+        result = result or json.loads(json.dumps(Report.DESIGNED))
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "grouped_design.json").write_text(json.dumps(record), encoding="utf-8")
+            return Report().report(result, Path(tmp))
+
+    @staticmethod
+    def record(model, used, capped, cu=1.52, ta=0.7324, period_model="all_frames"):
+        """A record of 2026-10-24 on: Cu and the period model in the period basis (the request identity's Cu differs,
+        so a report that read it, or Structure_Parameters, instead of the period basis would fail)."""
+        return {"demand_basis": {"design_period_sec": used, "period_basis": {
+                    "model_period_sec": model, "asce_ta_sec": ta, "capped_at_cu_ta": capped, "cu": cu,
+                    "period_model": period_model}},
+                "request_identity": {"inputs": {"ASCE_CU": 9.9}}}
+
+    def test_the_report_shows_the_period_the_design_used(self):
+        result = json.loads(json.dumps(Report.DESIGNED))                      # result's design model period 1.512 s
+        result["stage_results"]["gravity_modal"]["modal"]["asce_reference_period_check"] = {
+            "model_period_sec": 1.113, "period_ratio_to_asce_ta": 1.52, "warn_ratio_low": 0.5, "warn_ratio_high": 2.0,
+            "passes_reasonableness_check": True, "warning": None}
+        text = self.report_with(self.record(1.519, 1.1132, True), result)
+        for expected in ("design model 1.512 s = 2.06 Ta (first mode, entire structure; outside the 0.5-2 Ta sanity band)",
+                         "Ta 0.732 s; Cu Ta = 1.52 x 0.732 = 1.113 s; ELF design period 1.113 s",
+                         "the model's 1.519 s capped at Cu Ta, 12.8.2; one period for both X and Y",
+                         "nonlinear model (every frame resisting): first period 1.113 s = 1.52 Ta",
+                         "0.5-2 Ta sanity band: True"):
+            self.assertIn(expected, text)
+        self.assertNotIn("ELF design period", Report().report(result, Path("C:/runs/no_record_here")))
+
+    def test_a_record_made_before_the_table_and_the_entire_structure_period(self):
+        # 2026-10-23 records: no Cu or period model in the period basis; the request identity holds the fixed 1.4
+        record = self.record(1.519, 1.0253, True)
+        for key in ("cu", "period_model"):
+            del record["demand_basis"]["period_basis"][key]
+        record["request_identity"]["inputs"]["ASCE_CU"] = 1.4
+        text = self.report_with(record)
+        self.assertIn("(first mode, entire structure;", text)                 # no systems block: the continuous frame
+        record["systems"] = {"lateral_design_model": "perimeter_sfrs"}           # a two-system record of 2026-10-23
+        self.assertIn("(first mode, released perimeter-SFRS model, a record made before 2026-10-24;",
+                      self.report_with(record))
+        self.assertIn("Cu Ta = 1.4 x 0.732 = 1.025 s; ELF design period 1.025 s", text)
+
+    def test_the_report_names_an_uncapped_period_and_a_missing_one(self):
+        for record, expected in (
+                (self.record(0.9, 0.9, False), "ELF design period 0.900 s (the model period, not above Cu Ta"),
+                (self.record(None, 0.7324, False), "ELF design period 0.732 s (no model period: Ta used directly, 12.8.2")):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, self.report_with(record))
+        text = self.report_with(self.record(None, None, None, cu=None, ta=None))   # a record without an ELF result
+        self.assertIn("design model 1.512 s", text)
+        self.assertNotIn("ELF design period", text)
+
+
 class PlanOnly(unittest.TestCase):
     def test_plan_only_prints_the_request_and_writes_nothing(self):
         # A fresh interpreter: configuring the case changes Structure_Parameters globals (geometry, profile).
@@ -287,6 +374,7 @@ class PlanOnly(unittest.TestCase):
         self.assertIn("member of the V2 population", proc.stdout)
         self.assertIn("grouping system_three_story_v1", proc.stdout)
         self.assertIn("Result      plan_only", proc.stdout)
+        self.assertIn("Period      Ta = Ct hn^x = 0.016 x 70^0.9 = 0.732 s", proc.stdout)
         self.assertIn("(plan only: nothing is written)", proc.stdout)
 
 

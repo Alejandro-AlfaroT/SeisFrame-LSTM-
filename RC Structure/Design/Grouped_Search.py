@@ -25,7 +25,10 @@ form sizes wins. When a quantity is not available (no established slab layout) t
 
 Column sizes along one column line may not grow upward and may not step in by 3 in or more per face
 between adjacent bands (Design.SMRF_Transitions); moves that would break that are not evaluated and are
-logged as skipped with the reason. Concrete grades stay the seed's one column grade and one beam grade.
+logged as skipped with the reason. Concrete grades move by grade family (Design.Concrete_Grades): one grade per family
+over the full height, stepped one rung of the family's own ladder for a failure of one of its groups (under the two-
+system policies the special-frame columns, the gravity columns on 5-7 ksi, and the beams; under the band policy the
+columns and the beams).
 
 Every candidate is logged with why it was proposed, what it changed, its constraints and quantities and
 what was decided, and is appended to ``candidates.jsonl`` as soon as it is known when a log path is given,
@@ -40,6 +43,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import Structure_Parameters as sp
+from Design import Concrete_Grades as cg
 from Design import Grouped_Design as gd
 from Design import Group_Selection as selection
 from Design.Section_Design import (BEAM_CONCRETE_STRENGTHS_KSI, COLUMN_CONCRETE_STRENGTHS_KSI, COLUMN_SIZES_IN,
@@ -47,17 +51,18 @@ from Design.Section_Design import (BEAM_CONCRETE_STRENGTHS_KSI, COLUMN_CONCRETE_
 from Model import Member_Groups as mg
 from Model import Member_Properties as mp
 
-SEARCH_VERSION = "grouped_search_v2"
+SEARCH_VERSION = "grouped_search_v3"
 STEEL_GRADE_RETRY_RULE = "grade60_limits_then_grade80_full_search_v1"
 SFRS_LAYOUT_LADDER_RULE = "perimeter_then_core_ring_then_core_lines_v1"
 IMPROVEMENT_POLICY_ID = "dominance_concrete_and_total_reinforcement_v1"
 # The lever order of the iterative design (user decision 2026-10-16): concrete strength first, then the reinforcement
 # (which every evaluation exhausts through the cage selection), and the section size last. A growth move therefore
-# steps the common column or beam grade one rung before any size; only a failure that is room for bars (threading,
-# slab mats, bar rows, a cage layout) goes to the size directly, since a grade makes no room.
+# steps the grade of the failing group's family (Design.Concrete_Grades) one rung before any size; only a failure that
+# is room for bars (threading, slab mats, bar rows, a cage layout) goes to the size directly, since a grade makes no room.
 LEVER_ORDER_ID = "strength_then_reinforcement_then_size_v1"
+# The band policy's two families (every frame special); the two-system families are in Design.Concrete_Grades.
 GRADE_LADDERS = {"column": tuple(COLUMN_CONCRETE_STRENGTHS_KSI), "beam": tuple(BEAM_CONCRETE_STRENGTHS_KSI)}
-GRADE_KEYS = {"column": "column_grade", "beam": "beam_grade"}
+GRADE_KEY_SUFFIX = "_grade"
 ROOM_FAILURES = ("beam.bars_thread_column", "beam.bar_stacking_clear_of_slab_mats", "beam.cage_layout", "column.cage_layout",
                  "joint.through_bar_depth")
 MAX_COLUMN_SIZE_STEP_IN = 4.0          # adjacent bands: face step < 3 in on each face (ACI 318-19 10.7.4.2)
@@ -190,34 +195,43 @@ def _chains(state):
     return {label: selection._column_chain(state, locations) for label, locations in selection._column_units(state)}
 
 
-# ---- concrete grades (strength first) ---------------------------------------------------------------------------
-def common_grade(state, kind):
-    """The one column or beam grade of a grouped design (Grouped_Design._require_common_grades)."""
-    grades = {d.fc_ksi for d in state.designs.values() if d.is_column == (kind == "column")}
-    if len(grades) != 1:
-        raise mg.GroupedStateError(f"{kind} groups use different concrete grades {sorted(grades)}.")
-    return grades.pop()
+# ---- concrete grades (strength first, by grade family) ----------------------------------------------------------
+def grade_key(family):
+    """The move key of a family's grade step ("gravity_column_grade", "column_grade", ...)."""
+    return family + GRADE_KEY_SUFFIX
 
 
-def next_grade(state, kind):
-    """The next rung of the common grade ladder above the current grade, or None at the top (a grade below the
-    ladder, a legacy seed, steps to its first rung)."""
-    current = common_grade(state, kind)
-    return next((fc for fc in GRADE_LADDERS[kind] if fc > current + 1e-9), None)
+def is_grade_key(key):
+    """Group ids and design ties never end in "_grade"; grade keys always do."""
+    return key.endswith(GRADE_KEY_SUFFIX)
 
 
-def regraded(state, kind, fc):
-    """Every column (or beam) group at grade ``fc``: the one grade per member type of the engine."""
-    return state.with_designs({gid: replace(d, fc_ksi=float(fc)) for gid, d in state.designs.items()
-                               if d.is_column == (kind == "column")})
+def common_grade(state, family):
+    """The one grade of a grade family (Design.Concrete_Grades.grade): "column"/"beam" under the band policy,
+    "sfrs_column"/"gravity_column"/"beam" under the two-system policies."""
+    fc = cg.grade(state, family)
+    if fc is None:
+        raise mg.GroupedStateError(f"The grouped design has no {family} groups.")
+    return fc
+
+
+def next_grade(state, family):
+    """The next rung of the family's own ladder above its grade, or None at the top or for a family without groups
+    (a grade below the ladder, a legacy seed, steps to its first rung)."""
+    return cg.next_grade(state, family)
+
+
+def regraded(state, family, fc):
+    """Every group of one grade family at grade ``fc``; the other families keep theirs."""
+    return cg.regraded(state, family, fc)
 
 
 def apply_moves(state, moves):
-    """Apply growth moves {target: (to, reason)}: a grade key to every group of that kind, a design tie to its groups,
+    """Apply growth moves {target: (to, reason)}: a grade key to every group of that family, a design tie to its groups,
     a group id to that group (its tie under the system policy)."""
     for key, (to, _why) in moves.items():
-        if key in GRADE_KEYS.values():
-            state = regraded(state, key.split("_")[0], to)
+        if is_grade_key(key):
+            state = regraded(state, key[:-len(GRADE_KEY_SUFFIX)], to)
         elif key in state.ties():
             state = state.with_tied_designs({key: replace(state.tie_designs()[key], b_in=float(to[0]), h_in=float(to[1]))})
         else:
@@ -226,14 +240,14 @@ def apply_moves(state, moves):
 
 
 def _move_rows(moves):
-    return [{"target": key, "kind": "grade" if key in GRADE_KEYS.values() else "size",
-             "to": (float(to) if key in GRADE_KEYS.values() else list(to)), "reason": why}
+    return [{"target": key, "kind": "grade" if is_grade_key(key) else "size",
+             "to": (float(to) if is_grade_key(key) else list(to)), "reason": why}
             for key, (to, why) in sorted(moves.items())]
 
 
 def _moves_summary(moves):
-    grades = [f"{key.split('_')[0]} grade -> {to:g} ksi" for key, (to, _why) in sorted(moves.items()) if key in GRADE_KEYS.values()]
-    sizes = sum(1 for key in moves if key not in GRADE_KEYS.values())
+    grades = [f"{key[:-len(GRADE_KEY_SUFFIX)]} grade -> {to:g} ksi" for key, (to, _why) in sorted(moves.items()) if is_grade_key(key)]
+    sizes = sum(1 for key in moves if not is_grade_key(key))
     parts = grades + ([f"grow {sizes} group(s)/tie(s)"] if sizes else [])
     return "; ".join(parts) if parts else "no move"
 
@@ -425,11 +439,12 @@ def _core_groups_of_beam(gid, types):
 def propose_growth(evaluation, state):
     """The moves a not-feasible candidate asks for: {target: (to, reason)}; empty when none is known.
 
-    ``target`` is "column_grade" / "beam_grade" with the next grade (strength first), or a group id (its design
-    tie under the system policy) with a ladder size (size last; see LEVER_ORDER_ID). Room-for-bars failures go to
-    the size directly. Under the system policy drift moves the perimeter frames only, a lane-limited beam moves
-    the columns it threads, and the gravity ties grow for their own checks; the D6 coupling is applied afterwards
-    by enforce_system_coupling.
+    ``target`` is a grade key ("<family>_grade", Design.Concrete_Grades) with the next grade of the failing group's
+    family (strength first), or a group id (its design tie under the system policy) with a ladder size (size last;
+    see LEVER_ORDER_ID). Room-for-bars failures go to the size directly. Under the system policy drift moves the
+    perimeter frames only, a lane-limited beam moves the columns it threads, and the gravity ties grow for their own
+    checks; a gravity group's grade step moves the gravity family only, a special-frame group's the special-frame
+    family only. The D6 coupling is applied afterwards by enforce_system_coupling.
     """
     moves = {}
     columns = sorted(g for g, group in state.groups.items() if group["member_type"] == "column")
@@ -437,27 +452,28 @@ def propose_growth(evaluation, state):
     # Under the band policy every frame is part of the SFRS; under the system policy only the perimeter groups are.
     sfrs = {g for g in state.groups if not state.ties() or state.system_of(g) == mg.SYSTEM_SFRS}
 
-    def grade_move(kind, reason):
-        fc = next_grade(state, kind)
+    def grade_move(gid, reason):
+        family = cg.family_of(state, gid)
+        fc = next_grade(state, family)
         if fc is None:
             return False
-        moves.setdefault(GRADE_KEYS[kind], (fc, reason))
+        moves.setdefault(grade_key(family), (fc, reason))
         return True
 
     def size_key(gid):
         return state.tie_of(gid) or gid
 
     def grow_column(gid, reason, grade_first=True):
-        if grade_first and grade_move("column", reason):
+        if grade_first and grade_move(gid, reason):
             return
         size = _column_step(state.designs[gid], +1, state)
         if size is not None:
             moves.setdefault(size_key(gid), (size, reason))
         elif not grade_first:
-            grade_move("column", reason)                        # no larger size on the ladder: the grade is what is left
+            grade_move(gid, reason)                             # no larger size on the ladder: the grade is what is left
 
     def grow_beam(gid, reason, prefer="deeper", grade_first=True):
-        if grade_first and grade_move("beam", reason):
+        if grade_first and grade_move(gid, reason):
             return
         design = state.designs[gid]
         order = ("wider", "deeper", "larger") if prefer == "wider" else ("deeper", "wider", "larger")
@@ -465,7 +481,7 @@ def propose_growth(evaluation, state):
         if size is not None:
             moves.setdefault(size_key(gid), (size, reason))
         elif not grade_first:
-            grade_move("beam", reason)
+            grade_move(gid, reason)
 
     if evaluation["status"] == "infeasible":
         stage, evidence = evaluation.get("failed_stage"), evaluation.get("failure_evidence") or {}

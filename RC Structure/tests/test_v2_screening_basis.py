@@ -368,7 +368,7 @@ class ProfileAndTopology(unittest.TestCase):
             self.assertEqual((sp.ELEMENT_FORMULATION, sp.IMK_MATERIAL_TYPE, sp.IMK_APPLY_TO_BEAMS, sp.IMK_APPLY_TO_COLUMNS, sp.JOINT_MODEL),
                              ("imk", "IMKPeakOriented", True, True, "rigid_centerline"))
             self.assertEqual(sp.NTHA_HINGE_HISTORY_STRIDE, 1)
-            self.assertEqual(sp.IMK_ENERGY_MAPPING_MODE, "legacy_unmapped")                     # required, not changed
+            self.assertEqual(sp.IMK_ENERGY_MAPPING_MODE, "canonical_physical_orientation_baseline_v1")   # required, not changed
             self.assertEqual(identity["state"]["IMK_CYCLIC_CALIBRATION_STATUS"], "provisional_not_experimentally_calibrated")
             self.assertFalse(identity["joint_springs"]); self.assertFalse(identity["explicit_face_slip_interfaces"])
             self.assertIn("no clear spans", identity["declarations"]["joint_idealisation"])

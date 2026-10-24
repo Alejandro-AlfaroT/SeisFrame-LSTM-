@@ -601,7 +601,9 @@ def installed_deterioration_policy():
     for name, member_type, design in entries:
         d = deterioration_for_member(member_type, 0.0, design=design)
         anchors[name] = {
-            "spacing_depth_ratio": d["deterioration_spacing_depth_ratio"],
+            # s/d, the hoop spacing over the strong-axis effective depth (Eq. 3.20; s/h before 2026-10-23)
+            "spacing_effective_depth_ratio": d["deterioration_spacing_effective_depth_ratio"],
+            "equation_version": d["deterioration_equation_version"],
             "theta_y_member_rad": d["energy_reference_member_theta_y_rad"],
             "lambda_haselton": d["lambda_haselton_dimensionless"],
             "lamda_opensees_rad": d["lambda_opensees_rad"],
@@ -614,6 +616,11 @@ def installed_deterioration_policy():
                                  for m in reference["deterioration_suppressed_modes"] if m in modes},
             "axial_ratio_clamp": [0.0, 0.70],
             "anchors": anchors}
+
+
+def _backbone_definitions():
+    from Model.IMK_Calibration import EFFECTIVE_DEPTH_DEFINITION, EQ_3_20_VERSION, RHO_DEFINITION
+    return {"eq_3_10_rho": RHO_DEFINITION, "effective_depth": EFFECTIVE_DEPTH_DEFINITION, "eq_3_20": EQ_3_20_VERSION}
 
 
 def _grouped_floor_loads():
@@ -751,6 +758,8 @@ def _collect_global_parameters(u):
         # suppressed, so the mode and its policy are part of the output identity (2026-09-26).
         "imk_deterioration_mode": getattr(sp, "IMK_DETERIORATION_MODE", "direct"),
         "imk_use_calibrated_backbone": sp.IMK_USE_CALIBRATED_BACKBONE,
+        # Eq. 3.10's steel ratio and the effective depth Eq. 3.10 and 3.20 take (2026-10-23)
+        "imk_backbone_definitions": _backbone_definitions(),
         "imk_installed_deterioration": installed_deterioration_policy(),
         "imk_hinge_stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", "member_stiffness_factor"),
         "imk_hinge_stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,

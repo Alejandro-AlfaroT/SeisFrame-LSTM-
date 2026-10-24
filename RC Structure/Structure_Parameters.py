@@ -678,10 +678,20 @@ IMK_DETERIORATION_MODE = "haselton_2008"
 IMK_ENERGY_CONVENTION = "opensees_ref_energy_equals_lamda_times_fy"
 IMK_CYCLIC_CALIBRATION_ID = "legacy_member_cyclic_defaults_v1"
 IMK_CYCLIC_CALIBRATION_STATUS = "provisional_not_experimentally_calibrated"
-# Corrected member mapping stays disabled until experimentally supported mode
-# energies are supplied and reviewed (user decision, 2026-09-24). No hogging,
-# average-strength or legacy-Lambda energy anchor is inferred.
-IMK_ENERGY_MAPPING_MODE = "legacy_unmapped"
+# Member energy mapping. The experimentally calibrated mapping stays disabled
+# until experimentally supported mode energies are supplied and reviewed (user
+# decision, 2026-09-24). The default is the coordinate-invariant canonical
+# baseline (V6 IMK audit correction, user instruction 2026-10-23):
+# "canonical_physical_orientation_baseline_v1" keeps the existing provisional
+# Lamda magnitudes but anchors every mode energy to ONE declared physical
+# direction, the positive input at a canonically connected member's start end
+# (hogging for a beam's vertical bending), so swapping a beam's hogging and
+# sagging branches between the input signs no longer changes its energy
+# (Model/IMK_Materials.define_canonical_rotational_imk). It is a declared
+# provisional baseline, not an experimental calibration, the min-yield anchor
+# or an average strength. "legacy_unmapped" (Lamda unchanged whatever branch
+# is the positive input) stays selectable to reproduce earlier runs.
+IMK_ENERGY_MAPPING_MODE = "canonical_physical_orientation_baseline_v1"
 # Corrected mode: "explicit_reference_energy_v1". Profiles are keyed by string
 # physical element tag, then i/j, then y/z; each contains its own evidence.
 # Research mode: "provisional_min_yield_anchor_v1" (pre-generation review,
@@ -959,7 +969,12 @@ ASCE_IE = SEISMIC_IMPORTANCE_FACTOR_BY_RISK_CATEGORY[ASCE_RISK_CATEGORY]   # der
 # driver (seismic_design_basis), as for the risk category.
 ASCE_SITE_CLASSES = ("A", "B", "BC", "C", "CD", "D", "DE", "E", "F")   # ASCE 7-22 11.4.2, Table 20.2-1
 ASCE_SITE_CLASS = "C"
-ASCE_CU = 1.4       # upper-limit coefficient on the calculated period
+# ASCE 7-22 Table 12.8-1, coefficient for the upper limit on the calculated period: (SD1 in g, Cu), highest SD1
+# first; the first row stands for SD1 >= 0.4 and the last for SD1 <= 0.1. Cu follows the site's SD1 (asce_cu),
+# interpolated linearly between two rows (the table states no rule between its rows). Before 2026-10-24 a fixed
+# Cu = 1.4 was used at every site, the table's value only for SD1 >= 0.3 g.
+ASCE_CU_TABLE_12_8_1 = ((0.4, 1.4), (0.3, 1.4), (0.2, 1.5), (0.15, 1.6), (0.1, 1.7))
+ASCE_CU_RULE = "asce7_22_table_12_8_1_by_sd1_linear_between_rows_v1"
 ASCE_TL = 8.0       # long-period transition period, seconds
 
 # ACI 318-19 18.7.3 strong column / weak beam: sum(Mnc) >= 1.2 * sum(Mnb).
@@ -1137,8 +1152,33 @@ def building_height_ft():
 
 
 def asce_approx_fundamental_period_sec():
-    """ASCE approximate fundamental period Ta = Ct * h_n^x."""
+    """ASCE 7-22 Eq. 12.8-8 approximate fundamental period Ta = Ct * h_n^x of the entire structure."""
     return ASCE_PERIOD_CT * building_height_ft() ** ASCE_PERIOD_EXPONENT
+
+
+def asce_cu_table_12_8_1(sd1):
+    """(Cu, how it was read) from ASCE 7-22 Table 12.8-1 (ASCE_CU_TABLE_12_8_1) for SD1 in g."""
+    sd1 = float(sd1)
+    if not math.isfinite(sd1):
+        raise ValueError(f"SD1 must be a finite number of g, got {sd1!r}.")
+    (top_sd1, top_cu), (low_sd1, low_cu) = ASCE_CU_TABLE_12_8_1[0], ASCE_CU_TABLE_12_8_1[-1]
+    if sd1 >= top_sd1:
+        return top_cu, f"SD1 >= {top_sd1:g} g"
+    if sd1 <= low_sd1:
+        return low_cu, f"SD1 <= {low_sd1:g} g"
+    for (hi_sd1, hi_cu), (lo_sd1, lo_cu) in zip(ASCE_CU_TABLE_12_8_1, ASCE_CU_TABLE_12_8_1[1:]):
+        if math.isclose(sd1, lo_sd1):
+            return lo_cu, f"SD1 = {lo_sd1:g} g row"
+        if lo_sd1 < sd1 < hi_sd1:
+            cu = lo_cu + (hi_cu - lo_cu) * (sd1 - lo_sd1) / (hi_sd1 - lo_sd1)
+            return cu, (f"between the {lo_sd1:g} g ({lo_cu:g}) and {hi_sd1:g} g ({hi_cu:g}) rows"
+                        + ("" if lo_cu == hi_cu else ", interpolated"))
+    raise ValueError(f"SD1 = {sd1!r} g is outside Table 12.8-1")
+
+
+def asce_cu(sd1=None):
+    """Cu of ASCE 7-22 Table 12.8-1 at the configured ASCE_SD1 (or at the given SD1, in g)."""
+    return asce_cu_table_12_8_1(ASCE_SD1 if sd1 is None else sd1)[0]
 
 
 def asce_fundamental_period_check(model_period_sec=None, modal_source=None):

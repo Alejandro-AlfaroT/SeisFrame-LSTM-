@@ -237,13 +237,16 @@ class ChangedGroupPropagation(unittest.TestCase):
         nu = axial / (d.b_in * d.h_in * d.fc_ksi)
         close(self, entry["axial_ratio"], nu, 1e-11)
         rho_sh = d.stirrup_legs * sp.rebar_area(d.stirrup_bar_size) / (d.b_in * d.stirrup_spacing_in)
-        rho = d.top_bars * ab / (d.b_in * (d.h_in - cover))
+        # Eq. 3.10: total longitudinal steel, both faces and the side bars of both side faces, over b d (2026-10-23)
+        rho = (d.top_bars + d.bot_bars + 2 * d.side_bars) * ab / (d.b_in * (d.h_in - cover))
         s_n = d.stirrup_spacing_in / sp.rebar_diameter(d.bar_size) * math.sqrt(sp.FY_KSI * 6.894757 / 100.0)
         theta_p = (0.12 * 1.55 * 0.16 ** nu * (0.02 + 40.0 * rho_sh) ** 0.43 * 0.54 ** (0.01 * d.fc_ksi * 6.894757)
                    * 0.66 ** (0.1 * s_n) * 2.27 ** (10.0 * rho))
         close(self, entry["theta_p"], theta_p, 1e-11)
         close(self, entry["theta_pc"], min(0.10, 0.76 * 0.031 ** nu * (0.02 + 40.0 * rho_sh) ** 1.02), 1e-11)
-        close(self, entry["lambda_haselton_dimensionless"], 170.7 * 0.27 ** nu * 0.10 ** (d.stirrup_spacing_in / d.h_in), 1e-11)
+        # Eq. 3.20 takes s/d, d = h - d' (2026-10-23; s/h before)
+        close(self, entry["lambda_haselton_dimensionless"],
+              170.7 * 0.27 ** nu * 0.10 ** (d.stirrup_spacing_in / (d.h_in - cover)), 1e-11)
         # an unchanged column of the same story keeps the uniform cage and section
         corner = registry[next(t for t, kind, k, i, j in gf.hand_members() if (kind, k, i, j) == ("column", 3, 0, 0))]
         self.assertEqual(corner["installed_design"], mg.design_record(gf.COLUMN))

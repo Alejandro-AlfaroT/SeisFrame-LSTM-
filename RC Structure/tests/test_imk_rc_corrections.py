@@ -23,7 +23,8 @@ class RCCorrections(unittest.TestCase):
         with contextlib.ExitStack() as st:
             for k,v in {'IMK_DETERIORATION_MODE':'haselton_2008','H_BEAM':18.,'BEAM_STIRRUP_SPACING':3.,'IMK_BEAM_THETA_Y':.005}.items():st.enter_context(mock.patch.object(sp,k,v))
             a=c.deterioration_for_member('beam_x',0)
-            self.assertAlmostEqual(a['lambda_opensees_rad'],170.7*10**(-1/6)*.005)
+            d=18.-sp.longitudinal_cover_in('beam')      # Eq. 3.20 uses s/d, d = h - d' (2026-10-23; s/h before)
+            self.assertAlmostEqual(a['lambda_opensees_rad'],170.7*.10**(3./d)*.005)
             with mock.patch.object(sp,'IMK_HINGE_STIFFNESS_FACTOR',200.):
                 self.assertEqual(a,c.deterioration_for_member('beam_x',0))
             self.assertTrue(a['deterioration_beam_extrapolation'])

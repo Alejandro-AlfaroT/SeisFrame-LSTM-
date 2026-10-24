@@ -6,9 +6,10 @@
 
 Each case runs Design/Grouped_Runner.py in its own process and directory (<output-root>/<case_id>); a case directory that
 already exists is left alone and reported as such (a changed input or budget takes a new root). The seed of every case
-follows the lever order of 2026-10-16: the first rung of the column and beam concrete ladders, a column of 18, 20 or
-24 in by story count, and the lightest beam rung that the two bay spans and the story height admit at about span / 12
-deep. The budgets are the search's; nothing here is a bound on any design.
+follows the lever order of 2026-10-16: the first rung of the special-frame column and beam concrete ladders (the
+gravity columns start at their own ladder's 5 ksi, Design/Concrete_Grades), a column of 18, 20 or 24 in by story count,
+and the lightest beam rung that the two bay spans and the story height admit at about span / 12 deep. The budgets are
+the search's; nothing here is a bound on any design.
 
 Outputs in the root: batch_log.txt (one line per finished case), summary.csv and summary.md (status, acceptance,
 checks, the four tie sections, the search outcome, the compatibility and gravity-branch results), and the manifest's

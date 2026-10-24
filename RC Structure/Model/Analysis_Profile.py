@@ -19,7 +19,7 @@ sources, fixtures and reference work stay in the repository and are simply not i
 What the profile does NOT do: it does not create clear spans or rigid end offsets (``rigid_centerline``
 is a centerline idealisation: beams and columns meet at one node), it does not defer joint DESIGN (joint
 shear, confinement, anchorage, bar fit and strong-column/weak-beam checks stay in the design loop), it
-does not certify the member energy mapping (``legacy_unmapped``, provisional) and it does not release
+does not certify the member energy mapping (``canonical_physical_orientation_baseline_v1``, provisional) and it does not release
 generation. The hinge rotation it produces is the total relative spring rotation of a member calibration
 that still contains Haselton's bar-slip share (a_sl = 1, Model/Deformation_Ownership); it is not
 experimentally isolated plastic flexure.
@@ -55,9 +55,10 @@ PROFILES = {
             "NTHA_HINGE_HISTORY_STRIDE": 1,
         },
         "required_state": {
-            # The corrected member energy mapping stays disabled until experimentally supported
-            # energies exist (user decision 2026-09-24); this profile neither enables nor certifies it.
-            "IMK_ENERGY_MAPPING_MODE": "legacy_unmapped",
+            # The experimentally calibrated member energy mapping stays disabled until experimentally supported
+            # energies exist (user decision 2026-09-24); this profile neither enables nor certifies it. Its member
+            # energies are the coordinate-invariant canonical baseline (V6 IMK audit correction, 2026-10-23).
+            "IMK_ENERGY_MAPPING_MODE": "canonical_physical_orientation_baseline_v1",
             "ASCE_RISK_CATEGORY": "III",
         },
         "explicit_face_slip_interfaces": False,
@@ -71,8 +72,11 @@ PROFILES = {
             "deferred": "IMKPinching joint springs and explicit face slip interfaces, with their calibration",
             "slip": ("the member hinge keeps Haselton's bar-slip share (a_sl = 1) because no face interface owns it; the "
                      "recorded quantity is total relative spring rotation, not isolated plastic flexure"),
-            "member_energy": ("legacy_unmapped mapping, provisional cyclic calibration; coordinate-orientation discrepancies "
-                              "of the member energy anchor are unresolved and not suppressed by this profile"),
+            "member_energy": ("canonical_physical_orientation_baseline_v1: every mode's reference energy is the base Lamda "
+                              "times the yield moment of one declared physical direction (the positive input at a "
+                              "canonically connected member's start end; hogging for a beam's vertical bending), so it "
+                              "does not depend on the spring's sign convention; the magnitudes are the provisional cyclic "
+                              "baseline, not an experimental calibration"),
             "fidelity": ("the benefit of calibrated pinching has not been established by a matched comparison; deferral does "
                          "not establish that its effect is negligible"),
             "release": "GENERATION_RELEASE_READY stays False; a profile is not a qualification",

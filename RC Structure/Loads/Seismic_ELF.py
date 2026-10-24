@@ -56,11 +56,11 @@ def floor_heights_ft():
 
 
 def design_period_sec(model_period_sec=None):
-    """ASCE 7-22 12.8.2: T is capped at Cu*Ta when a model period is used."""
+    """ASCE 7-22 12.8.2: T is capped at Cu*Ta when a model period is used, Cu from Table 12.8-1 at the site's SD1."""
     ta = sp.asce_approx_fundamental_period_sec()
     if model_period_sec is None or model_period_sec <= 0.0:
         return ta, ta, False
-    capped = min(float(model_period_sec), sp.ASCE_CU * ta)
+    capped = min(float(model_period_sec), sp.asce_cu() * ta)
     return capped, ta, capped < float(model_period_sec)
 
 
@@ -123,6 +123,8 @@ def elf_story_forces(model_period_sec=None):
         "asce_ta_sec": ta,
         "model_period_sec": model_period_sec,
         "period_capped_at_cu_ta": was_capped,
+        "cu": sp.asce_cu(),
+        "cu_rule": sp.ASCE_CU_RULE,
         "seismic_weight_kip": total_weight,
         "base_shear_kip": base_shear,
         "vertical_distribution_k": k,

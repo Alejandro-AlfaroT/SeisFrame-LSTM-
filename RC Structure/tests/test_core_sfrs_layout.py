@@ -136,9 +136,13 @@ class LayoutLadderSearchTests(unittest.TestCase):
 
         def search(cfg, state, policy, log_path, verbose):
             calls.append(state.policy_id)
-            # every attempt starts from the seed sections, never from what an earlier layout grew to
-            sections = {(d.b_in, d.h_in, d.fc_ksi) for d in state.designs.values() if d.is_column}
-            self.assertEqual(sections, {(24.0, 24.0, 6.0)}, state.policy_id)
+            # every attempt starts from the seed sections, never from what an earlier layout grew to; the grades follow the
+            # attempt's own roles (Design.Concrete_Grades): its special-frame columns at the seed's 6 ksi, the columns it
+            # leaves outside the SFRS at the gravity ladder's 5 ksi (2026-10-23)
+            for gid, d in state.designs.items():
+                if d.is_column:
+                    grade = 5.0 if state.system_of(gid) == mg.SYSTEM_GRAVITY else 6.0
+                    self.assertEqual((d.b_in, d.h_in, d.fc_ksi), (24.0, 24.0, grade), (state.policy_id, gid))
             found = mg.layout_of(state.policy_id) in feasible_at
             result = {"version": "test", "final": complete_evaluation(state) if found else None, "log": [{"index": 1}, {"index": 2}],
                       "stop": {"reason": "found" if found else "feasibility_no_growth_move"}, "counts": {"feasibility_candidates": 2},

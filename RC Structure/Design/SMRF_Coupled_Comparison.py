@@ -120,11 +120,18 @@ def coupled_sections_by_member():
     from Design import SMRF_Floor_Sections as floor_sections
     from Design.SMRF_Coupled_Analysis import BY_MEMBER_SCHEMA
     from Model import Member_Groups as mg
-    grades = {m.design.fc_ksi for m in mg.all_members("column")}
-    if len(grades) != 1:
-        raise mg.GroupedStateError(f"Column groups use different concrete grades {sorted(grades)}; this revision keeps one.")
+    # Each column at its own group's grade (special-frame and gravity columns differ, Design.Concrete_Grades): the
+    # column of story k at grid (i, j) supports floor k. One shared grade is also given when every column has it.
+    columns = mg.all_members("column")
+    by_floor = [[[None] * (sp.NUM_BAY_X + 1) for _j in range(sp.NUM_BAY_Y + 1)] for _k in range(sp.NUM_FLOOR)]
+    for member in columns:
+        by_floor[member.story_or_floor - 1][member.grid_j][member.grid_i] = float(member.design.fc_ksi)
+    if any(fc is None for floor in by_floor for row in floor for fc in row):
+        raise mg.GroupedStateError("Every column support of every floor needs its installed column's concrete grade.")
+    grades = {m.design.fc_ksi for m in columns}
     return {"schema": BY_MEMBER_SCHEMA, "floors": [floor_sections.for_floor(k) for k in range(1, sp.NUM_FLOOR + 1)],
-            "fc_col_ksi": grades.pop(), "beam_stiffness_modifier": 1.0, "column_stiffness_modifier": 1.0}
+            "fc_col_ksi": grades.pop() if len(grades) == 1 else None, "column_fc_ksi_by_floor": by_floor,
+            "beam_stiffness_modifier": 1.0, "column_stiffness_modifier": 1.0}
 
 
 def compare_transfer_to_coupled(slab_record, tolerance=DEFAULT_TOLERANCE, mesh_per_bay=None,

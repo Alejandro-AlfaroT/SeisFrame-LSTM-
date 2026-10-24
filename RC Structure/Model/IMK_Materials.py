@@ -25,6 +25,20 @@ MAPPING_VERSION = "explicit_reference_energy_v1"
 # batch: not an experimental calibration, not an ACI requirement and not a proven bound on response.
 PROVISIONAL_ANCHOR_VERSION = "provisional_min_yield_anchor_v1"
 PROVISIONAL_ANCHOR_STATUS = "provisional_research_not_experimentally_calibrated"
+# Coordinate-invariant canonical baseline (V6 IMK audit correction, 2026-10-23). OpenSees takes the reference
+# energy of every mode as Lamda times the POSITIVE-INPUT yield strength, and the legacy member mapping kept Lamda
+# when a beam's two physical branches swap between the input signs (hogging is the positive input at a member's
+# start end i, sagging at its end j), so the same physical hinge had two energies. This baseline carries explicit
+# physical energies instead: E_ref,m = Lamda_base,m * My of the CANONICAL physical direction, the branch that is
+# the positive input at the start end of a member connected along its positive global axis (hogging for a beam's
+# vertical bending; the section's positive direction for a symmetric spring), and installs
+# Lamda_m = E_ref,m / My_positive_input. It preserves the legacy energy of every start-end spring and of every
+# symmetric spring; at a beam's end j it replaces the sagging-anchored energy by the hogging-anchored one. The
+# magnitude is the existing provisional cyclic baseline, declared here: not the min-yield anchor, not an average
+# strength, and not an experimental calibration.
+CANONICAL_BASELINE_VERSION = "canonical_physical_orientation_baseline_v1"
+CANONICAL_BASELINE_STATUS = "provisional_baseline_not_experimentally_calibrated"
+CANONICAL_REFERENCE_DIRECTION = "positive_input_at_the_start_end_of_a_canonically_connected_member"
 
 
 def active_energy_modes(material_type):
@@ -204,21 +218,74 @@ def _map_physical_branches(material_type, positive, negative, cyclic, reverse, p
     return mapped_pos, mapped_neg, directional, record
 
 
+def _install_physical_energies(material_type, mat_tag, ke, positive, negative, cyclic, energies, *, reverse,
+                               physical_directions, provenance, mapping):
+    """The shared explicit-energy mapping: physical branches and directional D placed on the input coordinates,
+    and every mode's Lamda_m = E_ref,m / My_positive_input, so E_ref,m stays the given physical energy whichever
+    branch is the positive input. ``mapping`` is the record of where the energies came from."""
+    modes = active_energy_modes(material_type)
+    if set(energies) != set(modes):
+        raise ValueError(f"Explicit energy capacities must contain exactly {modes}")
+    for mode, value in energies.items():
+        _positive(f"E_ref_{mode}", value)
+    mapped_pos, mapped_neg, directional, record = _map_physical_branches(
+        material_type, positive, negative, cyclic, reverse, physical_directions)
+    mapped_cyclic = replace(cyclic, **{f"lamda_{mode.lower()}": energies[mode] / mapped_pos.fy for mode in modes},
+                            **directional)
+    mapped_provenance = {**provenance, "energy_mapping": {**mapping, **record}}
+    return define_rotational_imk(material_type, mat_tag, ke, mapped_pos, mapped_neg, mapped_cyclic,
+                                 provenance=mapped_provenance)
+
+
 def define_mapped_rotational_imk(material_type, mat_tag, ke, positive, negative, cyclic, *,
                                 calibration, reverse=False, physical_directions=("positive", "negative"),
                                 provenance, verification_only=False):
     """Map complete physical branches, directional D and mode energies together."""
     profile = validate_energy_calibration(calibration, material_type, verification_only=verification_only)
-    mapped_pos, mapped_neg, directional, record = _map_physical_branches(
-        material_type, positive, negative, cyclic, reverse, physical_directions)
-    mapped_cyclic = replace(cyclic,
-        **{f"lamda_{mode.lower()}": value / mapped_pos.fy
-           for mode, value in profile["energies_kip_in_rad"].items()},
-        **directional)
-    mapped_provenance = {**provenance, "energy_calibration": profile,
-        "energy_mapping": {"version": MAPPING_VERSION, **record, "verification_only": verification_only}}
-    return define_rotational_imk(material_type, mat_tag, ke, mapped_pos, mapped_neg, mapped_cyclic,
-                                 provenance=mapped_provenance)
+    return _install_physical_energies(material_type, mat_tag, ke, positive, negative, cyclic,
+                                      profile["energies_kip_in_rad"], reverse=reverse,
+                                      physical_directions=physical_directions,
+                                      provenance={**provenance, "energy_calibration": profile},
+                                      mapping={"version": MAPPING_VERSION, "verification_only": verification_only})
+
+
+def canonical_baseline_energies(material_type, positive, cyclic):
+    """{mode: E_ref} of the canonical baseline: the base Lamda of every mode (the suppressed large-capacity modes
+    included) times the yield moment of the canonical physical branch, ``positive``."""
+    positive.arguments()
+    cyclic.arguments(material_type)
+    return {mode: getattr(cyclic, f"lamda_{mode.lower()}") * positive.fy for mode in active_energy_modes(material_type)}
+
+
+def define_canonical_rotational_imk(material_type, mat_tag, ke, positive, negative, cyclic, *,
+                                   reverse=False, physical_directions=("positive", "negative"), provenance):
+    """Install a spring on the canonical physical-orientation baseline (CANONICAL_BASELINE_VERSION).
+
+    ``positive`` and ``negative`` are the PHYSICAL branches, ``positive`` being the canonical one (hogging for a
+    beam's vertical bending), and ``cyclic`` carries the base Lamda of every mode. ``reverse`` places the physical
+    negative branch on the positive input (a beam's end j). For every active mode
+
+        E_ref,m = Lamda_base,m * My_canonical
+        Lamda_installed,m = E_ref,m / My_positive_input
+
+    so E_ref,m does not depend on the spring's sign convention, the base Lamda is installed unchanged where the
+    canonical branch is the positive input, and each spring keeps its own physical strengths.
+    """
+    modes = active_energy_modes(material_type)
+    base = {mode: getattr(cyclic, f"lamda_{mode.lower()}") for mode in modes}
+    energies = canonical_baseline_energies(material_type, positive, cyclic)
+    return _install_physical_energies(
+        material_type, mat_tag, ke, positive, negative, cyclic, energies, reverse=reverse,
+        physical_directions=physical_directions, provenance={**provenance, "energy_mapping_status": CANONICAL_BASELINE_VERSION},
+        mapping={"version": CANONICAL_BASELINE_VERSION, "status": CANONICAL_BASELINE_STATUS,
+                 "reference_direction": CANONICAL_REFERENCE_DIRECTION,
+                 "canonical_physical_direction": physical_directions[0],
+                 "reference_moment_kip_in": positive.fy, "base_lamda_rad": base,
+                 "reference_energies_kip_in_rad": energies,
+                 "equations": ["E_ref,m = Lamda_base,m * My_canonical",
+                               "Lamda_installed,m = E_ref,m / My_positive_input"],
+                 "limits": ("declared provisional baseline: the existing cyclic magnitudes made independent of the "
+                            "local coordinates; not an experimental calibration of the energy magnitude")})
 
 
 def define_anchored_rotational_imk(material_type, mat_tag, ke, positive, negative, cyclic, *,

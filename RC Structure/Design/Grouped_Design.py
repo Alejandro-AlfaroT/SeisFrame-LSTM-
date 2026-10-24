@@ -786,7 +786,7 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
     solves = {"frame": 0, "floor_before": context.get("floor_solves", 0)}
     try:
         mg.install(state)
-        _require_common_grades(state)
+        _require_family_grades(state)
         slab = slab_stage(cfg, context)
         record["stages"]["slab"] = {"thickness_in": slab["slab"]["thickness_in"], "attempts": slab["attempts"],
                                     "distinct_floors": len(slab["description"]["distinct"]),
@@ -800,9 +800,10 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
                                                           sp.FLOOR_LIVE_LOAD_KSF * area)
         from Design.SMRF_Demands import REDUNDANCY_FACTOR_STRENGTH, live_load_patterns, strength_load_combinations
         try:
-            # Period, torsion assessment, strength combinations and drift on the design model of the installed
-            # policy: the continuous frame under the band policy, the released (perimeter-SFRS) frame under the
-            # system policy, where the seismic combinations superpose by member system (Design.Perimeter_Systems).
+            # The period is the entire structure's under every policy (the continuous frame). Torsion assessment,
+            # strength combinations and drift on the design model of the installed policy: the continuous frame
+            # under the band policy, the released (perimeter-SFRS) frame under the system policy, where the
+            # seismic combinations superpose by member system (Design.Perimeter_Systems).
             period = systems.model_period(state)
             solves["frame"] += 1
             strength = story_strength_distribution(cfg)
@@ -968,14 +969,11 @@ def install_evaluation(evaluation):
     return evaluation
 
 
-def _require_common_grades(state):
-    """One column grade and one beam grade in this revision (group-specific grades wait for joint material rules)."""
-    for kind, groups in (("column", [g for g in state.groups.values() if g["member_type"] == "column"]),
-                         ("beam", [g for g in state.groups.values() if g["member_type"] != "column"])):
-        grades = {state.designs[g["group_id"]].fc_ksi for g in groups}
-        if len(grades) != 1:
-            raise mg.GroupedStateError(f"{kind} groups use different concrete grades {sorted(grades)}; this revision keeps one "
-                                       f"{kind} grade for the whole frame.")
+def _require_family_grades(state, policy=None):
+    """One grade per grade family over the full height, the gravity families on their own ladder
+    (Design.Concrete_Grades; a saved record names the policy it was written under, the legacy rule when none)."""
+    from Design import Concrete_Grades as cg
+    cg.require(state, cg.POLICY_ID if policy is None else policy)
 
 
 def _section_table(state):

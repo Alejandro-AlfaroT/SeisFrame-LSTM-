@@ -80,6 +80,11 @@ BEAM_DEPTHS_IN = (16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 36.0)
 COLUMN_CONCRETE_STRENGTHS_KSI = (6.0, 7.0, 8.0, 9.0, 10.0)
 BEAM_CONCRETE_STRENGTHS_KSI = (5.0, 6.0, 8.0)
 CONCRETE_STRENGTHS_KSI = tuple(sorted(set(COLUMN_CONCRETE_STRENGTHS_KSI) | set(BEAM_CONCRETE_STRENGTHS_KSI)))
+# Gravity members of the two-system grouped design (user decision DEC-SFV6-GRAVITY-CONCRETE-20261023, 2026-10-23):
+# gravity columns and gravity beams take their own ladder, 5, 6 and 7 ksi, starting at 5 ksi and never above 7 ksi.
+# The ladders above stay the special moment frame ladders (and the uniform route's). Applied by Design.Concrete_Grades.
+GRAVITY_COLUMN_CONCRETE_STRENGTHS_KSI = (5.0, 6.0, 7.0)
+GRAVITY_BEAM_CONCRETE_STRENGTHS_KSI = (5.0, 6.0, 7.0)
 # Large geometry is the last resort (user decision 2026-10-03; the tallest frames are nine stories): a column
 # past this size is selected only after the top grade failed at or below it, and is reported as an exception.
 COLUMN_SIZE_LAST_RESORT_IN = 32.0

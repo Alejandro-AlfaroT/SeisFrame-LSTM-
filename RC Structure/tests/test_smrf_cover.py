@@ -78,10 +78,12 @@ class CoverTests(unittest.TestCase):
         expected = area * sp.FY_KSI * (15.5 - area * sp.FY_KSI
                                        / (1.7 * sp.FC_BEAM_KSI * 12))
         self.assertAlmostEqual(sp.beam_nominal_moment_y(), expected)
+        # Haselton (2008) Eq. 3.10: TOTAL longitudinal steel over b d (2026-10-23): the beam's 2 top and 2 bottom
+        # bars; the column's 4 + 4 face bars and 2 side bars on EACH side face (4 + 4 + 2 x 2 = 12)
         self.assertAlmostEqual(imk.longitudinal_steel_ratio("beam"),
-                               area / (12 * 15.5))
+                               4 * sp.rebar_area(6) / (12 * 15.5))
         self.assertAlmostEqual(imk.longitudinal_steel_ratio("column"),
-                               4 * sp.COL_BAR_AREA / (18 * 15.0))
+                               12 * sp.COL_BAR_AREA / (18 * 15.0))
 
     def test_column_steel_layers_match_actual_side_coordinates(self):
         layers = checks._col_steel_layers()

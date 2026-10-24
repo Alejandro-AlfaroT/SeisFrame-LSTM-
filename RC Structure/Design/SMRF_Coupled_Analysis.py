@@ -51,7 +51,9 @@ from Design.SMRF_Floor_Mesh import coupled_floor_mesh
 METHOD_VERSION = "smrf_monolithic_eccentric_shell_web_column_gravity_v5_explicit_mesh"
 # Sections of a grouped design (2026-10-02): every floor described line by line, in ascending floor order.
 # The beams of floor k and the columns of story k (the supports of floor k: the column below it) are that
-# floor's; one column concrete grade. {"schema", "floors": [by-line floor, ...], "fc_col_ksi", modifiers}.
+# floor's. {"schema", "floors": [by-line floor, ...], "fc_col_ksi", modifiers}, and optionally
+# "column_fc_ksi_by_floor" ([floor][j][i] grade of the column below each support, 2026-10-23: special-frame and
+# gravity columns may differ); without it every column takes "fc_col_ksi".
 BY_MEMBER_SCHEMA = "smrf_coupled_sections_by_member_v1"
 SECTION_ACTION_SCHEMA = "native_global_actions_applied_loads_and_constraint_actions_v2"
 INPLANE_RESTRAINTS = ("finite_membrane", "rigid_joints", "rigid_floor")
@@ -138,7 +140,16 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
     parsed = [_inputs(slab_record, geometry, sections, case, mesh_per_bay, allow_zero=True, mesh_spec=mesh_spec) for case in floor_loadcases]
     nx, ny, lx, ly, hs, fc, nu, mesh, _ = parsed[0]
     by_member = isinstance(sections, dict) and sections.get("schema") == BY_MEMBER_SCHEMA
-    fcc = _number(sections.get("fc_col_ksi"), "fc_col_ksi")
+    column_grades = sections.get("column_fc_ksi_by_floor") if by_member else None
+    if column_grades is not None:
+        if (not isinstance(column_grades, list) or len(column_grades) != nf
+                or any(not isinstance(rows, list) or len(rows) != ny + 1 for rows in column_grades)
+                or any(not isinstance(row, list) or len(row) != nx + 1 for rows in column_grades for row in rows)):
+            raise ValueError("column_fc_ksi_by_floor needs one grade per column support of every floor ([floor][j][i]).")
+        column_grades = [[[_number(fc, "column_fc_ksi_by_floor") for fc in row] for row in rows] for rows in column_grades]
+        fcc = None
+    else:
+        fcc = _number(sections.get("fc_col_ksi"), "fc_col_ksi")
     bm = _number(sections.get("beam_stiffness_modifier", 1.), "beam_stiffness_modifier")
     cm = _number(sections.get("column_stiffness_modifier", 1.), "column_stiffness_modifier")
     if by_member:
@@ -165,7 +176,8 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
 
         def column_of(k, i, j):
             col = floors[k-1]["supports"][j][i]
-            return _rectangle(col["b_in"], col["h_in"], fcc, cm, nu), col
+            fc_col = fcc if column_grades is None else column_grades[k-1][j][i]
+            return _rectangle(col["b_in"], col["h_in"], fc_col, cm, nu), col
     else:
         b = _number(sections.get("b_beam_in"), "b_beam_in")
         hb = _number(sections.get("h_beam_in"), "h_beam_in")

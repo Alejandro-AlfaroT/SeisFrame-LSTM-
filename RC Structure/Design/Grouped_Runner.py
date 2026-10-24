@@ -128,6 +128,16 @@ def _status(record, probe, probe_date, stages, stage_results):
     return status
 
 
+def _grades_row(record):
+    """{family: f'c} and the gravity beams' status for the result row (None for a record without a grade policy)."""
+    grades = (record.get("materials") or {}).get("concrete_grades")
+    if not grades:
+        return None
+    return {"policy": grades["policy"], "families": {family: row["fc_ksi"] for family, row in grades["families"].items()},
+            "gravity_beams_fc_ksi": grades["gravity_beams"]["fc_ksi"],
+            "gravity_beams_within_gravity_ladder": grades["gravity_beams"]["within_gravity_ladder"]}
+
+
 def write_summary(record, path):
     """Group-by-group sections and cages, quantities, margins and the candidate table, as plain Markdown."""
     lines = ["**Grouped design summary**", "",
@@ -147,6 +157,19 @@ def write_summary(record, path):
                      f"No. {design['stirrup_bar_size']} {design['stirrup_legs']} @ {design['stirrup_spacing_in']:g} | "
                      f"{amounts['concrete_in3'] / 46656.0:.1f} | {amounts['longitudinal_steel_in3'] * density:.0f} | "
                      f"{amounts['transverse_steel_in3'] * density:.0f} |")
+    grades = (record.get("materials") or {}).get("concrete_grades")
+    if grades:
+        lines += ["", "**Concrete grades by family**", "",
+                  f"Policy {grades['policy']}: one grade per family over the full height.", "",
+                  "| family | groups | f'c (ksi) | ladder (ksi) | at top rung |", "|---|---|---|---|---|"]
+        for family, row in grades["families"].items():
+            lines.append(f"| {family} | {row['groups']} | {'' if row['fc_ksi'] is None else format(row['fc_ksi'], 'g')} | "
+                         f"{', '.join(format(v, 'g') for v in row['ladder'])} | {'' if row['at_top_rung'] is None else row['at_top_rung']} |")
+        gravity_beams = grades["gravity_beams"]
+        if gravity_beams["groups"]:
+            lines += ["", f"Gravity beams: {gravity_beams['groups']} groups at {gravity_beams['fc_ksi']} ksi; on the gravity "
+                          f"ladder {gravity_beams['gravity_ladder']}: {gravity_beams['within_gravity_ladder']} "
+                          f"({gravity_beams['rule']})."]
     q = record["quantities"]
     total_steel = "not available (no slab layout)" if q["total_steel_in3"] is None else f"{q['total_steel_in3'] * density:.0f} lb"
     lines += ["", "**Quantities**", "",
@@ -281,6 +304,7 @@ def run(args):
                 "fail_ids": sorted({str(i).split(":")[0] for i in qualification.get("failed") or []}),
                 "not_evaluated_ids": sorted({str(i).split(":")[0] for i in qualification.get("not_evaluated") or []}),
                 "sections_by_group": {gid: [d["b_in"], d["h_in"], d["fc_ksi"]] for gid, d in record["member_groups"]["designs"].items()},
+                "concrete_grades": _grades_row(record),
                 "systems": None if not record.get("systems") else {
                     "ties": {tie: [t["design"]["b_in"], t["design"]["h_in"], t["design"]["fc_ksi"]] for tie, t in record["systems"]["ties"].items()},
                     "gravity_frame_branches": {gid: g["branch"] for gid, g in record["systems"]["gravity_frame"].items()},
@@ -289,6 +313,10 @@ def run(args):
                 "quantities": {k: v for k, v in record["quantities"].items() if k not in ("groups", "basis")},
                 "margins": record["margins"], "dcr": record["dcr"],
                 "model_period_sec": record["demand"]["model_period_sec"],
+                # the model that period is of: "all_frames" (the entire structure) since 2026-10-24; None for an
+                # earlier record, whose period was that of its lateral design model (systems.lateral_design_model)
+                "period_model": ((record.get("demand_basis") or {}).get("period_basis") or {}).get("period_model"),
+                "design_period_sec": (record.get("demand_basis") or {}).get("design_period_sec"),
                 "search": {k: record["search"][k] for k in ("stop_reason", "stop_detail", "counts", "elapsed_seconds", "policy")},
                 "tradeoffs_retained": len(record["search"]["tradeoffs"]),
                 "coupled_max_vertical_difference": (record.get("coupled_comparison") or {}).get("max_column_vertical_relative_difference"),
@@ -330,9 +358,11 @@ def build_parser():
     parser.add_argument("--profile", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--output-dir", default=None, help="A new directory for this attempt (required unless --plan-only).")
     parser.add_argument("--seed-column", nargs=3, type=float, metavar=("B", "H", "FC"), default=None,
-                        help="Seed column section for every column group: b h fc (in, in, ksi); square.")
+                        help="Seed column section for every column group: b h fc (in, in, ksi); square. Under a two-system "
+                             "policy fc is the special-frame columns' starting grade; the gravity columns start at 5 ksi "
+                             "(Design/Concrete_Grades).")
     parser.add_argument("--seed-beam", nargs=3, type=float, metavar=("B", "H", "FC"), default=None,
-                        help="Seed beam section for every beam group: b h fc (in, in, ksi).")
+                        help="Seed beam section for every beam group: b h fc (in, in, ksi); fc is the shared beam grade.")
     parser.add_argument("--seed-design", default=None, help="A saved uniform design.json of the same case, expanded into its groups.")
     parser.add_argument("--grouping", default=DEFAULT_GROUPING, choices=GROUPINGS,
                         help="Grouping policy: the two-system policy (perimeter special moment frames and an interior gravity "

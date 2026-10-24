@@ -222,8 +222,8 @@ class AnchoredProfileTests(unittest.TestCase):
             self.assertIn("not an experimental calibration", identity["declarations"]["member_energy"])
             self.assertIn("P-M-M", identity["declarations"]["columns"])
             with self.assertRaises(ValueError):
-                ap.apply_profile(ap.V2_FLEXURE)                    # the screening profile requires the legacy mapping
-            sp.IMK_ENERGY_MAPPING_MODE = "legacy_unmapped"
+                ap.apply_profile(ap.V2_FLEXURE)                    # the screening profile requires the canonical baseline
+            sp.IMK_ENERGY_MAPPING_MODE = "canonical_physical_orientation_baseline_v1"
             screening = ap.apply_profile(ap.V2_FLEXURE)
             self.assertNotEqual(screening["sha256"], identity["sha256"])
             if before is not None:

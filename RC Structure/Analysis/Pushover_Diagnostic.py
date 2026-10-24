@@ -160,7 +160,8 @@ def pattern_weights(settings):
         raw = list(elf["story_forces_kip"])
         basis = {"kind": "ASCE 7-22 12.8.3 vertical distribution", "design_period_sec": elf["design_period_sec"],
                  "vertical_distribution_k": elf["vertical_distribution_k"], "asce_ta_sec": elf["asce_ta_sec"],
-                 "period_capped_at_cu_ta": elf["period_capped_at_cu_ta"], "elf_base_shear_kip": elf["base_shear_kip"]}
+                 "period_capped_at_cu_ta": elf["period_capped_at_cu_ta"], "cu": elf["cu"], "cu_rule": elf["cu_rule"],
+                 "elf_base_shear_kip": elf["base_shear_kip"]}
     elif settings.load_pattern == "uniform":
         raw = [1.0] * n
         basis = {"kind": "uniform: equal force at every floor"}

@@ -14,9 +14,13 @@ from Model.IMK_Calibration import (
     column_pm_nominal,
 )
 from Model.IMK_Materials import (
-    MAPPING_VERSION, PROVISIONAL_ANCHOR_VERSION, CyclicParameters, RotationalBackbone, active_energy_modes,
-    define_rotational_imk, define_anchored_rotational_imk, define_mapped_rotational_imk, validate_energy_calibration,
+    CANONICAL_BASELINE_VERSION, MAPPING_VERSION, PROVISIONAL_ANCHOR_VERSION, CyclicParameters, RotationalBackbone,
+    active_energy_modes, define_rotational_imk, define_anchored_rotational_imk, define_canonical_rotational_imk,
+    define_mapped_rotational_imk, validate_energy_calibration,
 )
+# Energy mappings that derive each spring's physical reference energy from its own physical branches (no supplied
+# profile): they need the member's canonical connectivity to place the branches on the input coordinates.
+DERIVED_ENERGY_MODES = (CANONICAL_BASELINE_VERSION, PROVISIONAL_ANCHOR_VERSION)
 
 
 # Per-hinge backbones recorded as the model is built, keyed by physical
@@ -391,13 +395,18 @@ def _orientation(member_type):
 def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone=None,
                               yield_moment_negative=None, *, energy_calibration=None,
                               reverse_physical=False, physical_directions=("section_positive", "section_negative"),
-                              verification_only=False, spring_context=None, anchored=False):
+                              verification_only=False, spring_context=None, anchored=False, canonical=False, axis=None):
     """Install a member material with its explicit, modern OpenSees signature.
 
     The historical function name is retained for callers. Only Bilin and
     PeakOriented are member options; a joint Pinching spring requires its own
     topology and calibration. Legacy calls pass Lamda unchanged. The corrected
-    path derives every Lamda from an explicit reviewed reference energy.
+    path derives every Lamda from an explicit reviewed reference energy; the
+    canonical baseline (``canonical``) and the min-yield anchor (``anchored``)
+    derive it from the spring's own PHYSICAL branches, passed as
+    (yield_moment, yield_moment_negative) with ``reverse_physical`` placing them.
+    ``axis`` ("y" or "z") selects that spring's Eq. 3.20 deterioration when the
+    backbone carries one per axis (s/d of the spring's own bending depth).
     """
     material_type = sp.IMK_MATERIAL_TYPE
     if material_type not in ("IMKBilin", "IMKPeakOriented"):
@@ -423,7 +432,11 @@ def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone
     # constants are passed unchanged. Either way Lamda is a command-level
     # value here (E_ref = Lamda * My), never multiplied by a rotation again.
     modes = active_energy_modes(material_type)
-    by_mode = (backbone or {}).get("lambda_opensees_by_mode_rad")
+    by_axis = (backbone or {}).get("deterioration_by_axis")
+    if by_axis is not None and axis is not None:
+        by_mode = by_axis[axis]["lambda_opensees_by_mode_rad"]       # this spring's own s/d (Eq. 3.20)
+    else:
+        by_mode = (backbone or {}).get("lambda_opensees_by_mode_rad")
     if by_mode is None and (backbone or {}).get("lambda_opensees_rad") is not None:
         # One translated value for every mode (the desktop's uniform form).
         by_mode = {mode: backbone["lambda_opensees_rad"] for mode in modes}
@@ -467,6 +480,10 @@ def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone
         provenance["deterioration"] = {key: backbone[key] for key in backbone
                                        if key.startswith("deterioration_") or key.startswith("lambda_")
                                        or key == "energy_reference_member_theta_y_rad"}
+        if axis is not None:
+            provenance["deterioration"]["spring_axis"] = axis
+    if (backbone or {}).get("theta_p_longitudinal_steel") is not None:
+        provenance["theta_p_longitudinal_steel"] = backbone["theta_p_longitudinal_steel"]
     if spring_context is not None:
         provenance["spring_context"] = spring_context
     args = (material_type, mat_tag, elastic_stiffness, branch("POS", yield_moment),
@@ -475,6 +492,10 @@ def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone
         return define_mapped_rotational_imk(*args, calibration=energy_calibration,
             reverse=reverse_physical, physical_directions=physical_directions,
             provenance=provenance, verification_only=verification_only)
+    if canonical:
+        # The strengths passed are the PHYSICAL branches, the canonical one first.
+        return define_canonical_rotational_imk(*args, reverse=reverse_physical,
+            physical_directions=physical_directions, provenance=provenance)
     if anchored:
         # The strengths passed are the PHYSICAL branches; the adapter places them on the input coordinates.
         return define_anchored_rotational_imk(*args, reverse=reverse_physical,
@@ -520,7 +541,8 @@ def _create_released_end_hinge(ele_tag, end_id, retained_node, hinge_node, membe
 
 def _create_end_hinge(
     ele_tag, end_id, retained_node, hinge_node, member_type, props, length, backbone=None,
-    *, energy_profiles=None, reverse_physical=False, verification_only=False, anchored=False, released=False
+    *, energy_profiles=None, reverse_physical=False, verification_only=False, anchored=False, released=False,
+    canonical=False
 ):
     if released:
         return _create_released_end_hinge(ele_tag, end_id, retained_node, hinge_node, member_type, props, length)
@@ -553,25 +575,29 @@ def _create_end_hinge(
         positive, negative = hogging, sagging
     else:
         positive, negative = sagging, hogging
+    # The physical directions, the canonical one first: hogging for a beam's vertical bending (the positive
+    # input at the start end i of a canonically connected member), the section's positive direction otherwise.
     directions_y = (("hogging", "sagging") if member_type.startswith("beam")
                     else ("section_positive_y", "section_negative_y"))
-    if energy_profiles is None and anchored:
-        material_y = _define_imk_peak_material(mat_y, ke_y, hogging, backbone, sagging, anchored=True,
-            reverse_physical=reverse_physical, physical_directions=directions_y, spring_context=contexts[0])
-        material_z = _define_imk_peak_material(mat_z, ke_z, props["mz"], backbone, anchored=True,
+    if energy_profiles is None and (anchored or canonical):
+        material_y = _define_imk_peak_material(mat_y, ke_y, hogging, backbone, sagging, anchored=anchored,
+            canonical=canonical, reverse_physical=reverse_physical, physical_directions=directions_y,
+            spring_context=contexts[0], axis="y")
+        material_z = _define_imk_peak_material(mat_z, ke_z, props["mz"], backbone, anchored=anchored, canonical=canonical,
             reverse_physical=reverse_physical, physical_directions=("section_positive_z", "section_negative_z"),
-            spring_context=contexts[1])
+            spring_context=contexts[1], axis="z")
     elif energy_profiles is None:
-        material_y = _define_imk_peak_material(mat_y, ke_y, positive, backbone, negative, spring_context=contexts[0])
-        material_z = _define_imk_peak_material(mat_z, ke_z, props["mz"], backbone, spring_context=contexts[1])
+        material_y = _define_imk_peak_material(mat_y, ke_y, positive, backbone, negative, spring_context=contexts[0],
+                                               axis="y")
+        material_z = _define_imk_peak_material(mat_z, ke_z, props["mz"], backbone, spring_context=contexts[1], axis="z")
     else:
         material_y = _define_imk_peak_material(mat_y, ke_y, hogging, backbone, sagging,
             energy_calibration=energy_profiles["y"], reverse_physical=reverse_physical,
-            physical_directions=directions_y, verification_only=verification_only, spring_context=contexts[0])
+            physical_directions=directions_y, verification_only=verification_only, spring_context=contexts[0], axis="y")
         material_z = _define_imk_peak_material(mat_z, ke_z, props["mz"], backbone,
             energy_calibration=energy_profiles["z"], reverse_physical=reverse_physical,
             physical_directions=("section_positive_z", "section_negative_z"),
-            verification_only=verification_only, spring_context=contexts[1])
+            verification_only=verification_only, spring_context=contexts[1], axis="z")
 
     ops.element(
         "zeroLength",
@@ -596,8 +622,8 @@ def _member_energy_profiles(ele_tag, verification_profiles=None):
         if mode != MAPPING_VERSION:
             raise ValueError("Synthetic member fixtures require explicit corrected mapping mode")
         profiles = verification_profiles
-    elif mode in ("legacy_unmapped", PROVISIONAL_ANCHOR_VERSION):
-        return None                      # neither reads a supplied profile; the anchor is derived per spring
+    elif mode == "legacy_unmapped" or mode in DERIVED_ENERGY_MODES:
+        return None                      # none reads a supplied profile; the derived modes work per spring
     elif mode == MAPPING_VERSION:
         profiles = sp.IMK_MEMBER_ENERGY_CALIBRATIONS.get(str(ele_tag))
     else:
@@ -611,6 +637,21 @@ def _member_energy_profiles(ele_tag, verification_profiles=None):
         validated[end] = {axis: validate_energy_calibration(profiles[end][axis], sp.IMK_MATERIAL_TYPE,
                            verification_only=verification_profiles is not None) for axis in ("y", "z")}
     return validated
+
+
+def _beam_bar_rows(member_type, strength_basis, family):
+    """The bar rows a beam's yield moments were computed on ({"top": {"centroid_in"}, "bottom": {...}}), for the
+    effective depths of Haselton's Eq. 3.10 and 3.20: a grouped member's own rows (Model/Member_Properties
+    .beam_strengths), the uniform beam's rows for its line's axis (beam_yield_moments). None for a column, and for a
+    beam without a slab (one symmetric layer at the first-layer offset, which the calibration then states)."""
+    if member_type not in ("beam_x", "beam_y") or sp.SLAB_THICKNESS_IN is None:
+        return None
+    if strength_basis is not None and strength_basis.get("bar_rows") is not None:
+        return strength_basis["bar_rows"]
+    if mg.is_grouped():
+        return None
+    axis = (family or "").split("_")[0] or member_type[-1]
+    return sp.beam_bar_layers()[axis]
 
 
 def _canonical_member_reversed(n_i, n_j, member_type):
@@ -635,10 +676,11 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
     # Validate all four profiles before mutating the OpenSees domain. Normal
     # builders never pass the private synthetic-fixture argument.
     energy_profiles = _member_energy_profiles(ele_tag, _verification_calibrations)
-    anchored = (energy_profiles is None
-                and getattr(sp, "IMK_ENERGY_MAPPING_MODE", "legacy_unmapped") == PROVISIONAL_ANCHOR_VERSION)
+    mapping_mode = getattr(sp, "IMK_ENERGY_MAPPING_MODE", "legacy_unmapped")
+    anchored = energy_profiles is None and mapping_mode == PROVISIONAL_ANCHOR_VERSION
+    canonical = energy_profiles is None and mapping_mode == CANONICAL_BASELINE_VERSION
     reverse_connectivity = (_canonical_member_reversed(n_i, n_j, member_type)
-                            if energy_profiles is not None or anchored else False)
+                            if energy_profiles is not None or anchored or canonical else False)
     # A column's backbone depends on how hard it is being squeezed, so the
     # gravity axial load is estimated from tributary area before its hinge
     # properties are fixed. Beams carry no meaningful axial force.
@@ -673,8 +715,9 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
     # calibrated separately even though they share the axial load.
     from Model.Deformation_Ownership import member_end, ownership
     ends = {"i": member_end(ele_tag, member_type, "i", joint_i), "j": member_end(ele_tag, member_type, "j", joint_j)}
+    rows = _beam_bar_rows(member_type, strength_basis, None if member is not None else props.get("family"))
     backbones = {end: backbone_for_member(member_type, axial_kip=axial_kip, end=ends[end], member_scope=_member_scope,
-                                          design=design)
+                                          design=design, rows=rows)
                  for end in ("i", "j")}
     backbone = backbones["i"]
     length = _member_length(n_i, n_j)
@@ -687,11 +730,11 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
     materials_i = _create_end_hinge(ele_tag, 1, n_i, i_hinge_node, member_type, props, length, backbones["i"],
         energy_profiles=None if energy_profiles is None else energy_profiles["i"],
         reverse_physical=reverse_connectivity, verification_only=_verification_calibrations is not None,
-        anchored=anchored, released=released)
+        anchored=anchored, released=released, canonical=canonical)
     materials_j = _create_end_hinge(ele_tag, 2, n_j, j_hinge_node, member_type, props, length, backbones["j"],
         energy_profiles=None if energy_profiles is None else energy_profiles["j"],
         reverse_physical=not reverse_connectivity, verification_only=_verification_calibrations is not None,
-        anchored=anchored, released=released)
+        anchored=anchored, released=released, canonical=canonical)
 
     ke_y = imk_hinge_stiffness(member_type, "rot_y", length, props=props)
     ke_z = imk_hinge_stiffness(member_type, "rot_z", length, props=props)

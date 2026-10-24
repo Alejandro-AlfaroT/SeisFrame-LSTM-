@@ -163,8 +163,12 @@ class GradeInTheChecksTests(GradeStateCase):
         from Design.Config import DesignConfig
         sp.apply_reinforcement_grade(story_h_in=192.0)
         cfg = DesignConfig.from_structure_parameters()
+        from Model import Member_Groups as mg
+        # The record's materials also carry the grades by family (Design.Concrete_Grades, 2026-10-23), read under the
+        # state's grouping policy: the band policy here.
         state = SimpleNamespace(groups={"c": {"group_id": "c", "member_type": "column"}, "b": {"group_id": "b", "member_type": "beam"}},
-                                designs={"c": SimpleNamespace(fc_ksi=6.0), "b": SimpleNamespace(fc_ksi=5.0)})
+                                designs={"c": SimpleNamespace(fc_ksi=6.0), "b": SimpleNamespace(fc_ksi=5.0)},
+                                policy_id=mg.POLICY_ID)
         material = gr._materials(cfg, state)
         self.assertEqual((material["fy_ksi"], material["fyt_ksi"]), (80.0, 60.0))
         self.assertEqual(material["reinforcement_specification"], "ASTM A706 Grade 80")

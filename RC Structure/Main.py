@@ -1,5 +1,4 @@
-"""Design one building with the current methodology and check it on the nonlinear model (rewritten 2026-10-23).
-
+"""
 Main.py designs a single structure on the grouped two-system route that the design batches use: perimeter special
 moment frames are the seismic force-resisting system and every other beam and column is a gravity member. Members are
 grouped by three-story band and plan location, and the groups of one system tie (special-frame or gravity, column or
@@ -9,7 +8,11 @@ with the Grade 80 retry and the core-layout ladder (perimeter + core ring, then 
 The selected design is then built as the nonlinear IMK model and run through gravity and modal analysis.
 
 Progress is printed live: the search prints one line per candidate as it is decided, and a heartbeat line every
-``--heartbeat-seconds`` gives the elapsed time, the stage and the number of candidates decided so far.
+``--heartbeat-seconds`` gives the elapsed time, the stage and the number of candidates decided so far. The banner
+gives the building's ASCE 7-22 approximate fundamental period (Ta = Ct hn^x, 12.8.2.1) and its upper limit Cu Ta
+(Cu from Table 12.8-1) before the design starts; the end-of-run report gives the first period of the entire
+structure in Ta, the ELF design period recorded in grouped_design.json and, when the gravity and modal stage ran,
+the nonlinear model's first period in Ta. The period is the entire structure's, never one system's.
 
     & "$env:USERPROFILE\\anaconda3\\envs\\OpPy\\python.exe" -X utf8 -B Main.py
     & "$env:USERPROFILE\\anaconda3\\envs\\OpPy\\python.exe" -X utf8 -B Main.py --bays-x 5 --bays-y 4 --floors 6 `
@@ -38,10 +41,6 @@ every member while writing global_parameters.json); the two time-history tests o
 on it. The hybrid training sample (Hybrid_Exporter) and the uniform driver Ground_Motion_Main.main also refuse grouped
 designs.
 
-The legacy single-building route is gone: Main.py no longer reads Structure_Parameters.ANALYSIS_METHOD, the NTHA_*
-record settings or the RC_* environment geometry (Geometry_Overrides.apply_geometry_from_environment), and it no longer
-runs the pushover redesign loop or writes the fixed-name files directly in outputs/. The building comes from CASE or
-the command-line options below. The earlier Main.py is in the git history (commit f5734c5c and before).
 """
 from __future__ import annotations
 
@@ -243,6 +242,104 @@ def method_text(grouping):
     return f"grouped two-system design: {frames} + interior gravity system; one design per system tie, {bands}"
 
 
+def grade_policy_text(grouping):
+    """The concrete grade families of the grouping policy (Design/Concrete_Grades), for the banner."""
+    from Design import Concrete_Grades as cg
+    from Model import Member_Groups as mg
+    policy_id = mg.default_system_policy() if grouping == "auto" else grouping
+    parts = []
+    for family, spec in cg.families(policy_id).items():
+        start = "the seed's grade" if spec["start_ksi"] is None else f"{spec['start_ksi']:g} ksi"
+        parts.append(f"{family} {'/'.join(format(v, 'g') for v in spec['ladder'])} ksi from {start}")
+    return "; ".join(parts) + " (one grade per family)"
+
+
+def approximate_period(case):
+    """ASCE 7-22 12.8.2 for the case, from its geometry and site alone (so it is known before the design runs).
+
+    The period is the entire structure's, not one system's (user decision 2026-10-24): Ta = Ct hn^x (Eq. 12.8-8) with
+    hn the roof height (11.2) and Ct, x of Table 12.8-2's concrete moment-resisting frames, which the whole structure
+    is (the special moment frames and the gravity frames alike; bare frames, no infill or walls: assumed, not
+    checked); the upper limit Cu Ta (12.8.2) with Cu from Table 12.8-1 at the site's SD1 (Structure_Parameters.asce_cu,
+    the value the design uses); and Ta = 0.1 N (Eq. 12.8-9), which is permitted up to 12 stories with stories of at
+    least 10 ft but not used by the design. The period the design used is in its record (demand_basis), shown by
+    print_report.
+    """
+    import Structure_Parameters as sp
+    sd1 = {label: value for label, _sds, value, _s1 in sp.SEISMIC_SITE_OPTIONS}[case["seismic_site"]]
+    hn = case["num_floor"] * case["story_height_ft"]
+    ta = sp.ASCE_PERIOD_CT * hn ** sp.ASCE_PERIOD_EXPONENT
+    cu, cu_read = sp.asce_cu_table_12_8_1(sd1)
+    alternative = case["num_floor"] <= 12 and case["story_height_ft"] >= 10.0
+    return {"hn_ft": hn, "ct": sp.ASCE_PERIOD_CT, "x": sp.ASCE_PERIOD_EXPONENT, "ta_sec": ta, "sd1_g": sd1,
+            "cu": cu, "cu_read": cu_read, "cu_ta_sec": cu * ta,
+            "ta_0p1n_sec": 0.1 * case["num_floor"] if alternative else None}
+
+
+def period_lines(period):
+    """The banner's lines for approximate_period(case)."""
+    lines = [f"Period      Ta = Ct hn^x = {period['ct']:g} x {period['hn_ft']:g}^{period['x']:g} = {period['ta_sec']:.3f} s "
+             "(ASCE 7-22 Eq. 12.8-8; entire structure, concrete moment frames, Table 12.8-2)",
+             f"            upper limit Cu Ta = {period['cu']:.3g} x {period['ta_sec']:.3f} = {period['cu_ta_sec']:.3f} s (12.8.2); "
+             f"Cu from Table 12.8-1 at SD1 {period['sd1_g']:g} g ({period['cu_read']})"]
+    if period["ta_0p1n_sec"] is not None:
+        lines.append(f"            Ta = 0.1 N = {period['ta_0p1n_sec']:.2f} s (Eq. 12.8-9) is permitted for this building but not used")
+    return lines
+
+
+def design_period_basis(out_dir):
+    """The period the design used, from its record: (model T or None, Ta, Cu, ELF design period, capped, period model),
+    or None when the folder holds no record or the record carries no ELF result. Records made before 2026-10-24 name
+    no period model (their period was that of their lateral design model, systems.lateral_design_model, or the
+    continuous frame without a systems block) and keep their Cu in the request identity (a fixed 1.4 then)."""
+    try:
+        record = json.loads((Path(out_dir) / "grouped_design.json").read_text(encoding="utf-8"))
+        basis = record["demand_basis"]
+        period = basis["period_basis"]
+        cu = period.get("cu")
+        if cu is None:
+            cu = record["request_identity"]["inputs"]["ASCE_CU"]
+        model, ta, used = period["model_period_sec"], period["asce_ta_sec"], basis["design_period_sec"]
+        capped, period_model = bool(period["capped_at_cu_ta"]), period.get("period_model")
+        if period_model is None:              # before 2026-10-24: the period of the record's lateral design model
+            period_model = (record.get("systems") or {}).get("lateral_design_model") or "all_frames"
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if not all(isinstance(value, (int, float)) and value > 0 for value in (ta, cu, used)):
+        return None
+    return (model if isinstance(model, (int, float)) and model > 0 else None), ta, cu, used, capped, period_model
+
+
+def period_report_lines(model_period, basis, modal_check):
+    """The report's period lines: the design model's first period against Ta (the entire structure's, from the
+    record's period model), the ELF design period of the record (design_period_basis), and the nonlinear model's
+    first period against Ta (the gravity and modal stage)."""
+    import Structure_Parameters as sp
+    low, high = sp.ASCE_PERIOD_WARN_RATIO_LOW, sp.ASCE_PERIOD_WARN_RATIO_HIGH
+    line = f"Period      design model {'?' if model_period is None else format(model_period, '.3f')} s"
+    if basis and model_period is not None:
+        ratio = model_period / basis[1]
+        which = {"all_frames": "entire structure",
+                 "perimeter_sfrs": "released perimeter-SFRS model, a record made before 2026-10-24"}.get(basis[5], basis[5])
+        line += (f" = {ratio:.2f} Ta (first mode, {which}; {'inside' if low <= ratio <= high else 'outside'} "
+                 f"the {low:g}-{high:g} Ta sanity band)")
+    lines = [line]
+    if basis:
+        model, ta, cu, used, capped, _period_model = basis
+        how = (f"the model's {model:.3f} s capped at Cu Ta, 12.8.2" if capped
+               else "no model period: Ta used directly, 12.8.2" if model is None
+               else "the model period, not above Cu Ta")
+        lines.append(f"            Ta {ta:.3f} s; Cu Ta = {cu:.3g} x {ta:.3f} = {cu * ta:.3f} s; ELF design period {used:.3f} s "
+                     f"({how}; one period for both X and Y)")
+    if (modal_check or {}).get("period_ratio_to_asce_ta") is not None:
+        lines.append(f"            nonlinear model (every frame resisting): first period {modal_check['model_period_sec']:.3f} s = "
+                     f"{modal_check['period_ratio_to_asce_ta']:.2f} Ta; inside the "
+                     f"{modal_check.get('warn_ratio_low') or low:g}-{modal_check.get('warn_ratio_high') or high:g} Ta sanity band: "
+                     f"{modal_check.get('passes_reasonableness_check')}"
+                     + (f" ({modal_check['warning']})" if modal_check.get("warning") else ""))
+    return lines
+
+
 def print_banner(args, case, seed_column, seed_beam, out_dir, notes):
     import Structure_Parameters as sp
     site = {label: (sds, sd1, s1) for label, sds, sd1, s1 in sp.SEISMIC_SITE_OPTIONS}[case["seismic_site"]]
@@ -258,12 +355,15 @@ def print_banner(args, case, seed_column, seed_beam, out_dir, notes):
     print(f"            height {height:g} ft; plan {plan_x:g} x {plan_y:g} ft; height / least plan width {height / min(plan_x, plan_y):.2f}")
     print(f"Hazard      {case['seismic_site']} (SDS {site[0]:g} g, SD1 {site[1]:g} g, S1 {site[2]:g} g); "
           f"Risk Category {sp.ASCE_RISK_CATEGORY}")
+    for line in period_lines(approximate_period(case)):
+        print(line)
     print(f"Method      {method_text(args.grouping)}")
     print(f"            {slab}; grouping {args.grouping}; analysis profile {args.profile}")
     print(f"Search      seed column {seed_column[0]:g} x {seed_column[1]:g} in, fc {seed_column[2]:g} ksi; "
           f"seed beam {seed_beam[0]:g} x {seed_beam[1]:g} in, fc {seed_beam[2]:g} ksi")
     print(f"            budgets {args.max_feasibility_trials} feasibility and {args.max_reduction_trials} reduction evaluations"
           + ("; Grade 80 retry off" if args.no_grade80_retry else ""))
+    print(f"Concrete    {grade_policy_text(args.grouping)}")
     print(f"Assertions  PROBE values dated {args.probe_date} (let the slab and joint design path run; verify nothing)")
     print(f"Stages      design{'' if args.design_only else ' -> gravity and modal analysis on the nonlinear model'}")
     print(f"Population  " + ("member of the V2 population" if not notes else "outside the V2 population: " + "; ".join(notes)))
@@ -308,6 +408,13 @@ def print_report(result, out_dir):
             print("Ties        tie                             b x h (in)     fc (ksi)")
             for tie, (b, h, fc) in sorted(ties.items()):
                 print(f"            {tie:<31} {b:g} x {h:g}{'':<8} {fc:g}")
+        grades = result.get("concrete_grades")
+        if grades:
+            print("Concrete    " + "; ".join(f"{family} {'-' if fc is None else format(fc, 'g')} ksi"
+                                             for family, fc in grades["families"].items()))
+            if grades.get("gravity_beams_fc_ksi") is not None:
+                print(f"            gravity beams at {grades['gravity_beams_fc_ksi']} ksi (shared beam grade); on the gravity "
+                      f"ladder 5-7 ksi: {grades.get('gravity_beams_within_gravity_ladder')}")
         groups = result.get("sections_by_group") or {}
         print(f"Groups      {len(groups)} member groups (sections and cages by group in grouped_summary.md)")
         quantities = result.get("quantities") or {}
@@ -315,13 +422,14 @@ def print_report(result, out_dir):
             print(f"Quantities  concrete {quantities.get('concrete_total_yd3', float('nan')):.1f} yd3; "
                   f"frame steel {quantities.get('frame_steel_lb', float('nan')) / 2000.0:.1f} t; "
                   f"distinct form sizes {quantities.get('distinct_form_size_count')}")
-        period = result.get("model_period_sec")
-        print(f"Period      design model {'?' if period is None else format(period, '.3f')} s")
         stage = (result.get("stage_results") or {}).get("gravity_modal")
+        modal = (stage or {}).get("modal") or {}
+        for line in period_report_lines(result.get("model_period_sec"), design_period_basis(out_dir) if out_dir else None,
+                                        modal.get("asce_reference_period_check")):
+            print(line)
         if stage:
             print(f"Gravity     stage {stage.get('status')}; all checks pass: {stage.get('all_checks_pass')}; {stage.get('checks')}"
                   + (f"; error {stage.get('error')}" if stage.get("error") else ""))
-            modal = stage.get("modal") or {}
             if modal:
                 periods = ", ".join(f"{p:.3f}" for p in modal.get("periods_elastic_reference_sec") or [])
                 tangent = ", ".join(f"{p:.3f}" for p in modal.get("periods_post_gravity_tangent_sec") or [])

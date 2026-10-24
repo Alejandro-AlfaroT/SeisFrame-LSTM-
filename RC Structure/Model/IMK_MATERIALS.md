@@ -83,11 +83,13 @@ scientific validity or production acceptance.
 ### Explicit-energy mapping (2026-09-24)
 
 The user requires **experimentally supported reference-energy capacities
-before enabling the corrected structural member model**. The default remains
-`IMK_ENERGY_MAPPING_MODE = "legacy_unmapped"`, with an empty
-`IMK_MEMBER_ENERGY_CALIBRATIONS`. This preserves the historical diagnostic
-baseline, including its known coordinate-dependent energy limitation. It is
-not an accepted corrected model. Production release remains false.
+before enabling the corrected structural member model**, so
+`IMK_MEMBER_ENERGY_CALIBRATIONS` stays empty and the experimental mode stays
+disabled. Since 2026-10-23 the default is the canonical physical-orientation
+baseline below (`IMK_ENERGY_MAPPING_MODE =
+"canonical_physical_orientation_baseline_v1"`); `"legacy_unmapped"` remains
+selectable to reproduce the historical coordinate-dependent energies. Neither
+is an accepted corrected model. Production release remains false.
 
 The implemented optional mode is `explicit_reference_energy_v1`.
 `define_mapped_rotational_imk` receives physical positive/negative backbones,
@@ -135,6 +137,54 @@ calibration identity. Native directions 4/5/6 are rotation about local X/Y/Z.
 The measured spring rotation is the projected relative nodal rotation; it is
 not automatically member chord rotation, accumulated plastic rotation or joint
 shear distortion. The deformation-partition research task remains open.
+
+### Canonical physical-orientation baseline (2026-10-23)
+
+`define_canonical_rotational_imk` installs the existing Haselton Lamda
+magnitudes as explicit physical reference energies, through the same branch
+mapping as the explicit-energy mode:
+
+    E_ref,m           = Lamda_base,m * My_canonical
+    Lamda_installed,m = E_ref,m / My_positive_input
+
+The canonical direction is the positive input at the start end of a
+canonically connected member: hogging for a beam's vertical bending, the
+section's positive branch for the symmetric column and beam-lateral springs.
+End-i springs and symmetric springs therefore install exactly the legacy
+Lamda; an end-j beam vertical spring installs Lamda x My_hogging /
+My_sagging, so both ends carry the same physical energy whatever the node
+order or sign convention. Each spring keeps its own strengths; the suppressed
+A/K modes are mapped the same way (the existing anchored-mode convention), so
+their installed value is 1e12 times the same ratio. The choice of hogging is a
+declared provisional baseline, not an energy calibration: a sagging canonical
+direction is the alternative and changes the response by a similar amount.
+The provisional min-yield anchor (`provisional_min_yield_anchor_v1`) is
+unchanged and still selected only by its own profile.
+
+### Haselton (2008) inputs (2026-10-23)
+
+- Eq. 3.10, rho: total longitudinal steel over b d (PEER 2007/03 notation):
+  top + bottom + 2 x side bars (side bars are counted per face), with
+  d = h - d'. For a beam this is the web steel only; slab bars are not counted
+  and the column regression is extrapolated (`beam_extrapolation`).
+- Eq. 3.20, s/d: the hoop spacing over the effective depth of the spring's
+  own bending axis. Spring y (across h): columns h - offset; beams h - the
+  top-row centroid of the bar rows the strengths use (hogging, canonical;
+  stacked layers included). Spring z (across b): b - offset. Without bar rows
+  the first-layer offset is used and recorded as a single-layer assumption.
+  Lambda_OpenSees = lambda x theta_y,member (nominal), per axis.
+- The backbone records `theta_p_longitudinal_steel`,
+  `deterioration_by_axis`, `deterioration_effective_depths`,
+  `deterioration_equation_version` and, for beams,
+  `deterioration_unsupported_extensions` (beam use of a column regression,
+  one depth for both signs of vertical bending, the lateral-axis spring).
+  theta_p is computed once per member end, from spring y's depth, and used by
+  both springs: a beam's lateral spring and a non-square column's second axis
+  take the spring-y value. For a beam that d is the row-based hogging depth,
+  so its theta_p change combines the total-steel numerator and the new depth.
+- The canonical mode needs axis-aligned beam_x, beam_y and column members
+  (others raise); `legacy_unmapped` does not check. The rho, depth and
+  Eq. 3.20 definitions are output identity keys (`imk_backbone_definitions`).
 
 Output identity includes mapping mode and the complete member energy profiles,
 and refuses reuse after either changes. The raw material adapter and separate

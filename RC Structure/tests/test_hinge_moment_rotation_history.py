@@ -140,7 +140,7 @@ class SynchronizedHistories(unittest.TestCase):
             self.assertEqual(row["material_type"], "IMKPeakOriented")
             self.assertEqual(row["bar_slip_owner"], "member_hinge"); self.assertEqual(float(row["bond_slip_indicator"]), 1.0)
             self.assertEqual(row["panel_shear_owner"], "")                                # no joint spring in the V2 profile
-            self.assertEqual(row["energy_mapping_status"], "legacy_unmapped")
+            self.assertEqual(row["energy_mapping_status"], "canonical_physical_orientation_baseline_v1")
             self.assertTrue(row["calibration_id"]); self.assertTrue(row["calibration_status"])
             self.assertTrue(row["global_rotation_axis"]); self.assertTrue(row["retained_joint_node"] != "")
         np.testing.assert_array_equal(self.arrays["spring_hinge_element_tag"], [r["hinge_element_tag"] for r in self.rows])

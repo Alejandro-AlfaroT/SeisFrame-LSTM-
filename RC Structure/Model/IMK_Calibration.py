@@ -70,6 +70,15 @@ THETA_P_FLOOR = 0.005
 THETA_PC_FLOOR = 0.010
 THETA_PC_CAP = 0.10
 
+# Haselton et al. (2008), PEER 2007/03, notation (p. xvi): rho is the ratio of the TOTAL area of longitudinal
+# reinforcement to b d (rho_t + rho', where rho' includes the web steel), and d is the effective depth, d = h - d'.
+# Equation 3.10 keeps that b d denominator; the later NIST applicability summary's As/Ag belongs to another
+# equation family and is not used here. (V6 IMK audit corrections, 2026-10-23: the numerator used to be the
+# larger face only, max(top, bottom) bars, and Eq. 3.20 used s/h for s/d.)
+RHO_DEFINITION = "haselton_2008_eq3_10_total_longitudinal_steel_over_b_d_v2"
+EFFECTIVE_DEPTH_DEFINITION = "effective_depth_from_tension_steel_centroid_v1"
+EQ_3_20_VERSION = "haselton_2008_eq3_20_spacing_over_effective_depth_v2"
+
 
 def _clamp(value, low, high):
     return max(low, min(high, value))
@@ -258,14 +267,79 @@ def transverse_steel_ratio(member_type, design=None):
     return legs * sp.rebar_area(bar_size) / (width * spacing)
 
 
-def longitudinal_steel_ratio(member_type, design=None):
-    """rho = As / (b * d) using the tension-side longitudinal steel."""
-    b, h, _fc, _size, bar_area, top, bot = _section_values(member_type, design)[:7]
-    area = max(top, bot) * bar_area
-    width, depth = b, h - _longitudinal_cover(member_type, design)
-    if width <= 0.0 or depth <= 0.0:
-        return 0.0
-    return area / (width * depth)
+def total_longitudinal_bars(member_type, design=None):
+    """Every physical longitudinal bar once: the two bar faces plus the side bars of BOTH side faces
+    (``side_bars`` is the count per side face; Model/Sections lays that many bars down each side face)."""
+    if design is not None:
+        top, bot, side = design.top_bars, design.bot_bars, design.side_bars
+    elif member_type == "column":
+        top, bot, side = sp.COL_TOP_BARS, sp.COL_BOT_BARS, sp.COL_SIDE_BARS
+    else:
+        top, bot, side = sp.BEAM_TOP_BARS, sp.BEAM_BOT_BARS, sp.BEAM_SIDE_BARS
+    return int(top) + int(bot) + 2 * int(side)
+
+
+def effective_depths(member_type, design=None, rows=None):
+    """Effective depth d of each spring axis, from the bar geometry the member's strengths use (inches).
+
+    Spring y bends across the section depth h and spring z across the width b (Model/IMK_Hinges). d is that
+    dimension less the distance from the tension face to the centroid of the tension steel:
+
+      * a column has one bar layer per face, every bar at the grid offset of its first layer from its face
+        (Structure_Parameters.longitudinal_cover_in), so d = h - offset for y and d = b - offset for z;
+      * a beam's vertical bending (y) reads the centroids of its actual bar rows, stacked layers and slab-mat
+        clearances included (``rows``: {"top": {"centroid_in"}, "bottom": {...}} from Model/Member_Bar_Layers or
+        Structure_Parameters.beam_bar_layers). Hogging puts the top steel in tension and sagging the bottom; the
+        two values are recorded, and the canonical direction (hogging, the positive input at the member's start
+        end, the reference of the cyclic energy baseline in Model/IMK_Materials) is the one used, because the
+        2008 column regressions take one d and a beam's directional use is an unsupported extension;
+      * a beam's lateral bending (z) has its side-face bars at the first-layer offset: d = b - offset.
+
+    Without ``rows`` a beam's vertical-bending d uses the first-layer offset and says so (``rows_source``).
+    """
+    b, h = _section_values(member_type, design)[:2]
+    offset = _longitudinal_cover(member_type, design)
+    result = {"definition": EFFECTIVE_DEPTH_DEFINITION, "rows_source": None,
+              "z": {"depth_dimension": "b", "dimension_in": b, "tension_centroid_offset_in": offset, "d_in": b - offset,
+                    "basis": "one bar layer on the tension side face, at the first-layer offset"}}
+    if member_type == "column":
+        result["y"] = {"depth_dimension": "h", "dimension_in": h, "tension_centroid_offset_in": offset, "d_in": h - offset,
+                       "basis": "one bar layer on the tension face, at the first-layer offset (symmetric cage)"}
+        result["rows_source"] = "column cage: one layer per face"
+    else:
+        if rows is not None:
+            top, bottom = float(rows["top"]["centroid_in"]), float(rows["bottom"]["centroid_in"])
+            result["rows_source"] = "the member's bar rows (stacked layers and slab-mat clearances included)"
+        else:
+            top = bottom = offset
+            result["rows_source"] = "first-layer offset: no bar rows supplied (single-layer assumption)"
+        result["beam_vertical_bending"] = {"hogging_d_in": h - top, "sagging_d_in": h - bottom,
+                                           "used": "hogging (canonical direction)",
+                                           "directional_use": "not supported: one d per spring (2008 column regression)"}
+        result["y"] = {"depth_dimension": "h", "dimension_in": h, "tension_centroid_offset_in": top, "d_in": h - top,
+                       "basis": "top steel in tension (hogging, the canonical direction)"}
+    for axis in ("y", "z"):
+        if not math.isfinite(result[axis]["d_in"]) or result[axis]["d_in"] <= 0.0:
+            raise ValueError(f"{member_type} effective depth for spring {axis} is not positive: {result[axis]}")
+    return result
+
+
+def longitudinal_steel_record(member_type, design=None, depths=None):
+    """Eq. 3.10's rho with its inputs: total longitudinal steel over b d (RHO_DEFINITION), d of the y spring."""
+    b, _h, _fc, _size, bar_area = _section_values(member_type, design)[:5]
+    depths = depths if depths is not None else effective_depths(member_type, design)
+    bars = total_longitudinal_bars(member_type, design)
+    d = depths["y"]["d_in"]
+    rho = bars * bar_area / (b * d) if b > 0.0 and d > 0.0 else 0.0
+    return {"definition": RHO_DEFINITION, "rho": rho, "total_bars": bars, "bar_area_in2": bar_area,
+            "b_in": b, "d_in": d, "beam_extrapolation": member_type != "column",
+            "scope": ("column regression applied to the beam's web steel only (no slab steel, no directional "
+                      "calibration)" if member_type != "column" else "column")}
+
+
+def longitudinal_steel_ratio(member_type, design=None, depths=None):
+    """rho = A_s,total / (b d) of Haselton et al. (2008) Eq. 3.10 (longitudinal_steel_record)."""
+    return longitudinal_steel_record(member_type, design, depths)["rho"]
 
 
 def _stability_index(member_type, design=None):
@@ -278,7 +352,7 @@ def _stability_index(member_type, design=None):
     return (spacing / bar_diameter) * math.sqrt(sp.FY_KSI * KSI_TO_MPA / 100.0)
 
 
-def haselton_theta_p(member_type, nu, end=None, *, member_scope=None, design=None):
+def haselton_theta_p(member_type, nu, end=None, *, member_scope=None, design=None, depths=None):
     """Plastic rotation capacity to the capping point.
 
     Haselton et al. (2008), PEER 2007/03, equation 3.10 (full form):
@@ -286,11 +360,12 @@ def haselton_theta_p(member_type, nu, end=None, *, member_scope=None, design=Non
         theta_p = 0.12 (1 + 0.55 a_sl) (0.16)^nu (0.02 + 40 rho_sh)^0.43
                   (0.54)^(0.01 f'c_MPa) (0.66)^(0.1 s_n) (2.27)^(10 rho)
 
-    Beams are the nu = 0 case, where the (0.16)^nu term is unity.
+    rho is the total longitudinal steel over b d (RHO_DEFINITION). Beams are the nu = 0 case, where the
+    (0.16)^nu term is unity: a column regression extended to beams.
     """
     nu = _clamp(nu, NU_MIN, NU_MAX)
     rho_sh = _clamp(transverse_steel_ratio(member_type, design), RHO_SH_MIN, RHO_SH_MAX)
-    rho = longitudinal_steel_ratio(member_type, design)
+    rho = longitudinal_steel_ratio(member_type, design, depths)
     fc_mpa = _section_values(member_type, design)[2] * KSI_TO_MPA
     s_n = _stability_index(member_type, design)
 
@@ -323,13 +398,17 @@ def haselton_theta_pc(member_type, nu, design=None):
     return max(THETA_PC_FLOOR, min(THETA_PC_CAP, theta_pc))
 
 
-def deterioration_for_member(member_type, nu, design=None):
-    """Explicit OpenSees energy convention; PEER 2007/03 Eq. 3.20.
+def deterioration_for_member(member_type, nu, design=None, depths=None):
+    """Explicit OpenSees energy convention; PEER 2007/03 Eq. 3.20, for each spring axis.
 
-    Eq. 3.20 is a column regression, extended here to zero-axial beams.
-    The member yield rotation is a declared nominal assumption, NOT the
-    artificially small My/Ke of a stiff numerical zeroLength spring.
-    Conversion: Lambda_OpenSees = lambda_Haselton * theta_y_member.
+        lambda = 170.7 (0.27)^nu (0.10)^(s/d)
+
+    with s the hoop spacing and d the effective depth of the spring's bending axis (effective_depths:
+    d of spring y across h, of spring z across b; EQ_3_20_VERSION). Eq. 3.20 is a column regression,
+    extended here to zero-axial beams and to a beam's lateral axis. The member yield rotation is a declared
+    nominal assumption, NOT the artificially small My/Ke of a stiff numerical zeroLength spring.
+    Conversion: Lambda_OpenSees = lambda_Haselton * theta_y_member. The top-level lambda keys are spring y's
+    (the strong axis); ``deterioration_by_axis`` holds both springs'.
     """
     mode = getattr(sp, "IMK_DETERIORATION_MODE", "direct")
     if mode == "direct":
@@ -337,33 +416,48 @@ def deterioration_for_member(member_type, nu, design=None):
     if mode != "haselton_2008":
         raise ValueError(f"Unknown IMK_DETERIORATION_MODE: {mode!r}")
     values = _section_values(member_type, design)
-    spacing, depth = values[9], values[1]
+    spacing = values[9]
+    depths = depths if depths is not None else effective_depths(member_type, design)
     theta_y = sp.IMK_COLUMN_THETA_Y if member_type == "column" else sp.IMK_BEAM_THETA_Y
-    if not all(math.isfinite(v) and v > 0 for v in (spacing, depth, theta_y)):
-        raise ValueError("Deterioration calibration requires positive spacing, depth and member yield rotation")
+    if not all(math.isfinite(v) and v > 0 for v in (spacing, depths["y"]["d_in"], depths["z"]["d_in"], theta_y)):
+        raise ValueError("Deterioration calibration requires positive spacing, effective depths and member yield rotation")
     nu_used = _clamp(nu, NU_MIN, NU_MAX)
-    lam = 170.7 * 0.27**nu_used * 0.10**(spacing/depth)
+    by_axis = {}
+    for axis in ("y", "z"):
+        ratio = spacing / depths[axis]["d_in"]
+        lam = 170.7 * 0.27**nu_used * 0.10**ratio
+        by_axis[axis] = {"lambda_haselton_dimensionless": lam, "lambda_opensees_rad": lam*theta_y,
+                         # PEER 2007/03, Sec. 2.1.2.1 (p. 9): the fitted lambda applies
+                         # to S and C. A and K were excluded from that calibration.
+                         # Current IMKPeakOriented requires positive parameters: a large
+                         # finite capacity approximates disabled A/K, without 0 or inf.
+                         "lambda_opensees_by_mode_rad": {"S": lam*theta_y, "C": lam*theta_y, "A": 1.0e12, "K": 1.0e12},
+                         "spacing_in": spacing, "effective_depth_in": depths[axis]["d_in"],
+                         "spacing_effective_depth_ratio": ratio}
+    strong = by_axis["y"]
     return {"deterioration_source": "haselton_2008_eq3_20_nominal_member_theta_y",
-            "lambda_haselton_dimensionless": lam,
+            "deterioration_equation_version": EQ_3_20_VERSION,
+            "lambda_haselton_dimensionless": strong["lambda_haselton_dimensionless"],
             "energy_reference_member_theta_y_rad": theta_y,
-            "lambda_opensees_rad": lam*theta_y,
-            # PEER 2007/03, Sec. 2.1.2.1 (p. 9): the fitted lambda applies
-            # to S and C. A and K were excluded from that calibration.
-            # Current IMKPeakOriented requires positive parameters: a large
-            # finite capacity approximates disabled A/K, without 0 or inf.
-            "lambda_opensees_by_mode_rad": {
-                "S": lam*theta_y, "C": lam*theta_y, "A": 1.0e12, "K": 1.0e12,
-            },
+            "lambda_opensees_rad": strong["lambda_opensees_rad"],
+            "lambda_opensees_by_mode_rad": dict(strong["lambda_opensees_by_mode_rad"]),
+            "deterioration_by_axis": by_axis,
+            "deterioration_effective_depths": depths,
             "deterioration_mode_basis": "haselton_2008_section_2_1_2_1_strength_only",
             "deterioration_suppressed_modes": ["A", "K"],
             "deterioration_suppression_lambda_rad": 1.0e12,
-            "deterioration_spacing_depth_ratio": spacing/depth,
+            "deterioration_spacing_effective_depth_ratio": strong["spacing_effective_depth_ratio"],
             "deterioration_axial_ratio_used": nu_used,
             "deterioration_axial_ratio_clamped": nu_used != nu,
-            "deterioration_beam_extrapolation": member_type != "column"}
+            "deterioration_beam_extrapolation": member_type != "column",
+            "deterioration_unsupported_extensions": (
+                [] if member_type == "column" else
+                ["column regression applied to a beam", "one canonical (hogging) depth for both signs of vertical bending",
+                 "lateral-axis (z) spring of a beam"])}
 
 
-def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *, member_scope=None, design=None):
+def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *, member_scope=None, design=None,
+                        rows=None):
     """Full per-member IMK backbone, for one member END when ``end`` is given.
 
     Returns yield moment, plastic and post-capping rotations, ultimate
@@ -373,11 +467,13 @@ def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *
     behave differently. ``end`` (Model/Deformation_Ownership.member_end)
     decides whether the plastic rotation keeps Haselton's bar-slip share
     (member hinge owns slip) or excludes it (a registered face interface
-    owns it); the ownership record travels with the backbone.
+    owns it); the ownership record travels with the backbone. ``rows`` are a beam's bar rows (the ones its
+    strengths use), from which the effective depths of Eq. 3.10 and Eq. 3.20 are taken.
     """
     from Model import Deformation_Ownership as ownership
     use_calibration = getattr(sp, "IMK_USE_CALIBRATED_BACKBONE", True)
     nu = axial_load_ratio(axial_kip, member_type, design)
+    depths = effective_depths(member_type, design, rows)
     indicator = bond_slip_indicator(end, member_scope=member_scope)
     slip = {"bond_slip_indicator": indicator,
             "slip_owner": (ownership.ownership(end, member_scope=member_scope)["bar_slip"] if end is not None
@@ -396,10 +492,10 @@ def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *
             "theta_pc_neg": sp.IMK_THETA_PC_NEG,
             "theta_u_neg": sp.IMK_THETA_U_NEG,
             **slip,
-            **deterioration_for_member(member_type, nu, design),
+            **deterioration_for_member(member_type, nu, design, depths),
         }
 
-    theta_p = haselton_theta_p(member_type, nu, end, member_scope=member_scope, design=design)
+    theta_p = haselton_theta_p(member_type, nu, end, member_scope=member_scope, design=design, depths=depths)
     theta_pc = haselton_theta_pc(member_type, nu, design)
     return {
         **slip,
@@ -409,5 +505,6 @@ def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *
         "theta_pc": theta_pc,
         "theta_u": theta_p + theta_pc + (sp.IMK_COLUMN_THETA_Y if member_type == "column" else sp.IMK_BEAM_THETA_Y),
         "source": "haselton_2008",
-        **deterioration_for_member(member_type, nu, design),
+        "theta_p_longitudinal_steel": longitudinal_steel_record(member_type, design, depths),
+        **deterioration_for_member(member_type, nu, design, depths),
     }

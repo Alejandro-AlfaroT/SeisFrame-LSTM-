@@ -22,7 +22,9 @@ Per strength combination (decision D1 of the plan):
   Every piece is a linear elastic solve, so the member local forces add; the beam span envelopes are
   recovered from the summed end forces and the element loads of the continuous solve
   (Design.SMRF_Beam_Actions.recover_beam_bending, the same equilibrium the saved-record verifier recomputes);
-* the period, the accidental-torsion assessment and the drift screen are those of the released model.
+* the accidental-torsion assessment and the drift screen are those of the released model. The period is the
+  entire structure's under every policy (Design_Driver.PERIOD_MODEL, the continuous frame; user decision
+  2026-10-24: the period is not separated by system).
 
 Compatibility run (decision D2; ACI 318-19 18.14.2.1, ASCE 7-22 12.12.5): the design displacement
 delta_u = Cd delta_e / Ie of the released model's rho = 1 ELF runs is imposed, level by level, on the diaphragm
@@ -99,9 +101,9 @@ def member_systems():
 
 # ---- the lateral solves of the design route --------------------------------------------------------------------
 def model_period(state=None):
-    """First valid period of the design model (the released frame under the system policy)."""
-    with lateral_model(design_model_for(state)):
-        return driver._model_period()
+    """First valid period of the entire structure under every policy (Design_Driver._model_period builds the
+    continuous frame whatever lateral design model is in force); ``state`` is kept for the callers."""
+    return driver._model_period()
 
 
 def torsion_assessment(period, cfg, strength=None, state=None):

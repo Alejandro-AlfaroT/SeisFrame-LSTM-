@@ -93,6 +93,9 @@ OUTPUT_IDENTITY_KEYS = (
     # are identity keys, together with the installed policy and the member yield rotations it scales.
     "imk_deterioration_mode",
     "imk_use_calibrated_backbone",
+    # Eq. 3.10's steel ratio, the effective depth of Eq. 3.10 / 3.20 and the Eq. 3.20 version (2026-10-23):
+    # the steel ratio sets theta_p; the depth sets Lamda and, for beams, theta_p.
+    "imk_backbone_definitions",
     "imk_installed_deterioration",
     "imk_beam_theta_y",
     "imk_column_theta_y",

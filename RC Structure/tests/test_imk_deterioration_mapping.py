@@ -27,7 +27,8 @@ class HaseltonTranslationTests(unittest.TestCase):
         with mock.patch.multiple(sp, IMK_DETERIORATION_MODE="haselton_2008", COL_STIRRUP_SPACING=4., H_COL=24.,
                                  IMK_COLUMN_THETA_Y=.004, BEAM_STIRRUP_SPACING=3., H_BEAM=20., IMK_BEAM_THETA_Y=.005):
             d = deterioration_for_member("column", .2)
-            lam = 170.7 * .27 ** .2 * .10 ** (4. / 24.)
+            # Eq. 3.20 takes s/d with the effective depth d = h - d' (2026-10-23; s/h before)
+            lam = 170.7 * .27 ** .2 * .10 ** (4. / (24. - sp.longitudinal_cover_in("column")))
             self.assertAlmostEqual(d["lambda_haselton_dimensionless"], lam, places=9)
             self.assertAlmostEqual(d["lambda_opensees_rad"], lam * .004, places=9)
             self.assertEqual(d["energy_reference_member_theta_y_rad"], .004)
@@ -39,7 +40,8 @@ class HaseltonTranslationTests(unittest.TestCase):
             self.assertFalse(d["deterioration_beam_extrapolation"])
             self.assertFalse(d["deterioration_axial_ratio_clamped"])
             beam = deterioration_for_member("beam_x", 0.)
-            self.assertAlmostEqual(beam["lambda_opensees_rad"], 170.7 * .10 ** (3. / 20.) * .005, places=9)
+            self.assertAlmostEqual(beam["lambda_opensees_rad"],
+                                   170.7 * .10 ** (3. / (20. - sp.longitudinal_cover_in("beam"))) * .005, places=9)
             self.assertTrue(beam["deterioration_beam_extrapolation"])
             self.assertTrue(deterioration_for_member("column", 2.)["deterioration_axial_ratio_clamped"])
         with mock.patch.object(sp, "IMK_DETERIORATION_MODE", "direct"):

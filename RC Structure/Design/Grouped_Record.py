@@ -36,6 +36,7 @@ from pathlib import Path
 import openseespy.opensees as ops
 
 import Structure_Parameters as sp
+from Design import Concrete_Grades as cg
 from Design import Design_Driver as driver
 from Design import Group_Capacity as capacity_design
 from Design import Group_Checks as group_checks
@@ -77,7 +78,11 @@ LIMITATIONS = (
     "(18.14.3.3(c)); the 18.6.4 hinge-zone and 18.6.3.2 strength-balance rules are not applied to gravity beams; the "
     "Chapter 15 joint strength of a joint direction outside the SFRS uses the Table 18.8.4.3 row of the same joint (at or "
     "below the Table 15.4.2.3 value).",
-    "One column concrete grade and one beam concrete grade for the whole frame; group-specific grades are not available.",
+    "Concrete grades are one per grade family over the full height (Design.Concrete_Grades, " + cg.POLICY_ID + "): under "
+    "the two-system policies the special-frame columns (6-10 ksi), the gravity columns (5-7 ksi from 5 ksi, "
+    + cg.DECISION_ID + ") and the beams; gravity beams share the special-frame beam grade until a slab, pour-boundary and "
+    "flange-concrete rule for two beam grades on one floor is decided (materials.concrete_grades.gravity_beams states "
+    "whether that grade lies on the gravity ladder). Group-specific grades within a family are not available.",
     "Square columns; opposite sides of the plan share a group; the recorded story-band rule is a research policy, not a code rule.",
     "The story-strength model is provisional (review item M1); vertical strength regularity is recorded, not established.",
     "Nonlinear model scope: IMK member hinges with rigid centerline joints. Fiber members, scissors joint springs and the "
@@ -143,15 +148,28 @@ def _require_seed_sections(column, beam):
         raise ValueError(f"The grouped search keeps square columns; the seed column is {column[0]:g} x {column[1]:g}.")
 
 
+def _seed_grades(state):
+    """The grade families of a seed at their starting grades (Design.Concrete_Grades.seeded) and their description."""
+    state = cg.seeded(state)
+    return state, {"policy": cg.POLICY_ID,
+                   "families": {family: cg.grade(state, family) for family in cg.families(state.policy_id)},
+                   "rule": ("a family with a declared start (the gravity ladder, 5 ksi) starts there whatever grade the "
+                            "seed sections carry; the other families start at the seed's grade")}
+
+
 def seed_from_sections(column, beam, policy_id=mg.POLICY_ID):
     """(GroupedDesign, description): every group starts on one column and one beam section (b, h, fc), under the
-    grouping policy ``policy_id`` (the band policy, or the two-system policy of 2026-10-16)."""
+    grouping policy ``policy_id`` (the band policy, or the two-system policy of 2026-10-16). The seed's grades are the
+    special-frame grades; the gravity columns of a two-system policy start at the gravity ladder's 5 ksi
+    (Design.Concrete_Grades), so a column the policy's layout brings into the SFRS takes the special-frame grade."""
     column, beam = tuple(float(v) for v in column), tuple(float(v) for v in beam)
     _require_seed_sections(column, beam)
     state = mg.GroupedDesign.uniform(sp.NUM_BAY_X, sp.NUM_BAY_Y, sp.NUM_FLOOR,
                                      mg.MemberDesign("column", *column, **NOMINAL_COLUMN_CAGE),
                                      mg.MemberDesign("beam_x", *beam, **NOMINAL_BEAM_CAGE), policy_id=policy_id)
+    state, grades = _seed_grades(state)
     return state, {"kind": "explicit_uniform_sections", "column": list(column), "beam": list(beam), "grouping_policy": policy_id,
+                   "concrete_grades": grades,
                    "note": ("where the search starts, not a lower or upper bound on any group; the cages are placeholders "
                             "and every group's reinforcement is selected by the first evaluation")}
 
@@ -171,7 +189,10 @@ def seed_from_uniform_record(record, policy_id=mg.POLICY_ID):
         mg.MemberDesign("beam_x", *beam, rebar["beam_bar_size"], rebar["beam_top_bars"], rebar["beam_bot_bars"],
                         rebar["beam_side_bars"], rebar["beam_stirrup_bar_size"], rebar["beam_stirrup_legs"],
                         rebar["beam_stirrup_spacing_in"]), policy_id=policy_id)
+    # A new gravity search starts at the gravity ladder's 5 ksi whatever grade the uniform design used.
+    state, grades = _seed_grades(state)
     return state, {"kind": "uniform_design_record", "column": list(column), "beam": list(beam), "grouping_policy": policy_id,
+                   "concrete_grades": grades,
                    "source_schema": record.get("schema_version"),
                    "source_request_sha256": (record.get("request_identity") or {}).get("sha256"),
                    "note": "the saved uniform design expanded into its groups; the search may change any group"}
@@ -200,7 +221,8 @@ def grouped_request_identity(cfg=None, seed=None, policy=None, grouping_policy_i
                "rules": {"evaluation": gd.EVALUATION_VERSION, "reinforcement_selection": selection.RULES_ID,
                          "system_reinforcement_selection": selection.SYSTEM_RULES_ID, "lever_order": gs.LEVER_ORDER_ID,
                          "column_transitions": transition_rules.RULES_ID, "bar_layers": bar_layers.RULE_ID,
-                         "capacity_design": capacity_design.METHOD_VERSION, "qualification": QUALIFICATION_VERSION}}
+                         "capacity_design": capacity_design.METHOD_VERSION, "qualification": QUALIFICATION_VERSION,
+                         "concrete_grades": cg.identity_block()}}
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return {"sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(), **json.loads(canonical)}
 
@@ -212,9 +234,12 @@ def _floor_loads():
 
 
 def _materials(cfg, state):
+    # Member-type scalars only when every group of that type truly shares one grade; the grades by family (and whether
+    # the gravity beams' shared grade lies on the gravity ladder) are in concrete_grades. Nothing picks a first grade.
     grades = {kind: sorted({state.designs[g["group_id"]].fc_ksi for g in state.groups.values()
                             if (g["member_type"] == "column") == (kind == "column")}) for kind in ("column", "beam")}
-    return {"fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FYT_KSI, "es_ksi": sp.ES_KSI,
+    return {"concrete_grade_policy": cg.POLICY_ID, "concrete_grades": cg.describe(state),
+            "fy_ksi": sp.FY_KSI, "fyt_ksi": sp.FYT_KSI, "es_ksi": sp.ES_KSI,
             "transverse_specification": sp.TRANSVERSE_SPECIFICATION,
             "slab_fy_ksi": sp.SLAB_FY_KSI, "slab_reinforcement_specification": sp.SLAB_REINFORCEMENT_SPECIFICATION,
             "longitudinal_grade_rule": {"story_height_ft_for_grade_80": sp.LONGITUDINAL_GRADE_STORY_HEIGHT_FT,
@@ -226,7 +251,8 @@ def _materials(cfg, state):
                                                  "(2026-10-18). See search.steel_grade_trial for the actual decision."},
             "normalweight": sp.CONCRETE_UNIT_WEIGHT_KCF == 0.150, "aggregate_size_in": sp.AGGREGATE_MAX_SIZE_IN,
             "reinforcement_specification": cfg.materials.reinforcement_specification, "exposure": cfg.materials.exposure,
-            "fc_col_ksi": grades["column"][0], "fc_beam_ksi": grades["beam"][0],
+            "fc_col_ksi": grades["column"][0] if len(grades["column"]) == 1 else None,
+            "fc_beam_ksi": grades["beam"][0] if len(grades["beam"]) == 1 else None,
             "beam_clear_cover_in": sp.BEAM_CLEAR_COVER_IN, "col_clear_cover_in": sp.COL_CLEAR_COVER_IN,
             "cover_basis": "clear_cover_outside_hoops",
             "beam_bar_stacking": {"mode": sp.BEAM_BAR_STACKING, "convention": sp.beam_bar_stacking_convention(),
@@ -305,9 +331,11 @@ def systems_block(state, evidence, capacity):
         "scwb_not_required": gd.joint_check_inputs(capacity, state)["scwb_not_required"],
         "drift_model": ((evidence.get("drift_screen") or {}).get("assumptions") or {}).get("model"),
         "basis": ("perimeter special moment frames as the seismic force-resisting system and an interior gravity system "
-                  "(user decision 2026-10-16): one design per tie; the lateral solves on the released frame, the gravity "
-                  "members read from the continuous frame and checked for deformation compatibility (ACI 318-19 18.14.2.1, "
-                  "ASCE 7-22 12.12.5); Design.Perimeter_Systems"),
+                  "(user decision 2026-10-16): one design per tie; the torsion, strength and drift solves on the released "
+                  "frame, the period on the entire structure (Design_Driver.PERIOD_MODEL, user decision 2026-10-24), the "
+                  "gravity members read from the continuous frame and checked for deformation compatibility (ACI 318-19 "
+                  "18.14.2.1, ASCE 7-22 12.12.5); Design.Perimeter_Systems"),
+        "period_model": driver.PERIOD_MODEL,
     }
 
 
@@ -480,6 +508,23 @@ def _validated_record_grade(record):
     return grade
 
 
+def _check_record_grades(record, state):
+    """The member grades of a saved record under the grade policy it names (Design.Concrete_Grades): a clear version
+    error for a policy this code does not read, the policy's rule (one grade per family, the gravity ladder), and, for
+    the current policy, its saved grades by family equal to those of its member groups (explanatory text aside)."""
+    problem = cg.readable_policy_problem(record)
+    if problem:
+        raise ValueError(f"The grouped record's concrete grades cannot be read: {problem}.")
+    policy = cg.policy_of_record(record)
+    gd._require_family_grades(state, policy)
+    if policy == cg.POLICY_ID:
+        saved = cg.structural((record.get("materials") or {}).get("concrete_grades") or {})
+        found = differences(saved, cg.structural(_canonical(cg.describe(state))), path="materials.concrete_grades")
+        if found:
+            raise ValueError("The grouped record's concrete grades by family are not those of its member groups: "
+                             + "; ".join(found[:4]))
+
+
 def apply_grouped_design(record):
     """Install a saved grouped design: the member groups, the slab, the by-floor transfer and the slab layout.
 
@@ -515,7 +560,7 @@ def apply_grouped_design(record):
         sp.apply_reinforcement_grade(fy_ksi=selected_grade)
         slab = _validated_slab(record)
         mg.install(state)
-        gd._require_common_grades(state)
+        _check_record_grades(record, state)
         driver._apply_slab(slab)
         sp.AGGREGATE_MAX_SIZE_IN = aggregate
         sp.REINFORCEMENT_SPECIFICATION = material["reinforcement_specification"]
@@ -1092,6 +1137,7 @@ def _search_with_layout_ladder(cfg, seed_state, seed, policy, log_path, verbose,
         at_cap = sorted(gid for gid, s in sections.items() if "__column__" in gid and max(s["b_in"], s["h_in"]) >= cap - 1e-9)
         return {"grouping_policy": policy_id, "sfrs_layout": mg.layout_of(policy_id), "column_size_cap_in": cap,
                 "columns_at_cap_in_last_candidate": at_cap,
+                "concrete_grades_in_last_candidate": cg.family_grades(policy_id, sections) if sections else {},
                 "candidate_log": None if path is None else Path(path).name,
                 "found_candidate": result.get("final") is not None, "stop": result["stop"], "counts": result["counts"],
                 "error": result.get("error")}
@@ -1116,7 +1162,9 @@ def _search_with_layout_ladder(cfg, seed_state, seed, policy, log_path, verbose,
                 "restart_basis": ("each next layout is re-seeded from the original seed sections, never from the sections the "
                                   "failed layout grew to: with more frames the members start small again, the feasibility "
                                   "phase grows only what the new system needs and the reduction phase then steps the groups "
-                                  "down (user direction 2026-10-18)"),
+                                  "down (user direction 2026-10-18). Concrete grades are re-seeded by the new layout's "
+                                  "roles (Design.Concrete_Grades): a member it brings into the SFRS starts at the seed's "
+                                  "special-frame grade, a member still outside it at the gravity ladder's start"),
                 "trigger_basis": ("advance only when the current layout returns no feasible candidate, including a "
                                   "budget stop or recorded attempt error; reaching the column size cap alone does not "
                                   "discard a feasible design. Each layout's cap is recorded in attempts. Concrete and "

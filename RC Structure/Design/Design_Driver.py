@@ -534,12 +534,24 @@ def _sync_cfg_to_sp(cfg):
     cfg.rebar.aggregate_max_size_in = sp.AGGREGATE_MAX_SIZE_IN
 
 
+# The model the design period is taken from: the entire structure, every beam and column of the continuous frame,
+# whatever lateral design model the strength and drift solves use (user decision 2026-10-24: the period is not
+# separated by system; before, the two-system route took it from the released perimeter-SFRS model).
+PERIOD_MODEL = "all_frames"
+PERIOD_MODEL_BASIS = "entire structure: every beam and column, continuous frame (not separated by system)"
+
+
 def _model_period():
-    """First valid elastic period of the current model, for the ELF period cap."""
-    with _quiet():
-        ops.wipe()
-        build_model()
-        modes = run_modal_analysis()
+    """First valid elastic period of the entire structure (PERIOD_MODEL), for the ELF period cap."""
+    saved = sp.LATERAL_DESIGN_MODEL
+    sp.LATERAL_DESIGN_MODEL = PERIOD_MODEL
+    try:
+        with _quiet():
+            ops.wipe()
+            build_model()
+            modes = run_modal_analysis()
+    finally:
+        sp.LATERAL_DESIGN_MODEL = saved
     for mode in modes:
         if mode.get("valid") and mode.get("period"):
             return float(mode["period"])
@@ -813,7 +825,9 @@ def _demand_basis(cfg, torsion, elf, drift_screen, strength=None, regularity=Non
         "ts_sec": ts,
         "period_basis": {"model_period_sec": (elf or {}).get("model_period_sec"),
                          "asce_ta_sec": (elf or {}).get("asce_ta_sec"),
-                         "capped_at_cu_ta": (elf or {}).get("period_capped_at_cu_ta")},
+                         "capped_at_cu_ta": (elf or {}).get("period_capped_at_cu_ta"),
+                         "cu": (elf or {}).get("cu"), "cu_rule": (elf or {}).get("cu_rule"),
+                         "period_model": PERIOD_MODEL, "period_model_basis": PERIOD_MODEL_BASIS},
         "live_load_patterns": (live_load_patterns(sp.NUM_BAY_X, sp.NUM_BAY_Y)
                                if cfg.demands.live_load_patterning and sp.FLOOR_TRANSFER is not None else []),
         "patterns_in_strength_envelope": bool(cfg.demands.live_load_patterning and sp.FLOOR_TRANSFER is not None),
@@ -3221,8 +3235,10 @@ def design_request_identity(cfg=None):
     keys = ("NUM_BAY_X", "NUM_BAY_Y", "NUM_FLOOR", "BAY_X", "BAY_Y", "STORY_H",
             "FLOOR_DEAD_LOAD_KSF", "FLOOR_LIVE_LOAD_KSF", "CONCRETE_UNIT_WEIGHT_KCF",
             "GRAVITY_LOAD_MODEL", "ASCE_SDS", "ASCE_SD1", "ASCE_S1", "ASCE_R", "ASCE_RISK_CATEGORY", "ASCE_IE",
-            "ASCE_CU", "ASCE_TL", "FY_KSI", "ES_KSI", "COVER")
+            "ASCE_CU_TABLE_12_8_1", "ASCE_CU_RULE", "ASCE_TL", "FY_KSI", "ES_KSI", "COVER")
     inputs = {key: getattr(sp, key) for key in keys}
+    inputs["ASCE_CU"] = sp.asce_cu()                   # Table 12.8-1 at this site's SD1 (fixed 1.4 before 2026-10-24)
+    inputs["PERIOD_MODEL"] = PERIOD_MODEL
     policy = asdict(cfg)
     # The nonlinear-model profile the design is made for (Model/Analysis_Profile): part of the
     # policy so the methodology hash and the cache check both refuse a design made under another

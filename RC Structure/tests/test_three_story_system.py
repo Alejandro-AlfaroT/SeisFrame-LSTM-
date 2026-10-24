@@ -111,7 +111,7 @@ class ThreeStorySystems(unittest.TestCase):
                 gs.search(self.state,DesignConfig.from_structure_parameters(),verbose=False)
 
     def test_failed_tied_upper_column_chain_targets_the_right_band(self):
-        s=gs.regraded(self.state,'column',10.)
+        s=gs.regraded(self.state,'sfrs_column',10.)   # the special-frame columns at their top grade (grade families, 2026-10-23)
         gids=s.ties()['s04_06__sfrs_column']
         constraints={'exhausted_groups':gids,'exhausted_column_lines':{
             'sfrs_column':{'blocked_at':'+'.join(gids),'blocked_by':'no admissible cage'}},
