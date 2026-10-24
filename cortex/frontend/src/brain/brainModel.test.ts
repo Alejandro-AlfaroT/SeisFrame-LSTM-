@@ -25,6 +25,36 @@ describe("generateBrain", () => {
     }
   });
 
+  it("has a brain's proportions: egg-shaped from above, widest behind the middle", () => {
+    const cloud = small();
+    const P = cloud.positions;
+    const cerebrum = [...Array(cloud.count).keys()].filter((i) => P[i * 3 + 1] > -0.56);
+    const zs = cerebrum.map((i) => P[i * 3 + 2]);
+    const [minZ, maxZ] = [Math.min(...zs), Math.max(...zs)];
+    const width = Math.max(...cerebrum.map((i) => Math.abs(P[i * 3]))) * 2;
+    expect(width / (maxZ - minZ)).toBeGreaterThan(0.78); // real cerebrum ≈ 0.84
+    expect(width / (maxZ - minZ)).toBeLessThan(0.92);
+    const bins = Array.from({ length: 10 }, () => 0); // half-widths, back to front
+    for (const i of cerebrum) {
+      const b = Math.min(9, Math.floor(((P[i * 3 + 2] - minZ) / (maxZ - minZ)) * 10));
+      bins[b] = Math.max(bins[b], Math.abs(P[i * 3]));
+    }
+    const widest = bins.indexOf(Math.max(...bins));
+    expect(widest).toBeGreaterThanOrEqual(3);
+    expect(widest).toBeLessThanOrEqual(5); // not a tube: one clear widest zone behind the middle
+    expect(bins[9]).toBeLessThan(0.6 * Math.max(...bins)); // narrow frontal pole
+  });
+
+  it("keeps the hemispheres close: a thin fissure, not a wide gap", () => {
+    const cloud = small();
+    let closest = Infinity;
+    for (let i = 0; i < cloud.count; i++) {
+      const [x, y, z] = [cloud.positions[i * 3], cloud.positions[i * 3 + 1], cloud.positions[i * 3 + 2]];
+      if (y > 0.1 && y < 0.4 && Math.abs(z) < 0.5 && cloud.region[i] !== regionCode("hippocampus")) closest = Math.min(closest, Math.abs(x));
+    }
+    expect(closest).toBeLessThan(0.025);
+  });
+
   it("keeps the two hemispheres apart at the longitudinal fissure", () => {
     const cloud = small();
     let nearMidlineOnTop = 0;

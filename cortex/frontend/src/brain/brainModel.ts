@@ -61,13 +61,28 @@ const smax = (a: number, b: number, k: number) => -smin(-a, -b, k);
 /** Height of the cerebral underside: raised under the frontal lobe, lowest mid-way, rising toward the occipital pole. */
 const baseY = (z: number) => -0.46 + 0.25 * smoothstep(0.15, 0.7, z) + 0.12 * (1 - smoothstep(-0.95, -0.45, z));
 
-function hemisphere(x: number, y: number, z: number, s: number): number {
-  let d = sdEllipsoid(x, y, z, s * 0.36, 0.08, -0.06, 0.4, 0.56, 0.9); // parietal dome
-  d = smin(d, sdEllipsoid(x, y, z, s * 0.3, 0.04, 0.44, 0.35, 0.47, 0.5), 0.16); // frontal
-  d = smin(d, sdEllipsoid(x, y, z, s * 0.33, 0.02, -0.5, 0.37, 0.45, 0.5), 0.14); // occipital
+/** Half-width of the cerebrum along its length: widest over the parietal lobes, narrower toward both poles. */
+export const widthScale = (z: number) => 1 - 0.25 * smoothstep(-0.15, 0.95, z) - 0.12 * smoothstep(-0.5, -1.0, z);
+
+/** Height along the length: the occipital pole tapers, the frontal pole stays blunt. */
+const heightScale = (z: number) => 1 - 0.14 * smoothstep(-0.35, -1.0, z);
+
+/** Half the width of the longitudinal fissure between the hemispheres. */
+export const FISSURE = 0.012;
+
+/**
+ * Both hemispheres as one egg-shaped body (seen from above: narrow forehead, widest behind the
+ * middle), with temporal lobes below the lateral fissure, split down the midline by a thin
+ * fissure so each hemisphere has a flat medial wall and a rounded lateral side.
+ */
+function cerebrum(x: number, y: number, z: number): number {
+  const s = widthScale(z);
+  const h = heightScale(z);
+  // Ellipsoid evaluated in squeezed space: the distance is approximate, the surface exact.
+  let d = sdEllipsoid(x / s, 0.05 + (y - 0.05) / h, z, 0, 0.05, -0.06, 0.78, 0.51, 0.9) * Math.min(s, h);
   d = smax(d, baseY(z) - y, 0.1);
-  d = smin(d, sdEllipsoid(x, y, z, s * 0.5, -0.3, 0.12, 0.22, 0.2, 0.43), 0.05); // temporal lobe
-  d = smax(d, 0.03 - s * x, 0.04); // medial wall: longitudinal fissure
+  for (const side of [1, -1]) d = smin(d, sdEllipsoid(x, y, z, side * 0.46, -0.29, 0.12, 0.21, 0.2, 0.43), 0.05);
+  d = smax(d, FISSURE - Math.abs(x), 0.015);
   return smax(d, -0.52 - y, 0.05);
 }
 
@@ -76,14 +91,14 @@ const CEREBELLUM = 1;
 const STEM = 2;
 
 function field(x: number, y: number, z: number): [number, number] {
-  const cerebrum = Math.min(hemisphere(x, y, z, 1), hemisphere(x, y, z, -1));
+  const cerebrumD = cerebrum(x, y, z);
   const cerebellum = smin(
-    sdEllipsoid(x, y, z, 0.21, -0.5, -0.6, 0.27, 0.18, 0.25),
-    sdEllipsoid(x, y, z, -0.21, -0.5, -0.6, 0.27, 0.18, 0.25),
+    sdEllipsoid(x, y, z, 0.22, -0.46, -0.58, 0.28, 0.17, 0.25),
+    sdEllipsoid(x, y, z, -0.22, -0.46, -0.58, 0.28, 0.17, 0.25),
     0.12,
   );
-  const stem = sdCapsule(x, y, z, 0, -0.35, -0.3, 0, -0.98, -0.42, 0.1);
-  if (cerebrum <= cerebellum && cerebrum <= stem) return [cerebrum, CEREBRUM];
+  const stem = sdCapsule(x, y, z, 0, -0.35, -0.3, 0, -0.9, -0.4, 0.1);
+  if (cerebrumD <= cerebellum && cerebrumD <= stem) return [cerebrumD, CEREBRUM];
   if (cerebellum <= stem) return [cerebellum, CEREBELLUM];
   return [stem, STEM];
 }
@@ -186,7 +201,7 @@ export function generateBrain({ surface = 42000, hippocampus = 2600, dust = 2200
       const sylvian = (1 - smoothstep(0, 0.035, Math.abs(y - sylvianY(z)))) * smoothstep(0.3, 0.42, ax) * smoothstep(-0.3, -0.15, z) * (1 - smoothstep(0.5, 0.6, z));
       const cz = centralZ(y) + 0.03 * noise(y * 6, x * 6, 3.3);
       const central = (1 - smoothstep(0, 0.022, Math.abs(z - cz))) * smoothstep(sylvianY(z), sylvianY(z) + 0.08, y) * 0.95;
-      const fissure = (1 - smoothstep(0, 0.05, Math.abs(x) - 0.03)) * smoothstep(0.2, 0.45, y) * 0.6;
+      const fissure = (1 - smoothstep(0, 0.02, Math.abs(x) - FISSURE)) * smoothstep(0.2, 0.45, y) * 0.3;
       groove = Math.max(groove, sylvian, central, fissure);
       if (random() < groove * 0.68) continue;
       x -= nx * 0.032 * groove;
