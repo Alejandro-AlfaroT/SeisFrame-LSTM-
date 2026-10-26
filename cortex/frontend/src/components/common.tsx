@@ -55,7 +55,7 @@ export function RecordPicker({ onPick, exclude = [], placeholder = "Find a recor
     const skip = new Set(excludeKey.split(","));
     const handle = window.setTimeout(() => {
       api
-        .search({ q, limit: 8 })
+        .search({ q, limit: 8, include_documents: false })
         .then((r) => setResults(r.results.filter((x) => !skip.has(x.id))))
         .catch(() => setResults([]));
     }, 180);

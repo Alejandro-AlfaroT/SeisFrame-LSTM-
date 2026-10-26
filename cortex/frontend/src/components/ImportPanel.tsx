@@ -225,6 +225,10 @@ export default function ImportPanel({ nav }: { nav: Nav }) {
       <p className="tiny muted">
         Large folders can also be imported from the command line: <code>python -m cortex_server import-md "&lt;folder&gt;" --dry-run</code>
       </p>
+      <p className="tiny muted">
+        PDFs: this page imports Markdown only. A command-line folder import also reads the text of every PDF in the folder (in a separate, time-limited process) so you can search inside
+        papers; scanned PDFs without a text layer are listed but not searchable.
+      </p>
     </div>
   );
 }

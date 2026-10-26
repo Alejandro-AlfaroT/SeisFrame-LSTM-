@@ -1,13 +1,16 @@
-"""Explicit Markdown import (single files, uploads, or an Obsidian-style folder).
+"""Explicit Markdown import (single files, uploads, or an Obsidian-style folder), with the PDFs
+found in a folder.
 
 Imported documents are untrusted:
 * only .md/.markdown files are read, each at most MAX_FILE_BYTES; symlinks and paths that
   resolve outside the chosen folder are skipped; hidden folders are never entered;
 * YAML frontmatter is parsed with yaml.safe_load and reduced to bounded, JSON-safe values;
 * content is stored as text and never executed; the UI renders it without raw HTML;
+* PDFs are read in a separate, time-limited process and only their text is kept (documents.py);
 * nothing is marked verified, and a dry run previews every action without writing.
 Re-importing the same source updates unchanged-in-CORTEX records (the previous state is kept
-in version history) and skips records that were edited inside CORTEX since their import.
+in version history) and skips records that were edited inside CORTEX since their import. A PDF's
+text is extracted again only when the file changed.
 """
 
 from __future__ import annotations
@@ -22,11 +25,11 @@ import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
-from . import conflicts
+from . import conflicts, documents
 from .db import new_id, transaction, utcnow
 from .repository import (
     DATE_RE,
@@ -43,6 +46,7 @@ from .textutil import WIKILINK_RE, sanitize_text
 
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_FILES = 5000
+MAX_PDFS = 2000
 MARKDOWN_SUFFIXES = (".md", ".markdown")
 DEFAULT_EXCLUDED_DIRS = ("templates",)
 ROUTES = ("inbox", "by_type")
@@ -86,6 +90,14 @@ class SourceFile:
 
 
 @dataclass
+class PdfSource:
+    path: str  # relative to the import folder, with forward slashes
+    file: Path  # absolute location on disk
+    size: int
+    mtime_ns: int
+
+
+@dataclass
 class ImportOptions:
     route: str = "inbox"
     project_id: str | None = None
@@ -122,15 +134,19 @@ def _excluded(rel_path: str, exclude_dirs: tuple[str, ...]) -> str | None:
 
 
 def collect_directory(
-    root: Path, exclude_dirs: tuple[str, ...] = DEFAULT_EXCLUDED_DIRS
+    root: Path, exclude_dirs: tuple[str, ...] = DEFAULT_EXCLUDED_DIRS, pdfs: list[PdfSource] | None = None
 ) -> tuple[list[SourceFile], list[dict[str, str]]]:
-    """Read every Markdown file under root. Returns (files, skipped entries)."""
+    """Read every Markdown file under root. Returns (files, skipped entries).
+
+    When `pdfs` is a list, the PDF files found on the way are appended to it (located, not read).
+    """
     root = root.resolve(strict=True)
     if not root.is_dir():
         raise InvalidInput(f"{root} is not a folder")
     excluded = {d.lower() for d in exclude_dirs}
     files: list[SourceFile] = []
     skipped: list[dict[str, str]] = []
+    found_pdfs = pdfs if pdfs is not None else []
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         rel_dir = Path(dirpath).relative_to(root)
         kept = []
@@ -146,7 +162,8 @@ def collect_directory(
                 kept.append(name)
         dirnames[:] = kept
         for name in sorted(filenames):
-            if not name.lower().endswith(MARKDOWN_SUFFIXES):
+            is_pdf = pdfs is not None and name.lower().endswith(".pdf")
+            if not (is_pdf or name.lower().endswith(MARKDOWN_SUFFIXES)):
                 continue
             path = Path(dirpath) / name
             rel = (rel_dir / name).as_posix()
@@ -155,6 +172,15 @@ def collect_directory(
                 continue
             if not path.resolve().is_relative_to(root):
                 skipped.append({"path": rel, "reason": "resolves outside the import folder"})
+                continue
+            if is_pdf:
+                stat = path.stat()
+                if stat.st_size > documents.MAX_PDF_BYTES:
+                    skipped.append({"path": rel, "reason": f"PDF larger than {documents.MAX_PDF_BYTES} bytes"})
+                elif len(found_pdfs) >= MAX_PDFS:
+                    raise InvalidInput(f"more than {MAX_PDFS} PDFs; import a smaller folder")
+                else:
+                    found_pdfs.append(PdfSource(rel, path.resolve(), stat.st_size, stat.st_mtime_ns))
                 continue
             if path.stat().st_size > MAX_FILE_BYTES:
                 skipped.append({"path": rel, "reason": f"larger than {MAX_FILE_BYTES} bytes"})
@@ -327,7 +353,11 @@ def import_markdown(
     files: list[SourceFile],
     options: ImportOptions,
     skipped: list[dict[str, str]] | None = None,
+    pdfs: list[PdfSource] | None = None,
+    progress: Callable[[int, int, Path, documents.Extraction], None] | None = None,
 ) -> dict[str, Any]:
+    """Import Markdown files and PDFs in one batch. PDF text is extracted before the write
+    transaction starts (it can take minutes), so the database is locked only while saving."""
     if options.route not in ROUTES:
         raise InvalidInput(f"route must be one of {', '.join(ROUTES)}")
     if len(files) > MAX_FILES:
@@ -356,13 +386,32 @@ def import_markdown(
         "counts": counts,
         "links": link_stats,
         "conflicts": None,
+        "pdfs": None,
     }
+    extractor = documents.extractor_id()
+    pdf_jobs: list[_PdfJob] = []
+    if pdfs and extractor is None:
+        report["skipped"] += [{"path": p.path, "reason": "reading PDFs needs the pypdf package"} for p in pdfs]
+    elif pdfs:
+        pdf_jobs = _plan_pdfs(conn, pdfs, label, extractor)
+        to_read = [job for job in pdf_jobs if job.action in ("created", "updated")]
+        if not options.dry_run:
+            extracted = documents.extract_many([job.source.file for job in to_read], progress)
+            for job in to_read:
+                job.extraction = extracted[job.source.file]
+    pdf_entries: list[dict[str, Any]] = []
     try:
         with transaction(conn):
             conn.execute(
                 "INSERT INTO import_batches (id, source, route, created_at) VALUES (?, ?, ?, ?)",
                 (batch_id, options.root or label, options.route, now),
             )
+            # PDFs first, so wikilinks from notes to them resolve below.
+            for job in pdf_jobs:
+                entry = _import_pdf(conn, job, options, label, batch_id, now, extractor or "")
+                counts[entry["action"]] += 1
+                entries.append(entry)
+                pdf_entries.append(entry)
             seen_paths: set[str] = set()
             for f in files:
                 if f.path in seen_paths:
@@ -419,6 +468,18 @@ def import_markdown(
     except _DryRun:
         pass
     report["counts"] = dict(counts)
+    if pdf_jobs:
+        report["pdfs"] = {
+            "found": len(pdf_jobs),
+            "read": sum(job.extraction is not None for job in pdf_jobs),
+            "statuses": dict(Counter(e["pdf"]["status"] for e in pdf_entries if "pdf" in e)),
+            "attention": [
+                {"path": e["path"], "status": e["pdf"]["status"], "text_pages": e["pdf"]["text_pages"],
+                 "pages": e["pdf"]["pages"], "note": e["pdf"]["error"]}
+                for e in pdf_entries
+                if e.get("pdf", {}).get("status") in ("partial", "no_text", "failed")
+            ],
+        }
     if not options.dry_run and touched:
         found = conflicts.detect(conn, record_ids=list(touched))
         report["conflicts"] = {"new": len(found["new_conflicts"])}
@@ -491,6 +552,121 @@ def _import_one(
     }
     update_record(conn, existing["id"], patch, reason=f"re-import {batch_id}", source_hash=digest, log=False)
     entry["action"] = "updated"
+    return entry
+
+
+# ---------------------------------------------------------------- PDFs
+
+
+@dataclass
+class _PdfJob:
+    source: PdfSource
+    source_ref: str
+    existing: sqlite3.Row | None
+    action: str  # created | updated | unchanged | skipped-trashed
+    sha256: str = ""
+    extraction: documents.Extraction | None = None
+
+
+def _plan_pdfs(conn: sqlite3.Connection, pdfs: list[PdfSource], label: str, extractor: str) -> list[_PdfJob]:
+    """Which PDFs are new, changed or unchanged since they were last read. A file whose size and
+    modification time match is not hashed again; one that failed before is always retried."""
+    jobs = []
+    for pdf in pdfs:
+        source_ref = f"{label}/{pdf.path}"
+        existing = find_by_source_ref(conn, source_ref)
+        job = _PdfJob(pdf, source_ref, existing, "created" if existing is None else "updated")
+        doc = documents.stored(conn, existing["id"]) if existing is not None else None
+        if existing is not None and existing["deleted_at"] is not None:
+            job.action = "skipped-trashed"
+        elif doc is not None and doc["extractor"] == extractor and doc["status"] != "failed":
+            if (doc["bytes"], doc["mtime_ns"]) == (pdf.size, pdf.mtime_ns):
+                job.sha256 = doc["sha256"]
+            else:
+                job.sha256 = documents.file_sha256(pdf.file)
+            if job.sha256 == doc["sha256"]:
+                job.action = "unchanged"
+        if job.action in ("created", "updated") and not job.sha256:
+            job.sha256 = documents.file_sha256(pdf.file)
+        jobs.append(job)
+    return jobs
+
+
+def _pdf_report(row: sqlite3.Row | documents.Extraction) -> dict[str, Any]:
+    if isinstance(row, documents.Extraction):
+        return {"status": row.status, "pages": row.page_count, "text_pages": row.text_pages,
+                "error": row.error, "seconds": round(row.seconds, 1)}
+    return {"status": row["status"], "pages": row["page_count"], "text_pages": row["text_pages"], "error": row["error"]}
+
+
+def _import_pdf(
+    conn: sqlite3.Connection,
+    job: _PdfJob,
+    options: ImportOptions,
+    label: str,
+    batch_id: str,
+    now: str,
+    extractor: str,
+) -> dict[str, Any]:
+    pdf = job.source
+    title = sanitize_text(PurePosixPath(pdf.path).stem).strip()[:300] or "PDF"
+    category = "facts" if options.route == "by_type" else "inbox"
+    entry: dict[str, Any] = {"path": pdf.path, "title": title, "category": category, "kind": "pdf",
+                             "warnings": [], "action": job.action}
+    if job.existing is not None:
+        entry.update(record_id=job.existing["id"], category=job.existing["category"], title=job.existing["title"])
+    if job.action == "skipped-trashed":
+        return entry
+    if job.action == "unchanged":
+        record_id = entry["record_id"]
+        doc = documents.stored(conn, record_id)
+        if doc["path"] != str(pdf.file) or doc["mtime_ns"] != pdf.mtime_ns:
+            documents.note_location(conn, record_id, pdf.file, pdf.mtime_ns)
+        entry["pdf"] = _pdf_report(doc)
+        return entry
+
+    extraction = job.extraction
+    entry["pdf"] = _pdf_report(extraction) if extraction else {
+        "status": "not read (dry run)", "pages": None, "text_pages": None, "error": None}
+    content = documents.describe(extraction, pdf.path) if extraction else f"PDF, not read yet.\n\nFile: `{pdf.path}`\n"
+    import_meta: dict[str, Any] = {"source": label, "path": pdf.path, "sha256": job.sha256, "imported_at": now,
+                                   "batch_id": batch_id}
+    if options.root:
+        import_meta["root"] = options.root
+    keep_record_text = False
+    if job.existing is None:
+        metadata: dict[str, Any] = {"import": import_meta}
+        if category == "inbox":
+            metadata["suggested_category"] = "facts"
+        fields: dict[str, Any] = {
+            "title": title,
+            "content": content,
+            "category": category,
+            "kind": "pdf",
+            "source_ref": job.source_ref,
+            "occurred_at": occurred_at_for({}, pdf.path),
+            "tags": normalize_tags(["imported", "pdf", *(t for t in [_folder_slug(pdf.path)] if t), *options.extra_tags]),
+            "metadata": metadata,
+        }
+        if options.project_id:
+            fields["project_id"] = options.project_id
+        record_id = create_record(conn, fields, import_batch_id=batch_id, source_hash=job.sha256, log=False)
+        entry["record_id"] = record_id
+    else:
+        record_id = job.existing["id"]
+        old_meta = json.loads(job.existing["metadata"])
+        keep_record_text = (
+            job.existing["updated_at"] != old_meta.get("import", {}).get("synced_at") and not options.update_edited
+        )
+        if keep_record_text:
+            entry["warnings"].append("edited in CORTEX: the record was kept as it is; the PDF text was refreshed")
+        else:
+            patch = {"content": content, "metadata": {**old_meta, "import": {**old_meta.get("import", {}), **import_meta}}}
+            update_record(conn, record_id, patch, reason=f"re-import {batch_id}", source_hash=job.sha256, log=False)
+    if extraction is not None:
+        documents.store(conn, record_id, pdf.file, job.sha256, pdf.size, pdf.mtime_ns, extraction, extractor)
+    if not keep_record_text:
+        _mark_synced(conn, record_id)
     return entry
 
 

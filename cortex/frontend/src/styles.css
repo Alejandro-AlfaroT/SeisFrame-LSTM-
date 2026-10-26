@@ -754,6 +754,64 @@ mark {
   padding: 0 0 7px;
 }
 
+/* PDF passages in search results */
+.passages {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--line-2);
+}
+.passage {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 3px 4px;
+  text-align: left;
+  white-space: normal;
+}
+.passage:hover {
+  background: var(--panel-3);
+}
+.page-no {
+  flex: none;
+  min-width: 42px;
+  font-size: 10.5px;
+  color: var(--lime-2);
+}
+
+/* PDF text in a record */
+.page-find input {
+  width: 100%;
+  margin: 6px 0 2px;
+}
+.page-matches {
+  margin: 4px 0;
+}
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+.page-nav input {
+  width: 64px;
+}
+.page-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #c9cdd2;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
 .search-input {
   width: 100%;
   font-size: 14px;

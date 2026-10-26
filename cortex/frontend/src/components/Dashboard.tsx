@@ -29,7 +29,8 @@ export function Dashboard({ stats, error, includeDemo, onToggleDemo, nav }: { st
         <Tile label="Inbox" value={stats.inbox} onClick={() => nav.go({ kind: "region", region: "temporal" })} />
       </div>
       <div className="mono tiny muted meta-line">
-        {stats.relationships} links · {stats.trash} in trash · backup {stats.last_backup ? stats.last_backup.slice(7, 22) : "never"}
+        {stats.relationships} links · {stats.pdfs > 0 && `${stats.pdfs} PDFs (${stats.pdf_pages_searchable.toLocaleString()} pages searchable) · `}
+        {stats.trash} in trash · backup {stats.last_backup ? stats.last_backup.slice(7, 22) : "never"}
       </div>
       {stats.demo_records > 0 && (
         <div className="demo-flag mono tiny">

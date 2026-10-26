@@ -2,6 +2,9 @@ fastapi>=0.115,<1.0
 uvicorn>=0.30,<1.0
 pydantic>=2.7,<3.0
 PyYAML>=6.0,<7.0
+# PDF text extraction; cryptography opens PDFs encrypted with AES (many published papers)
+pypdf>=6.0,<7.0
+cryptography>=42,<47
 
 # tests
 pytest>=8.0,<9.0

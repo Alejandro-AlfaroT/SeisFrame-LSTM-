@@ -24,7 +24,7 @@ export type Panel =
   | { kind: "overview" }
   | { kind: "region"; region: RegionId }
   | { kind: "cluster"; clusterId: string }
-  | { kind: "record"; id: string }
+  | { kind: "record"; id: string; page?: number; q?: string }
   | { kind: "search"; q?: string }
   | { kind: "capture"; mode?: CaptureMode }
   | { kind: "import" }
@@ -34,7 +34,8 @@ export type Panel =
 
 export interface Nav {
   go: (p: Panel) => void;
-  openRecord: (id: string) => void;
+  /** `at` opens a PDF record at a page, with the words of `q` marked. */
+  openRecord: (id: string, at?: { page: number; q?: string }) => void;
   openRef: (ref: string) => void;
   changed: () => void;
   toast: (msg: string) => void;
@@ -92,7 +93,7 @@ export default function App() {
       return h.slice(0, -1);
     });
   };
-  const openRecord = useCallback((id: string) => go({ kind: "record", id }), [go]);
+  const openRecord = useCallback((id: string, at?: { page: number; q?: string }) => go({ kind: "record", id, ...at }), [go]);
   const openRef = useCallback(
     (ref: string) => {
       api
@@ -157,7 +158,7 @@ export default function App() {
       case "cluster":
         return cluster ? <ClusterPanel cluster={cluster} map={brain.data ?? null} nav={nav} /> : <p className="muted pad">Cluster no longer exists.</p>;
       case "record":
-        return <RecordPanel key={panel.id} id={panel.id} rev={rev} nav={nav} />;
+        return <RecordPanel key={`${panel.id}:${panel.page ?? ""}:${panel.q ?? ""}`} id={panel.id} rev={rev} nav={nav} page={panel.page} q={panel.q} />;
       case "search":
         return <SearchPanel initialQuery={panel.q ?? ""} nav={nav} onResults={setSearchHits} />;
       case "capture":

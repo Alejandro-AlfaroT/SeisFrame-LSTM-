@@ -2,6 +2,9 @@
 
     python -m cortex_server serve
     python -m cortex_server import-md "<folder>" --route by_type --project "SeisFrame V6" --dry-run
+
+import-md also reads the text of the PDFs in the folder (new or changed ones only); --no-pdfs
+skips them.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import backup, conflicts, demo, importer, repository
+from . import backup, conflicts, demo, documents, importer, repository
 from .config import Settings
 from .db import connect, migrate
 
@@ -38,10 +41,19 @@ def cmd_serve(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def _pdf_progress(done: int, total: int, path: Path, result: documents.Extraction) -> None:
+    pages = f"{result.text_pages}/{result.page_count} pages with text" if result.status != "failed" else result.error
+    print(f"  [{done}/{total}] {path.name} · {result.status} · {pages} · {result.seconds:.1f} s", file=sys.stderr, flush=True)
+
+
 def cmd_import(args: argparse.Namespace, settings: Settings) -> int:
     root = Path(args.folder)
     exclude = tuple(args.exclude) if args.exclude is not None else importer.DEFAULT_EXCLUDED_DIRS
-    files, skipped = importer.collect_directory(root, exclude)
+    pdfs: list[importer.PdfSource] | None = None if args.no_pdfs else []
+    files, skipped = importer.collect_directory(root, exclude, pdfs)
+    if pdfs and not args.dry_run:
+        size = sum(p.size for p in pdfs) / 2**20
+        print(f"Reading the text of new or changed PDFs among {len(pdfs)} ({size:.0f} MB) …", file=sys.stderr, flush=True)
     conn = _open(settings)
     try:
         project_id = None
@@ -65,7 +77,7 @@ def cmd_import(args: argparse.Namespace, settings: Settings) -> int:
             exclude_dirs=exclude,
             root=str(root.resolve()),
         )
-        report = importer.import_markdown(conn, files, options, skipped)
+        report = importer.import_markdown(conn, files, options, skipped, pdfs, _pdf_progress)
     finally:
         conn.close()
     if args.verbose:
@@ -83,6 +95,7 @@ def cmd_import(args: argparse.Namespace, settings: Settings) -> int:
                 "counts": report["counts"],
                 "by_category": by_category,
                 "links": report["links"],
+                "pdfs": report["pdfs"],
                 "skipped": report["skipped"],
                 "conflicts": report["conflicts"],
                 "warnings": [{"path": e["path"], "warnings": e["warnings"]} for e in report["files"] if e["warnings"]],
@@ -175,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label", help="source label used in source references (default: folder name)")
     p.add_argument("--exclude", nargs="*", help="folder names to skip (default: Templates)")
     p.add_argument("--update-edited", action="store_true", help="also refresh records edited inside CORTEX")
+    p.add_argument("--no-pdfs", action="store_true", help="skip PDF files (by default their text is extracted)")
     p.add_argument("--dry-run", action="store_true", help="report what would happen without writing")
     p.add_argument("--verbose", action="store_true")
     p.set_defaults(func=cmd_import)

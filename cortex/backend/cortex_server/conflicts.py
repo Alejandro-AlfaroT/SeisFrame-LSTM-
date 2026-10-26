@@ -197,9 +197,10 @@ def detect(
 ) -> dict[str, Any]:
     """Scan for new candidate conflicts and store them as 'open'. Never modifies records."""
     focus = set(record_ids) if record_ids is not None else None
+    # A PDF's record body is generated ("PDF · 23 pages …"), not a statement to compare.
     rows = conn.execute(
         "SELECT id, title, content, is_demo, subject, predicate, value, occurred_at"
-        " FROM records WHERE deleted_at IS NULL"
+        " FROM records WHERE deleted_at IS NULL AND id NOT IN (SELECT record_id FROM documents)"
     ).fetchall()
     demo = {r["id"]: r["is_demo"] for r in rows}
     day = {r["id"]: (r["occurred_at"] or "")[:10] for r in rows}

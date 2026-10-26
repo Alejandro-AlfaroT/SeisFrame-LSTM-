@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { api, type RecordPatch } from "../api";
 import type { Nav } from "../App";
-import { errorText, fmtDate, useAsync } from "../lib";
-import type { Category, MemoryRecord, RelationshipView } from "../types";
+import { errorText, fmtDate, Snippet, useAsync } from "../lib";
+import type { Category, DocumentInfo, MemoryRecord, RelationshipView } from "../types";
 import { CATEGORY_REGION, REGION_META } from "../types";
 import { Badges, CategoryChip, ProjectSelect, RecordPicker, TagInput } from "./common";
 import Markdown from "./Markdown";
@@ -29,7 +29,7 @@ function toDraft(r: MemoryRecord): Draft {
   };
 }
 
-export default function RecordPanel({ id, rev, nav }: { id: string; rev: number; nav: Nav }) {
+export default function RecordPanel({ id, rev, nav, page, q }: { id: string; rev: number; nav: Nav; page?: number; q?: string }) {
   const rec = useAsync(() => api.record(id), [id, rev]);
   const relTypes = useAsync(() => api.relationshipTypes(), []);
   const similar = useAsync(() => api.similar(id), [id, rev]);
@@ -264,6 +264,8 @@ export default function RecordPanel({ id, rev, nav }: { id: string; rev: number;
         )}
       </section>
 
+      {r.document && <PdfPages id={r.id} doc={r.document} initialPage={page} initialQuery={q} />}
+
       <section>
         <h4 className="section-title">Relationships</h4>
         <RelList title="outgoing" items={r.relationships.outgoing} types={relTypes.data ?? []} nav={nav} busy={busy} act={act} arrow="→" />
@@ -351,6 +353,95 @@ export default function RecordPanel({ id, rev, nav }: { id: string; rev: number;
       )}
       <p className="mono tiny muted">id {r.id}</p>
     </article>
+  );
+}
+
+/** The text CORTEX extracted from a PDF, page by page, with an in-document search. */
+export function PdfPages({ id, doc, initialPage, initialQuery }: { id: string; doc: DocumentInfo; initialPage?: number; initialQuery?: string }) {
+  const [page, setPage] = useState(Math.min(Math.max(initialPage ?? 1, 1), Math.max(doc.page_count, 1)));
+  const [draft, setDraft] = useState(initialQuery ?? "");
+  const [query, setQuery] = useState(initialQuery ?? "");
+  const searchable = doc.text_pages > 0;
+  const current = useAsync(() => (searchable ? api.page(id, page, query || undefined) : Promise.resolve(null)), [id, page, query, searchable]);
+  const matches = current.data?.matches ?? [];
+  const prevMatch = [...matches].reverse().find((m) => m < page);
+  const nextMatch = matches.find((m) => m > page);
+  const go = (n: number) => setPage(Math.min(Math.max(n, 1), doc.page_count));
+  const meta = Object.entries(doc.pdf_meta).filter(([k]) => k === "title" || k === "author");
+
+  return (
+    <section className="pdf">
+      <h4 className="section-title">
+        PDF text <span className="muted tiny mono">{doc.extractor}</span>
+      </h4>
+      {doc.status === "no_text" && <p className="notice">No text layer: the pages are images (a scan). CORTEX does not run OCR, so this PDF cannot be searched inside.</p>}
+      {doc.status === "failed" && <p className="notice warn">The text could not be extracted: {doc.error ?? "unknown error"}.</p>}
+      {doc.status === "partial" && doc.error && <p className="notice">{doc.error}.</p>}
+      <dl className="meta-grid mono">
+        <dt>pages</dt>
+        <dd>
+          {doc.page_count} · text on {doc.text_pages}
+        </dd>
+        {meta.map(([k, v]) => (
+          <Fragment key={k}>
+            <dt>{k}</dt>
+            <dd className="break">{v}</dd>
+          </Fragment>
+        ))}
+        <dt>file</dt>
+        <dd className="break">
+          <a href={api.fileUrl(id, page)} target="_blank" rel="noopener noreferrer">
+            Open PDF{searchable ? ` at p. ${page}` : ""} ↗
+          </a>{" "}
+          <span className="muted">{doc.path}</span>
+        </dd>
+        <dt>read</dt>
+        <dd>{fmtDate(doc.extracted_at, true)}</dd>
+      </dl>
+      {searchable && (
+        <>
+          <form
+            className="page-find"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setQuery(draft.trim());
+            }}
+          >
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="find in this PDF ⏎" aria-label="Find in this PDF" />
+          </form>
+          {query && (
+            <p className="mono tiny muted page-matches">
+              {matches.length ? `“${query}” on ${matches.length} page${matches.length === 1 ? "" : "s"}` : `“${query}” is not in the extracted text`}
+              {matches.length > 0 && (
+                <>
+                  {" · "}
+                  <button className="link" disabled={prevMatch === undefined} onClick={() => prevMatch !== undefined && go(prevMatch)}>
+                    ‹ previous
+                  </button>{" "}
+                  <button className="link" disabled={nextMatch === undefined} onClick={() => nextMatch !== undefined && go(nextMatch)}>
+                    next ›
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+          <div className="page-nav mono tiny">
+            <button onClick={() => go(page - 1)} disabled={page <= 1} aria-label="Previous page">
+              ‹
+            </button>
+            <label>
+              page <input type="number" min={1} max={doc.page_count} value={page} onChange={(e) => e.target.value && go(Number(e.target.value))} /> of {doc.page_count}
+            </label>
+            <button onClick={() => go(page + 1)} disabled={page >= doc.page_count} aria-label="Next page">
+              ›
+            </button>
+          </div>
+          <div className="page-text" data-testid="page-text">
+            {current.error ? <span className="warn">{current.error}</span> : !current.data ? <span className="muted">loading…</span> : current.data.has_text ? <Snippet text={current.data.text} /> : <span className="muted">No text on this page (a figure, a scan or a blank page).</span>}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

@@ -135,6 +135,7 @@ def import_vault(explicit: str | None) -> None:
         print('    Import it later with: python cortex/setup_cortex.py --vault "<folder>"')
         return
     print(f"    vault: {vault}")
+    print("    Notes, then the text of new or changed PDFs (the first time: a minute or two).")
     run([VENV_PYTHON, BACKEND / "run.py", "import-md", vault, "--route", "by_type", "--project", PROJECT])
 
 

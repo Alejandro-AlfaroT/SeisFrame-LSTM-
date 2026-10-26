@@ -21,6 +21,7 @@ export default function SearchPanel({ initialQuery, nav, onResults }: { initialQ
   const [includeDemo, setIncludeDemo] = useState(true);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<"notes" | "pdfs">("notes");
   const allTags = useAsync(() => api.tags(), []);
 
   useEffect(() => setQ(initialQuery), [initialQuery]);
@@ -43,8 +44,8 @@ export default function SearchPanel({ initialQuery, nav, onResults }: { initialQ
         .search(params)
         .then((r) => {
           setResult(r);
-          setError(r.error ?? null);
-          onResults(r.results.map((x) => x.id));
+          setError(r.error ?? r.documents?.error ?? null);
+          onResults([...r.results.map((x) => x.id), ...(r.documents?.results.map((d) => d.id) ?? [])]);
         })
         .catch((e) => setError(errorText(e)));
     }, 160);
@@ -52,6 +53,9 @@ export default function SearchPanel({ initialQuery, nav, onResults }: { initialQ
   }, [q, mode, categories, tags, projectId, dateFrom, dateTo, verifiedOnly, includeDemo, onResults]);
 
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  // PDF passages exist only for a full-text query; when no note matches but pages do, show those.
+  const docs = result?.mode === "fulltext" && result.documents && result.documents.total_documents > 0 ? result.documents : null;
+  const shown = docs && (view === "pdfs" || result!.total === 0) ? "pdfs" : "notes";
 
   return (
     <div className="search">
@@ -111,13 +115,59 @@ export default function SearchPanel({ initialQuery, nav, onResults }: { initialQ
         )}
       </div>
       {error && <p className="notice warn">{error}</p>}
-      {result && (
+      {docs && (
+        <div className="seg">
+          <button className={shown === "notes" ? "active" : ""} onClick={() => setView("notes")}>
+            Notes <span className="mono tiny">{result!.total}</span>
+          </button>
+          <button className={shown === "pdfs" ? "active" : ""} onClick={() => setView("pdfs")}>
+            In PDFs{" "}
+            <span className="mono tiny">
+              {docs.total_pages}
+              {docs.capped ? "+" : ""} page{docs.total_pages === 1 ? "" : "s"} · {docs.total_documents} file{docs.total_documents === 1 ? "" : "s"}
+            </span>
+          </button>
+        </div>
+      )}
+      {result && shown === "notes" && (
         <p className="mono tiny muted">
           {result.total} result{result.total === 1 ? "" : "s"} · {result.mode === "browse" ? "newest first" : result.mode === "similar" ? "lexical similarity (not neural embeddings)" : "ranked by bm25"} · lit in the brain
         </p>
       )}
+      {docs && shown === "pdfs" && (
+        <>
+          <p className="mono tiny muted">
+            pages ranked by bm25 · best 3 per file
+            {docs.total_documents > docs.results.length ? ` · top ${docs.results.length} of ${docs.total_documents} files` : ""} · lit in the brain
+          </p>
+          <ul className="results">
+            {docs.results.map((d) => (
+              <li key={d.id}>
+                <button className="row-main" onClick={() => nav.openRecord(d.id, { page: d.passages[0]?.page ?? 1, q })}>
+                  <span className="row-title">{d.title}</span>
+                  <span className="row-meta mono">
+                    <CategoryChip category={d.category} /> pdf · {d.pages_matched} of {d.page_count} pages match <Badges r={d} />
+                  </span>
+                </button>
+                <ul className="passages">
+                  {d.passages.map((p) => (
+                    <li key={p.page}>
+                      <button className="passage" onClick={() => nav.openRecord(d.id, { page: p.page, q })}>
+                        <span className="mono page-no">p. {p.page}</span>
+                        <span className="row-excerpt">
+                          <Snippet text={p.snippet} />
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <ul className="results">
-        {result?.results.map((r) => (
+        {shown === "notes" && result?.results.map((r) => (
           <li key={r.id}>
             <button className="row-main" onClick={() => nav.openRecord(r.id)}>
               <span className="row-title">{r.title}</span>

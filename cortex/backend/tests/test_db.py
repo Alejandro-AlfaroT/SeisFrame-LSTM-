@@ -9,11 +9,12 @@ from cortex_server.db import MIGRATIONS_DIR, connect, migrate, schema_version, t
 def test_fresh_database_gets_full_schema(tmp_path: Path) -> None:
     db = tmp_path / "c.db"
     applied = migrate(db)
-    assert applied == [1]
+    assert applied == [1, 2]
     conn = connect(db)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table')")}
     assert {"records", "tags", "relationships", "record_versions", "conflicts", "activity", "records_fts"} <= tables
-    assert schema_version(conn) == 1
+    assert {"documents", "document_pages", "document_pages_fts"} <= tables
+    assert schema_version(conn) == 2
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
@@ -47,6 +48,23 @@ def test_new_migration_backs_up_existing_data_first(tmp_path: Path) -> None:
     conn = connect(db)
     assert schema_version(conn) == 2
     assert conn.execute("SELECT pinned FROM records").fetchone()[0] == 0
+
+
+def test_documents_migration_upgrades_a_version_1_database_and_keeps_its_records(tmp_path: Path) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "0001_initial.sql").write_text((MIGRATIONS_DIR / "0001_initial.sql").read_text("utf-8"), "utf-8")
+    db = tmp_path / "c.db"
+    migrate(db, tmp_path / "backups", migrations)
+    conn = connect(db)
+    conn.execute("INSERT INTO records (id, title, category, created_at, updated_at) VALUES ('r1', 'Old note', 'facts', 'x', 'x')")
+    conn.close()
+
+    assert migrate(db, tmp_path / "backups") == [2]  # the real migrations folder
+    assert len(list((tmp_path / "backups").glob("cortex-*-pre-migration-0002.db"))) == 1
+    conn = connect(db)
+    assert conn.execute("SELECT title FROM records").fetchone()[0] == "Old note"
+    assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
 
 
 def test_failed_migration_rolls_back_completely(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ import type {
   Category,
   ConflictDetail,
   ConflictSummary,
+  DocumentPage,
   GraphData,
   ImportReport,
   MemoryRecord,
@@ -78,6 +79,7 @@ export interface SearchParams {
   verified?: boolean;
   include_demo?: boolean;
   status?: string;
+  include_documents?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -124,6 +126,9 @@ export const api = {
   versions: (id: string) => request<Version[]>("GET", `/records/${id}/versions`),
   revert: (id: string, versionId: number) => request<MemoryRecord>("POST", `/records/${id}/revert`, { version_id: versionId }),
   similar: (id: string, limit = 8) => request<SearchResult>("GET", `/records/${id}/similar`, undefined, { limit }),
+  page: (id: string, page: number, q?: string) => request<DocumentPage>("GET", `/records/${id}/pages/${page}`, undefined, { q }),
+  /** The original PDF, opened by the browser's own viewer (at a page via #page=N). */
+  fileUrl: (id: string, page?: number) => `${buildUrl(`/records/${id}/file`)}${page ? `#page=${page}` : ""}`,
   trash: () => request<RecordSummary[]>("GET", "/trash"),
 
   createRelationship: (source_id: string, target_id: string, rel_type: string, note?: string) =>

@@ -1,4 +1,4 @@
-"""Full-text search (SQLite FTS5) with filters, plus TF-IDF similarity.
+"""Full-text search (SQLite FTS5) with filters, passage search inside PDFs, plus TF-IDF similarity.
 
 The similarity search is lexical (TF-IDF cosine over words), computed locally. It is not a
 neural-embedding semantic search; see README for how one could be plugged in.
@@ -99,8 +99,14 @@ _TAG_LIST = "(SELECT group_concat(tag, ' ') FROM tags WHERE record_id = r.id) AS
 
 
 def search(
-    conn: sqlite3.Connection, q: str, filters: Filters, limit: int = 50, offset: int = 0
+    conn: sqlite3.Connection,
+    q: str,
+    filters: Filters,
+    limit: int = 50,
+    offset: int = 0,
+    include_documents: bool = True,
 ) -> dict[str, Any]:
+    """Records ranked by bm25 and, separately, matching passages inside imported PDFs."""
     where, params = filters.sql()
     match = build_match_query(q)
     limit = max(1, min(limit, 500))
@@ -130,7 +136,72 @@ def search(
     except sqlite3.OperationalError as exc:  # defensive: malformed expression
         return {"query": q, "mode": "fulltext", "total": 0, "results": [], "error": str(exc)}
     results = [{**summarize(r), "snippet": r["snip"], "score": -r["rank"]} for r in rows]
-    return {"query": q, "mode": "fulltext", "match": match, "total": total, "results": results}
+    return {
+        "query": q,
+        "mode": "fulltext",
+        "match": match,
+        "total": total,
+        "results": results,
+        "documents": search_passages(conn, match, where, params) if include_documents else None,
+    }
+
+
+MAX_PASSAGE_HITS = 20_000
+
+
+def search_passages(
+    conn: sqlite3.Connection, match: str, where: list[str], params: list[Any], doc_limit: int = 20, per_doc: int = 3
+) -> dict[str, Any]:
+    """Pages of PDFs that match, grouped by PDF: the best few passages of each, PDFs ordered by
+    their best passage. `where`/`params` filter the PDFs' records (alias r)."""
+    try:
+        hits = conn.execute(
+            "SELECT p.id, p.record_id, p.page, bm25(document_pages_fts) AS rank"
+            " FROM document_pages_fts JOIN document_pages p ON p.id = document_pages_fts.rowid"
+            " JOIN records r ON r.id = p.record_id"
+            f" WHERE document_pages_fts MATCH ? AND {' AND '.join(where)} ORDER BY rank LIMIT ?",
+            [match] + params + [MAX_PASSAGE_HITS],
+        ).fetchall()
+    except sqlite3.OperationalError as exc:
+        return {"total_pages": 0, "total_documents": 0, "capped": False, "results": [], "error": str(exc)}
+    by_record: dict[str, list[sqlite3.Row]] = {}
+    for hit in hits:  # best first, so each list starts with that PDF's best page
+        by_record.setdefault(hit["record_id"], []).append(hit)
+    shown = list(by_record.items())[:doc_limit]
+    best = [h["id"] for _, record_hits in shown for h in record_hits[:per_doc]]
+    snippets: dict[int, str] = {}
+    if best:
+        snippets = {
+            row[0]: row[1]
+            for row in conn.execute(
+                f"SELECT rowid, snippet(document_pages_fts, 0, '{SNIPPET_OPEN}', '{SNIPPET_CLOSE}', '…', 24)"
+                f" FROM document_pages_fts WHERE document_pages_fts MATCH ? AND rowid IN ({','.join('?' * len(best))})",
+                [match, *best],
+            )
+        }
+    results = []
+    for record_id, record_hits in shown:
+        row = conn.execute(
+            f"SELECT r.*, {_TAG_LIST}, d.page_count FROM records r JOIN documents d ON d.record_id = r.id WHERE r.id = ?",
+            (record_id,),
+        ).fetchone()
+        results.append(
+            {
+                **summarize(row),
+                "page_count": row["page_count"],
+                "pages_matched": len(record_hits),
+                "passages": [
+                    {"page": h["page"], "snippet": snippets.get(h["id"], ""), "score": -h["rank"]}
+                    for h in record_hits[:per_doc]
+                ],
+            }
+        )
+    return {
+        "total_pages": len(hits),
+        "total_documents": len(by_record),
+        "capped": len(hits) >= MAX_PASSAGE_HITS,
+        "results": results,
+    }
 
 
 # ---------------------------------------------------------------- TF-IDF similarity
@@ -154,7 +225,8 @@ def _db_key(conn: sqlite3.Connection) -> str:
 def _signature(conn: sqlite3.Connection) -> tuple:
     return tuple(
         conn.execute(
-            "SELECT COUNT(*), MAX(updated_at), SUM(deleted_at IS NOT NULL), MAX(rowid) FROM records"
+            "SELECT COUNT(*), MAX(updated_at), SUM(deleted_at IS NOT NULL), MAX(rowid),"
+            " (SELECT MAX(extracted_at) FROM documents) FROM records"
         ).fetchone()
     )
 
@@ -168,8 +240,11 @@ def _weights(tokens: list[str], idf: dict[str, float]) -> dict[str, float]:
 
 def _record_tokens(row: sqlite3.Row) -> list[str]:
     # Title words count three times: titles are short and usually say what a note is about.
+    # For a PDF, its first two pages (title, abstract, introduction) count as well; its record
+    # body alone is a short generated description.
     title = index_tokens(row["title"])
-    return title * 3 + index_tokens(plain_text(row["content"])) + (row["tag_list"] or "").split()
+    opening = index_tokens(row["opening"]) if row["opening"] else []
+    return title * 3 + index_tokens(plain_text(row["content"])) + opening + (row["tag_list"] or "").split()
 
 
 def _index(conn: sqlite3.Connection) -> _Index:
@@ -180,7 +255,10 @@ def _index(conn: sqlite3.Connection) -> _Index:
         if cached and cached.signature == signature:
             return cached
     rows = conn.execute(
-        f"SELECT r.id, r.title, r.content, {_TAG_LIST} FROM records r WHERE r.deleted_at IS NULL"
+        f"SELECT r.id, r.title, r.content, {_TAG_LIST},"
+        " (SELECT group_concat(text, ' ') FROM (SELECT text FROM document_pages p WHERE p.record_id = r.id"
+        "   ORDER BY p.page LIMIT 2)) AS opening"
+        " FROM records r WHERE r.deleted_at IS NULL"
     ).fetchall()
     docs = {r["id"]: _record_tokens(r) for r in rows}
     df: Counter[str] = Counter()

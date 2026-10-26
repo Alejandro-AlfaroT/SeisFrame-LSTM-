@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import __version__, backup, brain, conflicts, demo, importer, repository, search
+from . import __version__, backup, brain, conflicts, demo, documents, importer, repository, search
 from .config import Settings
 from .db import connect, migrate, schema_version, transaction, utcnow
 from .repository import InvalidInput, NotFound, StaleWrite
@@ -232,6 +232,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         verified: bool | None = None,
         include_demo: bool = True,
         status: str | None = None,
+        include_documents: bool = True,
         limit: int = Query(50, ge=1, le=500),
         offset: int = Query(0, ge=0),
         conn: sqlite3.Connection = Conn,
@@ -242,7 +243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if mode == "similar":
             return search.similar(conn, text=q, filters=filters, limit=limit)
-        return search.search(conn, q, filters, limit, offset)
+        return search.search(conn, q, filters, limit, offset, include_documents)
 
     @app.get("/api/resolve")
     def resolve(ref: str, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
@@ -309,6 +310,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def similar(record_id: str, limit: int = Query(8, ge=1, le=50), conn: sqlite3.Connection = Conn) -> dict[str, Any]:
         repository.get_record(conn, record_id)
         return search.similar(conn, record_id=record_id, limit=limit)
+
+    @app.get("/api/records/{record_id}/pages/{page}")
+    def document_page(
+        record_id: str, page: int, q: str = Query("", max_length=500), conn: sqlite3.Connection = Conn
+    ) -> dict[str, Any]:
+        return documents.page_text(conn, record_id, page, q)
+
+    @app.get("/api/records/{record_id}/file")
+    def document_file(record_id: str, conn: sqlite3.Connection = Conn) -> FileResponse:
+        # Only files registered by a PDF import are served, from where they were imported.
+        path = documents.file_path(conn, record_id)
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            filename=path.name,
+            content_disposition_type="inline",
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"},
+        )
 
     @app.get("/api/trash")
     def trash(conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:

@@ -61,6 +61,37 @@ export interface MemoryRecord {
   relationships: { outgoing: RelationshipView[]; incoming: RelationshipView[] };
   version_count: number;
   conflicts: { id: string; status: string; reason: string; record_a_id: string; record_b_id: string }[];
+  document?: DocumentInfo | null;
+}
+
+/** What was read from a PDF record's file. */
+export interface DocumentInfo {
+  path: string;
+  sha256: string;
+  bytes: number;
+  page_count: number;
+  text_pages: number;
+  failed_pages: number;
+  status: "ok" | "partial" | "no_text" | "failed";
+  error: string | null;
+  pdf_meta: Record<string, string>;
+  extractor: string;
+  extracted_at: string;
+}
+
+export interface DocumentHit extends RecordSummary {
+  page_count: number;
+  pages_matched: number;
+  passages: { page: number; snippet: string; score: number }[];
+}
+
+export interface DocumentPage {
+  record_id: string;
+  page: number;
+  page_count: number;
+  has_text: boolean;
+  text: string;
+  matches: number[];
 }
 
 export interface Stats {
@@ -73,6 +104,8 @@ export interface Stats {
   inbox: number;
   open_conflicts: number;
   relationships: number;
+  pdfs: number;
+  pdf_pages_searchable: number;
   trash: number;
   demo_records: number;
   last_backup: string | null;
@@ -135,6 +168,13 @@ export interface SearchResult {
   total: number;
   results: RecordSummary[];
   error?: string;
+  documents?: {
+    total_pages: number;
+    total_documents: number;
+    capped: boolean;
+    results: DocumentHit[];
+    error?: string;
+  } | null;
 }
 
 export interface ConflictSummary {

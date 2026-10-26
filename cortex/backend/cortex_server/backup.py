@@ -16,7 +16,9 @@ import yaml
 from . import __version__
 from .db import backup_database, connect, schema_version, utcnow
 
-EXPORT_TABLES = ("records", "tags", "relationships", "record_versions", "conflicts", "import_batches", "activity")
+EXPORT_TABLES = (
+    "records", "tags", "relationships", "record_versions", "conflicts", "import_batches", "activity", "documents",
+)
 
 
 def create_backup(conn: sqlite3.Connection, backup_dir: Path, label: str = "manual") -> dict[str, Any]:
@@ -34,17 +36,22 @@ def list_backups(backup_dir: Path) -> list[dict[str, Any]]:
 
 
 def export_json(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Everything, including trashed records and version history."""
+    """Everything, including trashed records and version history.
+
+    The text extracted from PDFs is left out: it can be large, and importing the PDFs again
+    re-creates it. SQLite backups (create_backup) do contain it.
+    """
     data: dict[str, Any] = {
         "format": "cortex-export",
         "app_version": __version__,
         "schema_version": schema_version(conn),
         "exported_at": utcnow(),
+        "omitted": {"document_pages": "text extracted from PDFs; import the PDFs again to re-create it"},
     }
     for table in EXPORT_TABLES:
         rows = [dict(r) for r in conn.execute(f"SELECT * FROM {table}")]
         for row in rows:
-            for key in ("metadata", "snapshot", "stats"):
+            for key in ("metadata", "snapshot", "stats", "pdf_meta"):
                 if isinstance(row.get(key), str):
                     row[key] = json.loads(row[key])
         data[table] = rows

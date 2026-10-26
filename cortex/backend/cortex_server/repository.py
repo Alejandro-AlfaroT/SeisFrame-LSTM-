@@ -217,7 +217,20 @@ def get_record(conn: sqlite3.Connection, record_id: str) -> dict[str, Any]:
             (record_id, record_id),
         )
     ]
+    record["document"] = document_summary(conn, record_id)
     return record
+
+
+def document_summary(conn: sqlite3.Connection, record_id: str) -> dict[str, Any] | None:
+    """What was read from the record's PDF, if it is one (see documents.py)."""
+    doc = conn.execute(
+        "SELECT path, sha256, bytes, page_count, text_pages, failed_pages, status, error, pdf_meta, extractor,"
+        " extracted_at FROM documents WHERE record_id = ?",
+        (record_id,),
+    ).fetchone()
+    if doc is None:
+        return None
+    return {**dict(doc), "pdf_meta": json.loads(doc["pdf_meta"])}
 
 
 def find_by_source_ref(conn: sqlite3.Connection, source_ref: str) -> sqlite3.Row | None:
@@ -574,6 +587,13 @@ def stats(conn: sqlite3.Connection) -> dict[str, Any]:
             " WHERE c.status = 'open' AND a.deleted_at IS NULL AND b.deleted_at IS NULL"
         ),
         "relationships": one("SELECT COUNT(*) FROM relationships"),
+        "pdfs": one(
+            "SELECT COUNT(*) FROM documents d JOIN records r ON r.id = d.record_id WHERE r.deleted_at IS NULL"
+        ),
+        "pdf_pages_searchable": one(
+            "SELECT COALESCE(SUM(d.text_pages), 0) FROM documents d JOIN records r ON r.id = d.record_id"
+            " WHERE r.deleted_at IS NULL"
+        ),
         "trash": one("SELECT COUNT(*) FROM records WHERE deleted_at IS NOT NULL"),
         "demo_records": one("SELECT COUNT(*) FROM records WHERE deleted_at IS NULL AND is_demo = 1"),
     }
@@ -640,12 +660,17 @@ def resolve_reference(conn: sqlite3.Connection, ref: str) -> dict[str, Any] | No
     ref = ref.split("#", 1)[0].strip().replace("\\", "/")
     if not ref:
         return None
+    # A note reference names a Markdown file, usually without its suffix; another file (a PDF)
+    # is named with its own suffix.
     stem = ref[:-3] if ref.lower().endswith(".md") else ref
+    note, other = "%/" + _like_escape(stem + ".md"), "%/" + _like_escape(ref)
     candidates = conn.execute(
         "SELECT r.*, NULL AS tag_list FROM records r WHERE deleted_at IS NULL AND ("
-        " source_ref = ? OR source_ref LIKE ? ESCAPE '\\' OR lower(title) = lower(?))"
-        " ORDER BY CASE WHEN source_ref LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, created_at",
-        (stem + ".md", "%/" + _like_escape(stem) + ".md", stem.rsplit("/", 1)[-1], "%/" + _like_escape(stem) + ".md"),
+        " source_ref IN (?, ?) OR source_ref LIKE ? ESCAPE '\\' OR source_ref LIKE ? ESCAPE '\\'"
+        " OR lower(title) = lower(?))"
+        " ORDER BY CASE WHEN source_ref LIKE ? ESCAPE '\\' OR source_ref LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,"
+        " created_at",
+        (stem + ".md", ref, note, other, stem.rsplit("/", 1)[-1], note, other),
     ).fetchall()
     return summarize(candidates[0]) if candidates else None
 
