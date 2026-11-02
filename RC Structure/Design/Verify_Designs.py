@@ -271,9 +271,10 @@ def probe_config(probe_date=None):
                                FloorAnalysisConfig, PROBE_SLAB_REFINEMENT)
     slab_flags = ("analysis_applicability_verified", "all_floors_enveloped", "load_pattern_envelope_verified",
                   "spatial_envelope_per_unit_width", "twisting_moment_resolution_verified",
-                  "zero_membrane_force_verified", "verified", "two_way_shear_path_assessed")
+                  "zero_membrane_force_verified", "verified", "two_way_shear_path_assessed",
+                  "slab_column_local_steel_assessed")
+    # Fire resistance is a declared scope exclusion, never asserted (SMRF_Common.SCOPE_EXCLUSIONS).
     verify_flags = ("floor_hand_check_verified", "strength_model_verified", "detailing_model_consistency_verified",
-                    "slab_column_local_steel_assessed", "fire_resistance_scope_accepted",
                     "congestion_and_placement_accepted", "floor_frame_compatibility_reviewed")
     if not probe_date or date.fromisoformat(probe_date).isoformat() != probe_date:
         raise ValueError("PROBE runs require a shared --probe-date YYYY-MM-DD")

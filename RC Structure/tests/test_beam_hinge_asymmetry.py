@@ -18,6 +18,7 @@ import openseespy.opensees as ops  # noqa: E402
 
 import Structure_Parameters as sp  # noqa: E402
 from Model import IMK_Hinges  # noqa: E402
+from Model import IMK_Spring_Mapping as spring_mapping  # noqa: E402
 from Model.IMK_Hinges import create_imk_member, hinge_element_tag, reset_hinge_registry, hinge_registry  # noqa: E402
 
 HOGGING, SAGGING = 2000.0, 1000.0
@@ -79,13 +80,20 @@ class BeamHingeAsymmetryTests(unittest.TestCase):
         # sagging yield (1000, peak 1.1x) but well inside hogging (2000). The
         # moment is fixed by statics either way; yielding shows in the
         # spring rotation, which stays M/Ke when elastic.
-        for material_type in ("IMKBilin", "IMKPeakOriented"):
-            with mock.patch.object(sp, "IMK_MATERIAL_TYPE", material_type):
+        # The two pre-freeze cases (IMKBilin and IMKPeakOriented) run on the pre-freeze rule, kept as the explicit
+        # legacy replay (frozen IMK V2 calibration, 2026-10-29), which alone admits IMKBilin; the frozen calibration
+        # (IMKPeakOriented only) is checked as well.
+        cases = (("IMKBilin", spring_mapping.LEGACY_REPLAY), ("IMKPeakOriented", spring_mapping.LEGACY_REPLAY),
+                 ("IMKPeakOriented", spring_mapping.FROZEN_V2))
+        for material_type, calibration in cases:
+            with mock.patch.object(sp, "IMK_MATERIAL_TYPE", material_type), \
+                    mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION", calibration):
                 for member_type in ("beam_x", "beam_y"):
                     for fixed_end in ("i", "j"):
                         hog_m, hog_r = _cantilever(member_type, fixed_end, -4.375)
                         sag_m, sag_r = _cantilever(member_type, fixed_end, +4.375)
-                        with self.subTest(material=material_type, member=member_type, end=fixed_end):
+                        with self.subTest(material=material_type, calibration=calibration, member=member_type,
+                                          end=fixed_end):
                             self.assertAlmostEqual(abs(hog_m), 1050.0, delta=1.0)
                             self.assertAlmostEqual(abs(sag_m), 1050.0, delta=1.0)
                             elastic = 1050.0 / IMK_Hinges.imk_hinge_stiffness(member_type, "rot_y", 240.0)

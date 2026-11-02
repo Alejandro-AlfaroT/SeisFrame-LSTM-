@@ -190,7 +190,9 @@ class DomainLifecycle(unittest.TestCase):
         with mock.patch.multiple(sp, **SMALL):
             Build_Model.build_model()
             rows = own.end_inventory(hinge_registry())
-            before = {(r["member_tag"], r["end"]): r["theta_p"] for r in rows}
+            # the inventory column "theta_p" was renamed member_theta_p_rad, same member interval
+            # (frozen IMK V2 calibration, 2026-10-29)
+            before = {(r["member_tag"], r["end"]): r["member_theta_p_rad"] for r in rows}
             base = next(r for r in rows if r["location"] == "column_base")
             elevated = next(r for r in rows if r["location"] == "floor_joint" and r["member_type"] == "column")
             # stale declarations against a base end and an elevated end; the next build installs no replacement
@@ -199,7 +201,7 @@ class DomainLifecycle(unittest.TestCase):
                                             status="provisional_diagnostic_only")
             Build_Model.build_model()
             after_rows = own.end_inventory(hinge_registry())
-        after = {(r["member_tag"], r["end"]): r["theta_p"] for r in after_rows}
+        after = {(r["member_tag"], r["end"]): r["member_theta_p_rad"] for r in after_rows}
         self.assertEqual(before, after)
         for r in after_rows:
             self.assertEqual(r["bar_slip"], "member_hinge")

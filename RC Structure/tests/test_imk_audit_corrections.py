@@ -26,6 +26,7 @@ from Model import Member_Groups as mg
 from Model.IMK_Materials import (CANONICAL_BASELINE_STATUS, CANONICAL_BASELINE_VERSION, MATERIAL_TYPES,
                                  PROVISIONAL_ANCHOR_VERSION, active_energy_modes, define_canonical_rotational_imk,
                                  define_rotational_imk)
+from Model.IMK_Spring_Mapping import FROZEN_V2, LEGACY_REPLAY, SUPPRESSED_MODE_LAMDA
 from test_imk_energy_anchor import BASE_LAMDA, PROVENANCE, base_cyclic, member
 from test_imk_energy_mapping import NEG, POS, analyze_displacements, cyclic, history
 
@@ -108,7 +109,9 @@ class Eq320EffectiveDepth(SlabState):
     def test_square_column_both_axes(self):
         nu = 0.2
         lam = 170.7 * 0.27 ** nu * 0.10 ** (4.0 / 21.0)
-        d = cal.deterioration_for_member("column", nu, COLUMN)
+        # Lambda_OpenSees = lambda * nominal theta_y: the pre-freeze rule, kept as the explicit legacy replay (frozen
+        # IMK V2 calibration, 2026-10-29).
+        d = cal.deterioration_for_member("column", nu, COLUMN, calibration=LEGACY_REPLAY)
         self.assertEqual(d["deterioration_equation_version"], cal.EQ_3_20_VERSION)
         for axis in ("y", "z"):
             self.assertAlmostEqual(d["deterioration_by_axis"][axis]["lambda_haselton_dimensionless"], lam, places=12)
@@ -119,6 +122,31 @@ class Eq320EffectiveDepth(SlabState):
         # s/h made the energy 10^(s/d - s/h) times too large with every other input fixed
         self.assertAlmostEqual(170.7 * 0.27 ** nu * 0.10 ** (4.0 / 24.0) / lam, 10 ** (4.0 / 21.0 - 4.0 / 24.0), places=12)
 
+    def test_square_column_both_axes_under_the_frozen_calibration(self):
+        # Frozen IMK V2 calibration (2026-10-29): the dimensionless Eq. 3.20 lambda is the member quantity; the
+        # pre-freeze lambda * nominal theta_y conversion is labelled source metadata only, not an installed value.
+        nu = 0.2
+        lam = 170.7 * 0.27 ** nu * 0.10 ** (4.0 / 21.0)
+        d = cal.deterioration_for_member("column", nu, COLUMN, calibration=FROZEN_V2)
+        self.assertEqual(d["deterioration_equation_version"], cal.EQ_3_20_VERSION)
+        self.assertEqual(d["deterioration_calibration_id"], FROZEN_V2)
+        self.assertAlmostEqual(d["lambda_haselton_dimensionless"], lam, places=12)
+        for key in ("lambda_opensees_rad", "lambda_opensees_by_mode_rad", "energy_reference_member_theta_y_rad"):
+            self.assertNotIn(key, d)
+        # A and K stay suppressed: Eref_A = Eref_K = 1e12 * My_canonical (frozen counterpart of the legacy A = 1e12).
+        self.assertEqual(d["deterioration_suppressed_modes"], ["A", "K"])
+        self.assertEqual(d["deterioration_suppression_lambda_rad"], SUPPRESSED_MODE_LAMDA)
+        self.assertEqual(SUPPRESSED_MODE_LAMDA, 1e12)
+        historical = d["deterioration_historical_nominal"]
+        self.assertEqual(historical["nominal_member_theta_y_rad"], 0.004)
+        for axis in ("y", "z"):
+            entry = d["deterioration_by_axis"][axis]
+            self.assertAlmostEqual(entry["lambda_haselton_dimensionless"], lam, places=12)
+            self.assertAlmostEqual(entry["spacing_effective_depth_ratio"], 4.0 / 21.0, places=12)
+            self.assertNotIn("lambda_opensees_by_mode_rad", entry)
+            self.assertAlmostEqual(historical["by_axis"][axis]["lambda_opensees_by_mode_rad"]["S"], lam * 0.004, places=12)
+            self.assertEqual(historical["by_axis"][axis]["lambda_opensees_by_mode_rad"]["A"], 1e12)
+
     def test_non_square_column_takes_each_axis_own_depth(self):
         d = cal.deterioration_for_member("column", 0.0, WIDE)["deterioration_by_axis"]
         self.assertAlmostEqual(d["y"]["lambda_haselton_dimensionless"], 170.7 * 0.10 ** (5.0 / 25.0), places=12)  # across h
@@ -127,10 +155,26 @@ class Eq320EffectiveDepth(SlabState):
 
     def test_beam_vertical_bending_uses_its_rows_and_lateral_bending_its_width(self):
         depths = cal.effective_depths("beam_x", BEAM, ROWS)
-        d = cal.deterioration_for_member("beam_x", 0.0, BEAM, depths)
+        # Lambda_OpenSees = lambda * nominal theta_y: the pre-freeze rule, kept as the explicit legacy replay (frozen
+        # IMK V2 calibration, 2026-10-29).
+        d = cal.deterioration_for_member("beam_x", 0.0, BEAM, depths, calibration=LEGACY_REPLAY)
         self.assertAlmostEqual(d["deterioration_by_axis"]["y"]["lambda_haselton_dimensionless"], 170.7 * 0.10 ** (6.0 / 26.25), places=12)
         self.assertAlmostEqual(d["deterioration_by_axis"]["z"]["lambda_haselton_dimensionless"], 170.7 * 0.10 ** (6.0 / 15.0), places=12)
         self.assertAlmostEqual(d["deterioration_by_axis"]["y"]["lambda_opensees_rad"],
+                               170.7 * 0.10 ** (6.0 / 26.25) * 0.005, places=12)
+        self.assertTrue(d["deterioration_beam_extrapolation"])
+        self.assertEqual(len(d["deterioration_unsupported_extensions"]), 3)
+
+    def test_beam_vertical_bending_uses_its_rows_and_lateral_bending_its_width_under_the_frozen_calibration(self):
+        # Frozen IMK V2 calibration (2026-10-29): the per-axis Eq. 3.20 lambda from the bar rows (y) and the width (z)
+        # is unchanged; the lambda * nominal theta_y conversion is labelled source metadata only.
+        depths = cal.effective_depths("beam_x", BEAM, ROWS)
+        d = cal.deterioration_for_member("beam_x", 0.0, BEAM, depths, calibration=FROZEN_V2)
+        self.assertEqual(d["deterioration_calibration_id"], FROZEN_V2)
+        self.assertAlmostEqual(d["deterioration_by_axis"]["y"]["lambda_haselton_dimensionless"], 170.7 * 0.10 ** (6.0 / 26.25), places=12)
+        self.assertAlmostEqual(d["deterioration_by_axis"]["z"]["lambda_haselton_dimensionless"], 170.7 * 0.10 ** (6.0 / 15.0), places=12)
+        self.assertNotIn("lambda_opensees_rad", d["deterioration_by_axis"]["y"])
+        self.assertAlmostEqual(d["deterioration_historical_nominal"]["by_axis"]["y"]["lambda_opensees_rad"],
                                170.7 * 0.10 ** (6.0 / 26.25) * 0.005, places=12)
         self.assertTrue(d["deterioration_beam_extrapolation"])
         self.assertEqual(len(d["deterioration_unsupported_extensions"]), 3)
@@ -313,7 +357,10 @@ class CanonicalMember(unittest.TestCase):
                 ops.node(2, 240., 0., 0.)
                 ops.geomTransf("Linear", 9, 0, 0, 1)
                 ni, nj = (2, 1) if reverse else (1, 2)
-                with mock.patch.multiple(sp, IMK_MATERIAL_TYPE="IMKPeakOriented", IMK_ENERGY_MAPPING_MODE=self.MODE), \
+                # Canonical energies as base Lamda * hogging on a synthetic backbone: the pre-freeze rule, kept as the
+                # explicit legacy replay (frozen IMK V2 calibration, 2026-10-29).
+                with mock.patch.multiple(sp, IMK_MATERIAL_TYPE="IMKPeakOriented", IMK_ENERGY_MAPPING_MODE=self.MODE,
+                                         IMK_MEMBER_SPRING_CALIBRATION=LEGACY_REPLAY), \
                         mock.patch.object(hinges, "backbone_for_member", return_value=backbone), \
                         mock.patch.object(hinges, "beam_yield_moments", return_value=(*own["i"], basis)), \
                         contextlib.redirect_stdout(io.StringIO()):

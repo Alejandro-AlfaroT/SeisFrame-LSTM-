@@ -29,6 +29,7 @@ from Data_Generation.Graph_Exporter import (
     collect_node_rows,
 )
 from Model.IMK_Hinges import hinge_registry
+from Model.IMK_Spring_Mapping import hinge_end_demand
 from Run_Naming import analysis_run_name, safe_name, variant_value
 from Design.Design_Driver import DESIGN_ARTIFACT_NAME, load_or_create_design
 from Design.SMRF_Qualification import require_accepted_design, ensure_generation_release_ready
@@ -88,9 +89,11 @@ OUTPUT_IDENTITY_KEYS = (
     "imk_cyclic_calibration_id",
     "imk_cyclic_calibration_status",
     "imk_cyclic_parameters",
-    # A change of deterioration mode (direct constants vs Haselton Eq. 3.20 x theta_y) or of the
-    # backbone source alters every spring while leaving imk_cyclic_parameters unchanged, so both
-    # are identity keys, together with the installed policy and the member yield rotations it scales.
+    # A change of deterioration mode (direct constants vs Haselton Eq. 3.20 lambda) or of the backbone
+    # source alters every spring while leaving imk_cyclic_parameters unchanged, so both are identity
+    # keys, together with the installed policy. The nominal member yield rotations stay identity keys:
+    # under the legacy replay they scale lambda and pad du; under the frozen calibration they are only
+    # historical metadata (the energy rotation is My/K0 per spring, the du padding a frozen constant).
     "imk_deterioration_mode",
     "imk_use_calibrated_backbone",
     # Eq. 3.10's steel ratio, the effective depth of Eq. 3.10 / 3.20 and the Eq. 3.20 version (2026-10-23):
@@ -99,6 +102,10 @@ OUTPUT_IDENTITY_KEYS = (
     "imk_installed_deterioration",
     "imk_beam_theta_y",
     "imk_column_theta_y",
+    # The member-to-native spring calibration (frozen IMK V2 calibration, 2026-10-29): it changes every native
+    # dp/dpc and S/C energy while the keys above can stay equal, so runs of the frozen calibration and of the
+    # legacy replay (or of the pre-freeze code, which records none) never share a directory.
+    "imk_member_spring_calibration",
     "imk_hinge_stiffness_mode",
     "imk_hinge_stiffness_factor",
     # Joint springs (2026-09-27): their presence, what their rotation stands for, their calibration
@@ -253,13 +260,141 @@ def _joint_spring_rows(results):
     return rows
 
 
+# Layout and meaning of hinge_backbone.csv, written into every row (a CSV carries no header metadata). v2 (frozen IMK
+# V2 calibration, 2026-10-29): each end's two springs are classified against their OWN installed points, per axis and
+# native sign (Model/IMK_Spring_Mapping.hinge_end_demand), the row reports the installed points of every branch and
+# the demand of the governing branch. The unversioned v1 table measured max |rotation| of both axes against the larger
+# branch-minimum yield, compared the plastic part with the member theta_p and carried the nominal member yield
+# rotation as "theta_y". The two are not interchangeable: plastic rotation, yielded and past_capping differ from v1
+# even under the legacy replay, where only the denominator (native dp = member theta_p) agrees; v1 values are
+# reproduced only with the commit 66f964c1 code. Data_Generation/Hybrid_Exporter repeats this string (it must not
+# import OpenSees).
+HINGE_BACKBONE_VERSION = "hinge_backbone_v2_native_spring_demand"
+
+# Installed points of every branch of the end, independent of the demand: one column per bending axis (y, z) and
+# native sign (pos, neg), e.g. native_dp_rad_y_neg, plus Kh_kip_in_per_rad_y / _z. Blank where the end has no
+# installed IMK spring (a released gravity-beam end) or the calibration defines no such value (member-reference
+# values under the legacy replay).
+_HINGE_BRANCHES = (("y", "positive", "y_pos"), ("y", "negative", "y_neg"),
+                   ("z", "positive", "z_pos"), ("z", "negative", "z_neg"))
+_HINGE_BRANCH_POINT_KEYS = (
+    "My_kip_in", "native_theta_y_rad", "native_dp_rad", "native_dpc_rad", "native_theta_cap_rad", "native_du_rad",
+    "member_theta_p_rad", "member_theta_pc_rad", "member_theta_y_reference_rad", "physical_direction",
+)
+
+# The governing branch's installed points, then its demand; blank where the end has no installed IMK spring (a
+# released gravity-beam end) or the calibration defines no such value (member-reference values under the legacy replay).
+_HINGE_POINT_COLUMNS = (
+    "governing_axis", "governing_sign", "governing_axis_code", "governing_sign_code", "physical_direction",
+    "Kh_kip_in_per_rad", "K0_kip_in_per_rad", "Kb_kip_in_per_rad",
+    "native_theta_y_rad", "native_dp_rad", "native_dpc_rad", "native_theta_cap_rad", "native_du_rad",
+    "member_theta_y_reference_rad", "member_theta_cap_reference_rad", "member_theta_p_rad", "member_theta_pc_rad",
+    "lambda_haselton", "energy_reference_theta_y_rad",
+    "theta_y_spring", "theta_p", "theta_pc", "theta_u",
+)
+_HINGE_DEMAND_COLUMNS = (
+    "peak_rotation_rad", "plastic_rotation", "capping_ratio", "damage_ratio",
+    "yielded", "past_capping", "past_native_cutoff",
+)
+
+
+def _branch_point_values(points_by_axis):
+    """The installed points of every branch of one end (see _HINGE_BRANCHES); blank for a missing spring."""
+    values = {f"Kh_kip_in_per_rad_{axis}": (points_by_axis.get(axis) or {}).get("Kh_kip_in_per_rad")
+              for axis in ("y", "z")}
+    for axis, sign, label in _HINGE_BRANCHES:
+        branch = (points_by_axis.get(axis) or {}).get(sign) or {}
+        values.update({f"{key}_{label}": branch.get(key) for key in _HINGE_BRANCH_POINT_KEYS})
+    return values
+
+
+def _governing_hinge_values(backbone, end, demand, points_by_axis):
+    """The point and demand columns of one end's governing branch (see _hinge_backbone_rows)."""
+    axis, sign = demand["governing_axis"], demand["governing_sign"]
+    points = points_by_axis[axis]
+    branch = points[sign]
+    reference = points.get("member_reference") or {}
+    energy = points.get("energy") or {}
+    by_axis = ((backbone.get("backbone_by_end") or {}).get(end) or {}).get("deterioration_by_axis") or {}
+    return {
+        "governing_axis": axis,
+        "governing_sign": sign,
+        # Numeric twins of the two above for tensor readers: axis 0 = y, 1 = z (the envelope slot), sign +1 = native
+        # positive, -1 = native negative.
+        "governing_axis_code": 0 if axis == "y" else 1,
+        "governing_sign_code": 1 if sign == "positive" else -1,
+        "physical_direction": branch.get("physical_direction"),
+        "Kh_kip_in_per_rad": points["Kh_kip_in_per_rad"],
+        "K0_kip_in_per_rad": reference.get("K0_kip_in_per_rad"),
+        "Kb_kip_in_per_rad": reference.get("Kb_kip_in_per_rad"),
+        **{key: branch.get(key) for key in (
+            "native_theta_y_rad", "native_dp_rad", "native_dpc_rad", "native_theta_cap_rad", "native_du_rad",
+            "member_theta_y_reference_rad", "member_theta_cap_reference_rad", "member_theta_p_rad",
+            "member_theta_pc_rad")},
+        "lambda_haselton": energy.get("lambda_haselton_dimensionless",
+                                      (by_axis.get(axis) or {}).get("lambda_haselton_dimensionless")),
+        "energy_reference_theta_y_rad": energy.get("energy_reference_theta_y_rad"),
+        # The pre-freeze column names, kept with explicit meanings: the spring's own yield, the member intervals
+        # and the retained native cutoff of the governing branch.
+        "theta_y_spring": branch["native_theta_y_rad"],
+        "theta_p": branch["member_theta_p_rad"],
+        "theta_pc": branch["member_theta_pc_rad"],
+        "theta_u": branch["native_du_rad"],
+        "peak_rotation_rad": demand["peak_rotation_rad"],
+        "plastic_rotation": demand["plastic_rotation_rad"],
+        "capping_ratio": demand["capping_ratio"],
+        "damage_ratio": demand["capping_ratio"],
+        "yielded": int(demand["yielded"]),
+        "past_capping": int(demand["past_capping"]),
+        "past_native_cutoff": int(demand["past_native_cutoff"]),
+    }
+
+
 def _hinge_backbone_rows(results):
-    """One row per IMK spring: its calibrated backbone and rotation envelope.
+    """One row per member-end hinge: its installed backbone points and the native rotation demand it reached.
 
     Joins the per-build hinge registry, which records what each spring was
-    actually given, against the rotation peaks it reached. This is the table
-    every damage measure is computed from: without theta_p a rotation is just
-    a number, and without the rotation the backbone says nothing about damage.
+    actually given, against the rotation peaks it reached. Each end carries
+    two springs (envelope slot 0 = local y, slot 1 = local z); every peak is
+    measured against its own spring's installed points, sign by sign and axis
+    by axis (Model/IMK_Spring_Mapping.spring_points and hinge_end_demand). The
+    row carries the installed points of all four branches, which do not depend
+    on the response, and the demand of the governing branch, the one with the
+    larger capping ratio. Rotations are native zeroLength spring rotations: not
+    story drifts and not member chord rotations.
+
+    Columns (HINGE_BACKBONE_VERSION):
+      Kh_kip_in_per_rad_<axis>, <point>_<axis>_<pos|neg>
+                                             each spring's installed stiffness and each branch's My_kip_in,
+                                             native and member points named as below (axis y or z, native
+                                             sign pos or neg) and its physical_direction; fixed per end
+      governing_axis, governing_sign         the branch the demand and point columns below describe; the
+      governing_axis_code, _sign_code        codes are 0 = y, 1 = z and +1 / -1 for the native sign
+      native_theta_y_rad = theta_y_spring   My/Kh of the governing branch
+      native_dp_rad, native_dpc_rad          its installed dp and dpc
+      native_theta_cap_rad                   My/Kh + dp, the native capping rotation
+      native_du_rad = theta_u                its installed du, the retained cutoff: a provisional numerical
+                                             cutoff, not a collapse rotation
+      member_theta_y_reference_rad,          My/K0 and My/K0 + theta_p,member on the half-member reference
+      member_theta_cap_reference_rad         (blank under the legacy replay, which has no reference)
+      member_theta_p_rad = theta_p,          the Haselton member intervals of that branch; under the legacy
+      member_theta_pc_rad = theta_pc         replay they are also the native dp and dpc
+      Kh/K0/Kb_kip_in_per_rad                the governing spring's stiffness and its reference (K0, Kb blank
+                                             under the legacy replay)
+      lambda_haselton                        Eq. 3.20 lambda of the governing spring
+      energy_reference_theta_y_rad           My_canonical/K0, the rotation its S/C energies are scaled by
+                                             (blank under the legacy replay, which used the nominal below)
+      historical_nominal_theta_y_rad         nominal 0.005 beam / 0.004 column member yield rotation; metadata,
+                                             no threshold of this table
+      rot_abs_max                            largest |native rotation| of both springs, both signs
+      peak_rotation_rad                      peak native rotation of the governing branch (magnitude)
+      plastic_rotation                       max(0, peak_rotation_rad - native_theta_y_rad)
+      capping_ratio = damage_ratio           plastic_rotation / native_dp_rad: 1 at the native capping point.
+                                             Not the v1 axis-mixed ratio: under the legacy replay only its
+                                             denominator (native dp = member theta_p) is the same
+      yielded, past_capping,                 some branch of either spring passed My/Kh, My/Kh + dp, du;
+      past_native_cutoff                     past_native_cutoff is not a collapse or failure flag
+    A released (elastic) end has no IMK spring: its point and demand columns are blank and end_released is 1.
     """
     registry = hinge_registry()
     envelope = results.get("hinge_rotation_envelope") or {}
@@ -270,36 +405,30 @@ def _hinge_backbone_rows(results):
         offset = int(hinge_tag) - base
         ele_tag, end_id = divmod(offset, 10)
         backbone = registry.get(ele_tag, {})
-        theta_p = backbone.get("theta_p") or 0.0
-        # Recorded rotation is the SPRING's rotation, so the elastic part to
-        # remove is the spring's own yield rotation, not the member-level
-        # nominal theta_y_target. Subtracting the nominal (a fixed 0.004 for
-        # columns) took away 26x to 65x more than the spring actually stores
-        # elastically, understating plastic rotation and damage_ratio -- by
-        # 18% on the worst hinge of case_0008. theta_y_target is still
-        # reported, because it is what the backbone was calibrated against.
-        theta_y = backbone.get("theta_y_target") or 0.0
+        end = "i" if end_id == 1 else "j"
         rotation = max(peaks["abs_max"])
-        # Beam ends can differ in strength (an exterior end without developed
-        # slab bars); the spring's own yield rotation is the one at this end.
-        end_theta_y = backbone.get("theta_y_spring_y_i" if end_id == 1 else "theta_y_spring_y_j")
-        spring_theta_y = max(
-            end_theta_y if end_theta_y is not None else (backbone.get("theta_y_spring_y") or 0.0),
-            backbone.get("theta_y_spring_z") or 0.0,
-        ) or theta_y
-        plastic = max(0.0, rotation - spring_theta_y)
+        peaks_by_axis = {"y": (peaks["max"][0], peaks["min"][0])}
+        if len(peaks["max"]) > 1:
+            peaks_by_axis["z"] = (peaks["max"][1], peaks["min"][1])
+        points_by_axis = (backbone.get("spring_points") or {}).get(end) or {}
+        demand = hinge_end_demand(points_by_axis, peaks_by_axis)
+        governing = {} if demand is None else _governing_hinge_values(backbone, end, demand, points_by_axis)
         # The strong-axis material this end was actually given: its type and the deterioration
-        # capacities installed (under haselton_2008 these are lambda*theta_y for S and C and the
-        # 1e12 suppression for A and K, not the IMK_LAMBDA_* constants).
-        installed = ((backbone.get("installed_materials") or {}).get("i" if end_id == 1 else "j") or {}).get("y") or {}
+        # capacities installed (under the frozen calibration Lamda = Eref / My of the native positive
+        # branch with Eref_S = Eref_C = lambda_H My_canonical^2 / K0, under the legacy replay lambda
+        # times the nominal theta_y; the 1e12 suppression for A and K either way).
+        installed = ((backbone.get("installed_materials") or {}).get(end) or {}).get("y") or {}
         cyclic = installed.get("cyclic") or {}
         rows.append(
             {
+                "hinge_backbone_version": HINGE_BACKBONE_VERSION,
                 "hinge_ele_tag": int(hinge_tag),
                 "ele_tag": ele_tag,
                 "end_id": end_id,
                 "member_type": backbone.get("member_type", ""),
                 "material_type": backbone.get("material_type", ""),
+                "member_spring_calibration": backbone.get("member_spring_calibration", ""),
+                "end_released": 1 if backbone.get("ends_released") else 0,
                 "deterioration_source": (installed.get("provenance") or {}).get("deterioration_source", ""),
                 "lamda_s_installed": cyclic.get("lamda_s", ""),
                 "lamda_c_installed": cyclic.get("lamda_c", ""),
@@ -315,23 +444,18 @@ def _hinge_backbone_rows(results):
                 "yield_moment_sagging_kip_in": backbone.get("yield_moment_y_sagging_kip_in",
                                                             backbone.get("yield_moment_y_kip_in", 0.0)),
                 "beam_family": backbone.get("beam_family") or "",
-                "theta_y": theta_y,
-                "theta_y_spring": spring_theta_y,
-                "theta_p": theta_p,
-                "theta_pc": backbone.get("theta_pc", 0.0),
-                "theta_u": backbone.get("theta_u", 0.0),
+                "historical_nominal_theta_y_rad": backbone.get("historical_nominal_theta_y_rad"),
+                **_branch_point_values(points_by_axis),
+                **{key: governing.get(key) for key in _HINGE_POINT_COLUMNS},
                 "rot_y_max": peaks["max"][0],
                 "rot_y_min": peaks["min"][0],
                 "rot_z_max": peaks["max"][1] if len(peaks["max"]) > 1 else 0.0,
                 "rot_z_min": peaks["min"][1] if len(peaks["min"]) > 1 else 0.0,
                 "rot_abs_max": rotation,
-                "plastic_rotation": plastic,
-                # Damage ratio: plastic rotation as a fraction of the capping
-                # plastic rotation. 0 is elastic, 1 is the onset of strength
-                # loss. Unlike the moment ratio this does not saturate.
-                "damage_ratio": (plastic / theta_p) if theta_p > 0 else 0.0,
-                "yielded": 1 if rotation > spring_theta_y else 0,
-                "past_capping": 1 if theta_p > 0 and plastic >= theta_p else 0,
+                # Capping ratio (= damage_ratio): plastic native rotation over the native dp of the governing
+                # branch. 0 is elastic, 1 is the native onset of strength loss. Unlike the moment ratio this does
+                # not saturate.
+                **{key: governing.get(key) for key in _HINGE_DEMAND_COLUMNS},
             }
         )
         if backbone.get("group_id") is not None:

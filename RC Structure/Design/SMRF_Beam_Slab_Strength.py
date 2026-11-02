@@ -115,6 +115,18 @@ class BeamBarRowsError(ValueError):
     layered cage. The design search treats it as a failed candidate and steps the beam depth."""
 
 
+class CageArrangementError(BeamBarRowsError):
+    """Bar rows of the complete shared cage arrangement that do not fit (Model.Member_Bar_Layers.row_audit), refused where
+    a calculation needs valid rows or left by the bounded closure of a selection's terminal arrangement
+    (Design.Group_Selection.close_terminal_arrangement, 2026-11-01). ``evidence`` is the structured outcome (JSON-safe);
+    ``detail`` holds the objects that replay it (the rejected state, the selection's input state and report)."""
+
+    def __init__(self, message, evidence=None, detail=None):
+        super().__init__(message)
+        self.evidence = evidence or {}
+        self.detail = detail or {}
+
+
 def validate_bar_rows(face_rows, count, name="beam bars", depth_in=None):
     """The actual bar rows of one face as [(bars, elevation_from_that_face_in), ...], checked.
 
@@ -262,50 +274,144 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
 _BAR_DIAMETER = {3: 0.375, 4: 0.5, 5: 0.625, 6: 0.75, 7: 0.875, 8: 1.0, 9: 1.128, 10: 1.27, 11: 1.41}
 
 
-def hook_development_length_in(bar_size, fc_ksi, fy_ksi, spacing_in):
+def hook_development_length_in(bar_size, fc_ksi, fy_ksi, spacing_in, psi_o=1.0):
     """ACI 318-19 25.4.3.1 standard-hook development for an uncoated, normalweight bar.
 
     ldh = fy psi_e psi_r psi_o psi_c / (55 lambda sqrt(f'c)) * db^1.5, at least
     8 db and 6 in. psi_e = 1 (uncoated); psi_r = 1.0 where the hooked bars are
     spaced at least 6 db, else 1.6 (Table 25.4.3.2, without confining ties);
-    psi_o = 1.0 (the hook terminates inside a beam that continues along the
-    perimeter, so side cover normal to the hook plane is at least 6 db);
-    psi_c = f'c/15000 + 0.6 below 6 ksi, 1.0 above; lambda = 1.
+    psi_o is the Table 25.4.3.2 location factor, decided from the hook's
+    geometry by hook_location_factor (1.0 for a hook that terminates in a
+    perimeter beam continuing on both sides of it, whose side cover normal to
+    the hook plane is far beyond 6 db; 1.25 at a building corner that meets
+    neither condition); psi_c = f'c/15000 + 0.6 below 6 ksi, 1.0 above;
+    lambda = 1.
     """
+    if psi_o not in (1.0, 1.25):
+        raise ValueError(f"psi_o must be 1.0 or 1.25 (ACI 318-19 Table 25.4.3.2), not {psi_o!r}")
     db = _BAR_DIAMETER[bar_size]
     fc_psi = fc_ksi * 1000.0
     psi_r = 1.0 if spacing_in >= 6.0 * db else 1.6
     psi_c = fc_psi / 15000.0 + 0.6 if fc_psi < 6000.0 else 1.0
-    ldh = fy_ksi * 1000.0 * 1.0 * psi_r * 1.0 * psi_c / (55.0 * math.sqrt(fc_psi)) * db ** 1.5
-    return max(ldh, 8.0 * db, 6.0), {"psi_e": 1.0, "psi_r": psi_r, "psi_o": 1.0, "psi_c": psi_c, "db_in": db}
+    ldh = fy_ksi * 1000.0 * 1.0 * psi_r * psi_o * psi_c / (55.0 * math.sqrt(fc_psi)) * db ** 1.5
+    return max(ldh, 8.0 * db, 6.0), {"psi_e": 1.0, "psi_r": psi_r, "psi_o": psi_o, "psi_c": psi_c, "db_in": db}
+
+
+# The declared plan convention for the hook of the outermost slab bar at a building corner (2026-11-01). Columns and
+# beam webs are centred on the grid lines and the slab edge is the edge beam's outer face. The outermost bar parallel
+# to an edge runs inside that edge beam, just inside its hoop. Its hook is a standard 90-degree hook turned down into the
+# perimeter beam perpendicular to it, so the hook plane is vertical and contains the bar. The side cover normal to the
+# hook plane is measured in plan across the bar to the nearest outer face (the edge beam, or the corner column where it
+# projects beyond the edge beam); the cover in the plane of the hook is measured from the outside of the hook to the
+# outer face beyond it (the perimeter beam, or the column where it projects beyond that). The hook terminates inside
+# the column core when, both ways in plan, it lies inside the corner column's hoop.
+HOOK_CORNER_CONVENTION = "slab_corner_hook_plan_convention_v1"
+CORNER_HOOK_KEYS = ("side_cover_in", "in_plane_cover_in", "in_column_core", "convention")
+
+
+def corner_hook_geometry(column_along_in, column_transverse_in, column_cover_in, column_hoop_db_in,
+                         edge_beam_width_in, edge_hoop_db_in, perimeter_beam_width_in, perimeter_hoop_db_in,
+                         beam_clear_cover_in):
+    """The corner hook of the outermost slab bar under HOOK_CORNER_CONVENTION: its side cover normal to the hook
+    plane, its cover in that plane and whether it terminates inside the column core. ``column_along_in`` is the
+    corner column's dimension parallel to the bar, ``column_transverse_in`` across it; the edge beam runs along the
+    bar, the perimeter beam (the hook's) across it."""
+    transverse = beam_clear_cover_in + edge_hoop_db_in + 0.5 * (column_transverse_in - edge_beam_width_in)
+    along = beam_clear_cover_in + perimeter_hoop_db_in + 0.5 * (column_along_in - perimeter_beam_width_in)
+    core = column_cover_in + column_hoop_db_in
+    return {"side_cover_in": max(beam_clear_cover_in + edge_hoop_db_in, transverse),
+            "in_plane_cover_in": max(beam_clear_cover_in + perimeter_hoop_db_in, along),
+            "in_column_core": transverse >= core and along >= core, "convention": HOOK_CORNER_CONVENTION}
+
+
+def uniform_perimeter_hook_corners(column_x_in, column_y_in, column_cover_in, column_hoop_db_in, beam_width_in,
+                                   beam_hoop_db_in, beam_clear_cover_in):
+    """{axis: corner hook} of a frame of one column and one beam section (``column_x_in`` along global X)."""
+    return {"x": corner_hook_geometry(column_x_in, column_y_in, column_cover_in, column_hoop_db_in, beam_width_in,
+                                      beam_hoop_db_in, beam_width_in, beam_hoop_db_in, beam_clear_cover_in),
+            "y": corner_hook_geometry(column_y_in, column_x_in, column_cover_in, column_hoop_db_in, beam_width_in,
+                                      beam_hoop_db_in, beam_width_in, beam_hoop_db_in, beam_clear_cover_in)}
+
+
+def hook_location_factor(bar_size, corner=None):
+    """ACI 318-19 Table 25.4.3.2 location factor psi_o of a slab-mat hook, and whether 25.4.3.4 needs enclosing ties.
+
+    ``corner`` None: the hook terminates in a perimeter beam that continues on both sides of it, with slab on both
+    sides of the hook plane, so its side cover is far beyond 6 db (psi_o = 1.0) and 25.4.3.4 does not apply
+    (R25.4.3.4: the slab confines the hook on both sides). At a building corner (corner_hook_geometry): psi_o = 1.0
+    for a No. 11 or smaller bar that terminates inside the column core with side cover >= 2.5 in, or has side cover
+    >= 6 db; 1.25 otherwise. The slab is then on one side only, and 25.4.3.4 applies when both the side cover and the
+    cover in the hook plane are below 2.5 in: the slab mats carry no ties enclosing the hook, so such a hook is not
+    developed. Corner geometry that is missing or malformed raises: it is never read as 1.0.
+    """
+    db = _BAR_DIAMETER[bar_size]
+    if corner is None:
+        return {"psi_o": 1.0, "confinement_required_25_4_3_4": False, "location": "perimeter_beam_continuing",
+                "basis": "the perimeter beam continues on both sides of the hook: side cover normal to its plane far "
+                         "beyond 6 db (Table 25.4.3.2); slab on both sides (R25.4.3.4)"}
+    if not isinstance(corner, dict) or set(corner) != set(CORNER_HOOK_KEYS) \
+            or corner["convention"] != HOOK_CORNER_CONVENTION or type(corner["in_column_core"]) is not bool:
+        raise ValueError(f"corner hook geometry must give {CORNER_HOOK_KEYS} under {HOOK_CORNER_CONVENTION}")
+    side, in_plane = float(corner["side_cover_in"]), float(corner["in_plane_cover_in"])
+    if not (math.isfinite(side) and math.isfinite(in_plane)) or side < 0 or in_plane < 0:
+        raise ValueError("corner hook covers must be finite and nonnegative")
+    small = bar_size <= 11
+    core = small and corner["in_column_core"] and side >= 2.5
+    covered = small and side >= 6.0 * db
+    psi_o = 1.0 if (core or covered) else 1.25
+    return {"psi_o": psi_o, "confinement_required_25_4_3_4": side < 2.5 and in_plane < 2.5,
+            "location": "building_corner", "side_cover_in": side, "in_plane_cover_in": in_plane,
+            "in_column_core": corner["in_column_core"],
+            "basis": ("terminates inside the column core with side cover >= 2.5 in" if core else
+                      "side cover normal to the hook plane >= 6 db" if covered else
+                      "neither Table 25.4.3.2 condition holds at the corner: psi_o = 1.25")
+                     + ("; side and in-plane covers below 2.5 in with slab on one side: 25.4.3.4 requires ties "
+                        "enclosing the hook, which the slab mats do not have" if side < 2.5 and in_plane < 2.5 else ""),
+            "convention": HOOK_CORNER_CONVENTION}
+
+
+def perimeter_hook(bar_size, spacing_in, fc_ksi, fy_ksi, embedment_in, corner=None):
+    """One hooked mat bar at the perimeter: ldh with its location factor against the embedment offered, and
+    whether it is developed (ldh fits and 25.4.3.4 does not ask for ties the slab does not have)."""
+    location = hook_location_factor(bar_size, corner)
+    ldh, factors = hook_development_length_in(bar_size, fc_ksi, fy_ksi, spacing_in, location["psi_o"])
+    return {"ldh_in": ldh, "factors": factors, "location": location,
+            "developed": ldh <= embedment_in and not location["confinement_required_25_4_3_4"]}
 
 
 def perimeter_slab_bar_anchorage(layout, axis, perimeter_beam_width_in, beam_clear_cover_in, hoop_db_in,
-                                 fc_beam_ksi, fy_ksi):
+                                 fc_beam_ksi, fy_ksi, corner=None, embedment_available_in=None):
     """Can the slab mats parallel to ``axis`` be developed where the slab ends at the perimeter?
 
     At a beam's exterior end the slab bars in its flange run to the building
     edge, where the perimeter beam (perpendicular to them) is the only
     concrete beyond the critical section. They are developed there by a
-    standard hook into that beam: ldh (25.4.3.1) against the embedment from
-    the beam's near face to the outside of the hook, the beam width less the
-    far-side clear cover and hoop. Both mats of the axis are checked (both
-    are in tension under hogging); the worse governs. Returns the record the
-    strength entries carry.
+    standard hook into that beam: ldh (25.4.3.1, psi_o by hook_location_factor
+    for ``corner``, the least favourable bar's corner hook or None) against the
+    embedment beyond the critical section. At the support face (the default
+    datum) that is the beam width less the far-side clear cover and hoop;
+    ``embedment_available_in`` gives another datum's (the joint face's). Both
+    mats of the axis are checked (both are in tension under hogging); the
+    worse governs. Returns the record the strength entries carry.
     """
     if layout is None:
         return None
     layers = {face: layout["layers"][f"{axis}_{face}"] for face in ("top", "bottom")}
-    worst, detail, bar = 0.0, None, None
+    worst, detail, bar, location = 0.0, None, None, None
     for face, layer in layers.items():
         bar = layout.get("bar_size") or layer.get("bar_size") or next(
             size for size, area in _BAR_AREA.items() if abs(area - layer["bar_area_in2"]) < 1e-9)
-        ldh, factors = hook_development_length_in(bar, fc_beam_ksi, fy_ksi, layer["spacing_in"])
+        location = hook_location_factor(bar, corner)
+        ldh, factors = hook_development_length_in(bar, fc_beam_ksi, fy_ksi, layer["spacing_in"], location["psi_o"])
         if ldh > worst:
             worst, detail = ldh, {"face": face, "spacing_in": layer["spacing_in"], **factors}
-    available = perimeter_beam_width_in - beam_clear_cover_in - hoop_db_in
+    datum = "support_face" if embedment_available_in is None else "joint_face"
+    available = (perimeter_beam_width_in - beam_clear_cover_in - hoop_db_in if embedment_available_in is None
+                 else float(embedment_available_in))
+    ties = location["confinement_required_25_4_3_4"]
     return {"axis": axis, "bar_size": bar, "ldh_required_in": worst, "embedment_available_in": available,
-            "developed": worst <= available, "governing": detail,
+            "developed": worst <= available and not ties, "governing": detail, "datum": datum,
+            "psi_o": location["psi_o"], "location": location, "confinement_required_25_4_3_4": ties,
             "hook": "standard 90-degree hook into the perimeter beam, ACI 318-19 25.4.3.1 (not the 18.8.5.1 joint formula)",
             "basis": ("slab mats parallel to the beam terminate at the building edge; the perimeter beam is the "
                       "only embedment beyond the exterior critical section")}
@@ -509,6 +615,10 @@ def beam_slab_strengths(record):
     for axis in ("x", "y"):
         for position in ("edge", "interior"):
             families[f"{axis}_{position}"]["exterior_anchorage"] = anchorage[axis]
+    # A selected layout is credited as developed only where the slab record's own development check passes
+    # (SMRF_Slab_Reinforcement.slab_strength_eligibility, 2026-10-30); the perimeter-hook ends keep their own basis.
+    from Design.SMRF_Slab_Reinforcement import slab_strength_eligibility
+    eligibility = slab_strength_eligibility(record.get("slab_reinforcement"))
     entries = {}
     for tag, kind, line, span in beam_members_with_spans(geometry["num_bay_x"], geometry["num_bay_y"], geometry["num_floor"]):
         axis, position = beam_family(kind, line, geometry["num_bay_x"], geometry["num_bay_y"])
@@ -523,10 +633,18 @@ def beam_slab_strengths(record):
                     # not_evaluated instead of passing on zero slab strength.
                     entries[f"{tag}/{end}/{sign}"] = {"slab_basis": "unknown", "slab_mn_kip_in": None,
                                                       "section_compatibility_verified": False,
+                                                      "reason_code": eligibility["reason_code"],
                                                       "reason": "slab reinforcement not established (slab action "
                                                                 "evidence not asserted as verified)"}
                     continue
                 terminated = exterior[end] and not anchorage[axis]["developed"]
+                if not terminated and eligibility["credit"] != "developed":
+                    # Mats in the flange whose development the slab record does not establish: unknown, not zero.
+                    entries[f"{tag}/{end}/{sign}"] = {"slab_basis": "unknown", "slab_mn_kip_in": None,
+                                                      "section_compatibility_verified": False,
+                                                      "reason_code": eligibility["reason_code"],
+                                                      "reason": eligibility["reason"]}
+                    continue
                 if terminated:
                     # An exterior end whose slab bars cannot be hooked into the
                     # perimeter beam: the mats are not developed at this critical

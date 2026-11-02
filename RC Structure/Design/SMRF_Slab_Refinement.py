@@ -402,6 +402,24 @@ def build_refined_slab_action_evidence_by_floor(slab_record, geometry, descripti
     return combine_floor_evidence(floors, geometry["num_floor"])
 
 
+def unresolvable_plan_evidence(geometry, policy, error, assertions=None):
+    """The unverified record of a floor whose refinement plan does not resolve on its own beam faces (the ValueError
+    the builder raises before any solve), in the shape the builder returns for an unresolved plan: every flag false,
+    no strips, refinement status ``plan_unresolvable`` with the error. A caller that records it instead of raising
+    keeps the floor unverified and the candidate evaluable (Design.Grouped_Design._slab_evidence)."""
+    from Design.SMRF_Slab_Actions import _FLAGS
+    report = {"required": True, "method": "bounded_explicit_slab_refinement_v2_recipes", "status": "plan_unresolvable",
+              "status_detail": f"{type(error).__name__}: {error}", "all_within_tolerance": False,
+              "engineering_verified": False, "geometry": copy.deepcopy(geometry), "policy": copy.deepcopy(policy),
+              "tolerance_basis": (policy or {}).get("tolerance_basis"), "levels": [], "comparisons": [],
+              "resolution": None, "recipe_inputs": None, "resolved_meshes": None}
+    evidence = {flag: False for flag in _FLAGS}
+    evidence.update(strips=[], cases=[], equilibrium=[], numerical_basis={}, refinement=report,
+                    numerical_preconditions={"mesh_refinement_verified": False, "verified": False},
+                    engineering_assertions=copy.deepcopy(assertions or {}))
+    return evidence
+
+
 def build_refined_slab_action_evidence(slab_record, geometry, sections, live_load_ksf, slab_inputs,
                                        policy, *, assertions=None, case_observer=None):
     """Run all requested levels, retaining failed comparisons and solve errors.

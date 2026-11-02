@@ -35,6 +35,26 @@ Rules (the uniform rules, stated for unlike members; equal members give exactly 
 
 What this module does not decide: hook tails and whether the resulting rows fit the section
 (Design.SMRF_Cage_Geometry / the capacity checks, and validate_bar_rows).
+
+Row controls (2026-10-31): row_controls explains the arrangement without changing it: per layer, the last constraint
+that raised its offset (the group's own layer pitch, a crossing beam layer, a slab mat) and the joint type where it
+did. The lanes and the crossing gap are the declared detailing policy of Design.SMRF_Cage_Geometry.passage_policy.
+
+Joint inventory (2026-10-31, JOINT_INVENTORY_RULE_ID): at a joint whose column above has another cage and whose declared
+transition (Design.SMRF_Transitions.column_transition) bends or offsets bars inside the joint, the beam bars pass those
+bars where they are: the lanes there are threaded through the joint's bar inventory, not through the core cage alone.
+Every lower bar that stays put blocks its own lateral position; every moved bar blocks the whole lateral interval its bend
+sweeps, from its lower position to its position at the top of the joint (v2, swept bend intervals). The two ends alone
+(v1) were not conservative: a bar moved farther than twice the passage gap leaves a lane between its ends that the bar
+crosses at some beam row elevation. Where the transition declares no bar paths (a refused transition), where the bars run
+inside the joint is not established and no lane is claimed there (the threading check fails closed). Everywhere else the
+inventory is the core cage and the lanes are the earlier ones exactly. The bar-row basis records the rule only where it
+lowers a lane (``_basis["joint_inventory"]``), so the rows of every other design keep their earlier form.
+
+Row audit (2026-11-01, ROW_AUDIT_ID): row_audit checks every beam group's rows on the complete shared arrangement of one
+state, with the slab mats and settings in force. A column cage changes the lanes of the beams that thread it, so the
+layers of those beams and of every beam they cross; a unit-by-unit admissibility found on another state is not evidence
+for this one. The selection closes its terminal arrangement on it and the capacity design refuses a state it rejects.
 """
 from __future__ import annotations
 
@@ -66,8 +86,10 @@ def bars_per_layer(column_design, beam_design, axis):
     """How many bars of this beam pass this column cage in one layer, in the beam's own direction."""
     from Design.SMRF_Cage_Geometry import column_cage_admits_beam_bars
     n = max(beam_design.top_bars, beam_design.bot_bars)
+    # The lanes lie on the bar grid from the layout hoop: both are part of the key (a changed grid is never served
+    # another grid's lanes).
     key = ("fit", column_design.section_key(), beam_design.section_key(), axis, sp.COL_CLEAR_COVER_IN,
-           sp.BEAM_CLEAR_COVER_IN, sp.AGGREGATE_MAX_SIZE_IN)
+           sp.BEAM_CLEAR_COVER_IN, sp.AGGREGATE_MAX_SIZE_IN, sp.BAR_POSITION_GRID_IN, sp.BAR_LAYOUT_HOOP_DB_IN)
     if key not in _CACHE:
         if len(_CACHE) > 8192:
             _CACHE.clear()
@@ -77,6 +99,111 @@ def bars_per_layer(column_design, beam_design, axis):
             sp.BEAM_CLEAR_COVER_IN, _db(beam_design.stirrup_bar_size), _db(beam_design.bar_size), n,
             sp.AGGREGATE_MAX_SIZE_IN)["bars_per_layer"][axis]
     return _CACHE[key]
+
+
+# ---- the joint's bar inventory at a column transition (2026-10-31) ---------------------------------------------
+JOINT_INVENTORY_RULE_ID = "joint_inventory_lanes_v2__swept_bend_intervals"
+INVENTORY_NOT_ESTABLISHED = "not_established"
+
+
+def transition_inventory(below, above, transition):
+    """The vertical bars inside a joint whose core column is ``below`` and whose column above is ``above``, from their
+    declared transition (Design.SMRF_Transitions.column_transition result), in the core's plan coordinates
+    (Design.SMRF_Cage_Geometry.column_bars_plan: x along h, y along b, from the corner):
+
+      * None when no bar moves inside the joint (the core cage is the inventory);
+      * a tuple of (x0, y0, x1, y1, db): every lower bar at its lower position (x0 = x1, y0 = y1), and every bar its
+        declared path bends or offsets inside the joint as the plan segment from its lower position to its position at
+        the top of the joint. The bend points bound a straight inclined run, so at every elevation of the joint the bar
+        lies on that segment, and a lane clear of the segment's whole lateral interval is clear of the bar at every
+        beam row (beam_bars_through_inventory);
+      * INVENTORY_NOT_ESTABLISHED when the transition declares no bar paths (it was refused before any path was
+        placed) or a moved bar lacks either position: where the bars run inside the joint is then not established and
+        no lane is claimed through it."""
+    from Design import SMRF_Transitions as transitions
+    paths = transition.get("paths") or []
+    if not paths:
+        return INVENTORY_NOT_ESTABLISHED
+    moved = [p for p in paths if p.get("bent")]
+    if not moved:
+        return None
+    if any(p.get("lower_xy_in") is None or p.get("target_xy_in") is None for p in moved):
+        return INVENTORY_NOT_ESTABLISHED
+    db = transitions._BAR[int(below.bar_size)][0]
+    segments = [(b["x_in"], b["y_in"], b["x_in"], b["y_in"]) for b in transitions.bar_coordinates(below, sp.COL_CLEAR_COVER_IN)]
+    segments += [(p["lower_xy_in"][0], p["lower_xy_in"][1], p["target_xy_in"][0], p["target_xy_in"][1]) for p in moved]
+    unique = set()
+    for x0, y0, x1, y1 in segments:
+        unique.add((round(y0 + 0.5 * below.h_in, 6), round(x0 + 0.5 * below.b_in, 6),
+                    round(y1 + 0.5 * below.h_in, 6), round(x1 + 0.5 * below.b_in, 6)))
+    return tuple((*entry, db) for entry in sorted(unique))
+
+
+def joint_inventory(level, i, j):
+    """The bar inventory of the joint at floor ``level``, grid (i, j) of the installed design: {"bars", "established",
+    "core_group", "above_group", "transition", "bars_moved", "joint_depth_in", "upper_clear_height_in"} where the column
+    above has another cage and its declared
+    transition moves bars inside the joint, or declares no bar paths (``established`` False, ``bars`` is
+    INVENTORY_NOT_ESTABLISHED); None otherwise (the core cage is the inventory). The cache holds the geometry only:
+    equal designs at a corner, an edge and an interior joint share it, and the group ids are this joint's, attached on
+    every call."""
+    from Model import Member_Properties as mp
+    joint = mg.joint_members(level, i, j)
+    core, above = mp.joint_core_column(level, i, j), joint["column_above"]
+    if above is None or above.design == core.design:
+        return None
+    from Design.Group_Capacity import column_clear_heights
+    from Design.SMRF_Transitions import column_transition
+    depth = min(joint[k].design.h_in for k in ("beam_x_minus", "beam_x_plus", "beam_y_minus", "beam_y_plus")
+                if joint[k] is not None)
+    clear = column_clear_heights(above)["physical"]
+    key = ("inventory", core.design, above.design, depth, clear, sp.FY_KSI, sp.COL_CLEAR_COVER_IN, sp.BAR_POSITION_GRID_IN,
+           sp.BAR_LAYOUT_HOOP_DB_IN)
+    if key not in _CACHE:
+        if len(_CACHE) > 8192:
+            _CACHE.clear()
+        transition = column_transition(core.design, above.design, fy_ksi=sp.FY_KSI, clear_cover_in=sp.COL_CLEAR_COVER_IN,
+                                       upper_clear_height_in=clear, joint_depth_in=depth)
+        bars = transition_inventory(core.design, above.design, transition)
+        _CACHE[key] = None if bars is None else {
+            "bars": bars, "established": bars != INVENTORY_NOT_ESTABLISHED,
+            "transition": {k: transition[k] for k in ("kind", "supported")},
+            "bars_moved": sum(1 for p in transition.get("paths") or [] if p.get("bent")),
+            "joint_depth_in": depth, "upper_clear_height_in": clear}
+    geometry = _CACHE[key]
+    return None if geometry is None else {**geometry, "core_group": core.group_id, "above_group": above.group_id}
+
+
+def inventory_lanes(bars, column_design, beam_design, axis):
+    """How many bars of ``beam_design`` pass, in one layer and its own direction, a joint whose core is
+    ``column_design`` and whose vertical bars are ``bars`` (transition_inventory): the declared lane rule, each column
+    bar with its own diameter and each moved bar's whole bend interval kept clear. 0 when the inventory is not
+    established (INVENTORY_NOT_ESTABLISHED): no lane is claimed through bars whose paths are not declared."""
+    from Design.SMRF_Cage_Geometry import beam_bars_through_inventory, clear_spacing_limit
+    if isinstance(bars, str):
+        return 0
+    n = max(beam_design.top_bars, beam_design.bot_bars)
+    key = ("inventory_fit", bars, column_design.b_in, column_design.h_in, beam_design.section_key(), axis,
+           sp.BEAM_CLEAR_COVER_IN, sp.AGGREGATE_MAX_SIZE_IN, sp.BAR_POSITION_GRID_IN, sp.BAR_LAYOUT_HOOP_DB_IN)
+    if key not in _CACHE:
+        if len(_CACHE) > 8192:
+            _CACHE.clear()
+        db = _db(beam_design.bar_size)
+        _CACHE[key] = beam_bars_through_inventory(
+            column_design.b_in, column_design.h_in, beam_design.b_in, sp.BEAM_CLEAR_COVER_IN, _db(beam_design.stirrup_bar_size),
+            db, n, bars, clear_spacing_limit("beam", db, sp.AGGREGATE_MAX_SIZE_IN))[axis]["bars_per_layer_that_fit"]
+    return _CACHE[key]
+
+
+def bars_per_layer_at_joint(level, i, j, beam_design, axis):
+    """How many bars of this beam pass the joint at floor ``level``, grid (i, j) in one layer: through the joint's bar
+    inventory where the column above's transition moves bars inside it (never more than the core cage admits; none
+    where the transition declares no bar paths), else through the core cage (bars_per_layer)."""
+    from Model import Member_Properties as mp
+    core = mp.joint_core_column(level, i, j)
+    own = bars_per_layer(core.design, beam_design, axis)
+    inventory = joint_inventory(level, i, j)
+    return own if inventory is None else min(own, inventory_lanes(inventory["bars"], core.design, beam_design, axis))
 
 
 def joint_types():
@@ -145,44 +272,60 @@ def slab_mats():
     return mats, complete
 
 
-def _place(sequence, offsets, depth_of, fixed=None):
+def _place(sequence, offsets, depth_of, fixed=None, trace=None):
     """Sweep one joint's layers in order; raise each to its lowest admissible position.
 
     ``sequence``: [(group_id, layer_index, design)] from the face inward. ``offsets[(group, layer)]``
     are the current offsets from each beam's own face and only ever increase. ``depth_of[group]`` is
     how far that beam's face lies above the lowest face at this joint (0 at the top face, where all
-    beams are flush). Returns True when something moved.
+    beams are flush). Returns True when something moved. ``trace`` = (controls, face, joint type): the
+    constraint behind each raised offset is recorded there (row_controls); the placement is the same.
     """
     moved, placed = False, []
     fixed = fixed or {}
     for gid, layer, design in sequence:
         rise = depth_of[gid]
         position = rise + offsets[(gid, layer)]
+        cause = None
         own = [(p, d) for g, _l, p, d in placed if g == gid]
         if own:
-            position = max(position, max(p for p, _d in own) + pitch_in(design, design))
+            lifted = max(p for p, _d in own) + pitch_in(design, design)
+            if lifted > position:
+                position, cause = lifted, {"by": "own_layer_pitch"}
         changed = True
         while changed:
             changed = False
-            for g, _l, p, d in placed:
+            for g, other_layer, p, d in placed:
                 if g != gid and abs(position - p) < pitch_in(design, d) - _TOL:
                     position, changed = p + pitch_in(design, d), True
+                    cause = {"by": "crossing_layer", "group": g, "layer": other_layer}
             for p, db in fixed.get(gid, ()):
                 clearance = 0.5 * (_db(design.bar_size) + db) + sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN
                 if abs(position - (rise + p)) < clearance - _TOL:
                     position = rise + sp.snap_up_to_grid(p + clearance)
                     changed = True
+                    cause = {"by": "slab_mat", "mat_centroid_from_face_in": p, "mat_db_in": db}
         placed.append((gid, layer, position, design))
         if position - rise > offsets[(gid, layer)] + _TOL:
             offsets[(gid, layer)], moved = position - rise, True
+            if trace is not None:
+                controls, face, kind = trace
+                controls[(face, gid, layer)] = {
+                    **(cause or {"by": "unrecorded"}), "offset_in": position - rise,
+                    "joint_type": {"column": kind["column"].group_id,
+                                   "x": None if kind["x"] is None else kind["x"].group_id,
+                                   "y": None if kind["y"] is None else kind["y"].group_id},
+                    "joints": [list(j) for j in kind["joints"][:6]], "joint_count": len(kind["joints"])}
     return moved
 
 
-def arrangement():
+def arrangement(controls=None):
     """{beam group id: {"top": rows, "bottom": rows}} for the installed design.
 
     Rows have the form of one face of Structure_Parameters.beam_bar_layers: layers, per_layer,
     offsets_in (from that face), centroid_in. Also returns, under "_basis", what was assumed.
+    ``controls`` (a dict, row_controls) receives the constraint behind every raised offset; the
+    arrangement is then solved afresh (never served from the cache) and is the same arrangement.
     """
     state = mg.active()
     if state is None:
@@ -193,10 +336,10 @@ def arrangement():
     mats, mats_complete = slab_mats()
     key = ("arrangement", state.identity(), convention, limit, sp.BEAM_BAR_LAYER_ORDER, sp.SLAB_THICKNESS_IN,
            sp.COL_CLEAR_COVER_IN, sp.BEAM_CLEAR_COVER_IN, sp.AGGREGATE_MAX_SIZE_IN, sp.COVER,
-           sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, sp.BAR_POSITION_GRID_IN,
+           sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, sp.BAR_POSITION_GRID_IN, sp.BAR_LAYOUT_HOOP_DB_IN, sp.FY_KSI,
            None if layout is None else layout.get("outer_axis"), mats_complete,
            tuple((m["mat"], m["db_in"], m["centroid_from_top_in"], m["runs_along"]) for m in mats))
-    if key in _CACHE:
+    if controls is None and key in _CACHE:
         return _CACHE[key]
     beam_groups = {gid: state.designs[gid] for gid, group in state.groups.items() if group["member_type"] != "column"}
     if convention == "none" or sp.SLAB_THICKNESS_IN is None:
@@ -207,7 +350,7 @@ def arrangement():
 
     types = joint_types()
     # Lanes: the tightest cage each group meets.
-    fit = {}
+    fit, inventory_effect = {}, []
     for kind in types:
         for axis in ("x", "y"):
             beam = kind[axis]
@@ -215,7 +358,18 @@ def arrangement():
                 continue
             # The lanes are measured whatever the layer limit (the threading check reads them); they
             # split the bars into layers only when more than one layer is allowed.
-            n = bars_per_layer(kind["column"].design, beam.design, axis)
+            core = n = bars_per_layer(kind["column"].design, beam.design, axis)
+            # Where the column above has another cage whose transition moves bars inside the joint, the beam bars pass
+            # the joint's inventory, not the core cage alone.
+            for joint in kind["joints"]:
+                at_joint = bars_per_layer_at_joint(*joint, beam.design, axis)
+                if at_joint < core:
+                    inventory = joint_inventory(*joint)
+                    inventory_effect.append({"joint": list(joint), "axis": axis, "beam_group": beam.group_id,
+                                             "core_cage_lanes": core, "joint_lanes": at_joint,
+                                             "core_group": inventory["core_group"], "above_group": inventory["above_group"],
+                                             "inventory_established": inventory["established"]})
+                n = min(n, at_joint)
             fit[beam.group_id] = n if beam.group_id not in fit else min(fit[beam.group_id], n)
     per_layer = {gid: {face: sp._split_into_layers(count, fit.get(gid) if limit > 1 else None, limit)
                        for face, count in (("top", design.top_bars), ("bottom", design.bot_bars))}
@@ -254,7 +408,8 @@ def arrangement():
                  for gid, design in beam_groups.items()}
         for _ in range(MAX_SWEEPS):
             sweeps += 1
-            if not any([_place(order, offsets[face], depth_of, fixed) for order, depth_of in plans]):
+            if not any([_place(order, offsets[face], depth_of, fixed, None if controls is None else (controls, face, kind))
+                        for (order, depth_of), kind in zip(plans, types)]):
                 break
         else:
             raise mg.GroupedStateError(f"The {face} beam bar layers did not settle in {MAX_SWEEPS} sweeps over the joints; "
@@ -274,10 +429,85 @@ def arrangement():
                         "slab_mats": mats, "slab_mats_complete": mats_complete,
                         "slab_crossing_rule": "fixed mats; move straight beam rows inward on bar grid; "
                                               "interlayer gap is a declared construction allowance at orthogonal crossings"}
+    if inventory_effect:
+        # Recorded only where the joint inventory lowers a lane, so every other design's rows keep their earlier form.
+        result["_basis"]["joint_inventory"] = {"rule": JOINT_INVENTORY_RULE_ID, "count": len(inventory_effect),
+                                               "joints_with_fewer_lanes": inventory_effect[:24]}
     if len(_CACHE) > 8192:
         _CACHE.clear()
     _CACHE[key] = result
     return result
+
+
+ROW_AUDIT_ID = "complete_arrangement_row_audit_v1"
+
+
+def row_audit(state=None):
+    """Every beam group's rows checked on the complete shared arrangement of ``state`` (default: the installed design):
+    the arrangement of this module with the slab mats and settings in force, each face through
+    Design.SMRF_Beam_Slab_Strength.validate_bar_rows (counts, increasing elevations inside the section, short of
+    mid-depth). Returns {"rule", "state_identity", "valid", "invalid", "settle_error"}: each invalid face names its group,
+    face, error ("past_mid_depth" or "rows_invalid"), reason, rows, section and bars and, from row_controls, what set each
+    of its layers. An arrangement that does not settle is invalid with its reason (``settle_error``); it and a face whose
+    row record is malformed ("rows_invalid") are errors a gate raises again (raise_arrangement_errors). Geometry only:
+    nothing is changed."""
+    from Design.SMRF_Beam_Slab_Strength import BeamBarRowsError, validate_bar_rows
+    state = state or mg.active()
+    if state is None:
+        raise mg.GroupedStateError("A row audit describes a grouped design; none is given or installed.")
+    result = {"rule": ROW_AUDIT_ID, "state_identity": state.identity(), "valid": True, "invalid": [], "settle_error": None}
+    invalid = []
+    with mg.installed(state):
+        try:
+            rows = arrangement()
+        except mg.GroupedStateError as exc:
+            result.update(valid=False, settle_error=str(exc))
+            return result
+        for gid in sorted(g for g, group in state.groups.items() if group["member_type"] != "column"):
+            design = state.designs[gid]
+            for face, count in (("top", design.top_bars), ("bottom", design.bot_bars)):
+                try:
+                    validate_bar_rows(rows[gid][face], count, f"{face} bars", design.h_in)
+                    continue
+                except BeamBarRowsError as exc:
+                    error, reason = "past_mid_depth", str(exc)
+                except ValueError as exc:
+                    error, reason = "rows_invalid", str(exc)
+                invalid.append({"group": gid, "face": face, "error": error, "reason": reason,
+                                "per_layer": list(rows[gid][face]["per_layer"]),
+                                "offsets_in": list(rows[gid][face]["offsets_in"]), "section_in": [design.b_in, design.h_in],
+                                "bars": [design.bar_size, design.top_bars, design.bot_bars]})
+        if invalid:
+            controls = row_controls()
+            for item in invalid:
+                item["controls"] = controls[item["group"]][item["face"]]
+    result.update(valid=not invalid, invalid=invalid)
+    return result
+
+
+def raise_arrangement_errors(audit):
+    """Raise the errors a row audit caught that are not bar-row outcomes of the design: an arrangement that does not
+    settle (layers that do not settle within MAX_SWEEPS, a joint whose beams differ without a declared transition) as
+    GroupedStateError, and a malformed row record ("rows_invalid": counts, order or centroid that correct layering
+    cannot produce) as ValueError, as when the strengths read the rows. Only rows past mid-depth are a design outcome."""
+    if audit.get("settle_error"):
+        raise mg.GroupedStateError(audit["settle_error"])
+    malformed = [item for item in audit.get("invalid") or [] if item.get("error") == "rows_invalid"]
+    if malformed:
+        raise ValueError("malformed beam bar rows (an error in the layering or its inputs, not a design outcome): "
+                         + "; ".join(f"{item['group']} {item['face']}: {item['reason']}" for item in malformed[:4]))
+
+
+def row_controls():
+    """{beam group id: {"top": [...], "bottom": [...]}} of the installed design: per layer, None where the layer kept
+    its nominal offset, else the last constraint that raised it (``by``: own_layer_pitch, crossing_layer with the
+    crossing group and layer, or slab_mat), its offset from the face and the joint type (core column, X and Y beam
+    groups) and joints where it did. The arrangement is that of arrangement(); this explains it, it changes nothing."""
+    controls = {}
+    rows = arrangement(controls=controls)
+    return {gid: {face: [controls.get((face, gid, layer)) for layer in range(value[face]["layers"])]
+                  for face in ("top", "bottom")}
+            for gid, value in rows.items() if gid != "_basis"}
 
 
 def group_rows(group_id):

@@ -16,12 +16,18 @@ both ends of every beam and column, rigid centerline joints, no IMKPinching join
 face slip interface. IMKPinching and its joint/interface calibration are deferred, not deleted: their
 sources, fixtures and reference work stay in the repository and are simply not installed here.
 
+Since 2026-10-29 the profile requires the frozen V2 member spring calibration
+(``seisframe_imk_v2_frozen_20261029``, Model/IMK_Spring_Mapping; approved by the principal researcher with the
+RA's agreement): half-member conversion of the member intervals to native dp/dpc, member-reference S/C energy on
+the canonical orientation, the retained native du. ``v2_nonlinear_flexure_screening_v1_legacy_imk_replay`` is the
+same model with the pre-freeze member spring rule, for explicit historical replay of designs made for V2.
+
 What the profile does NOT do: it does not create clear spans or rigid end offsets (``rigid_centerline``
 is a centerline idealisation: beams and columns meet at one node), it does not defer joint DESIGN (joint
 shear, confinement, anchorage, bar fit and strong-column/weak-beam checks stay in the design loop), it
-does not certify the member energy mapping (``canonical_physical_orientation_baseline_v1``, provisional) and it does not release
-generation. The hinge rotation it produces is the total relative spring rotation of a member calibration
-that still contains Haselton's bar-slip share (a_sl = 1, Model/Deformation_Ownership); it is not
+does not establish experimental validation of the member calibration (the freeze is a modelling choice) and it
+does not release generation. The hinge rotation it produces is the total relative spring rotation of a member
+calibration that still contains Haselton's bar-slip share (a_sl = 1, Model/Deformation_Ownership); it is not
 experimentally isolated plastic flexure.
 """
 from __future__ import annotations
@@ -34,13 +40,21 @@ import Structure_Parameters as sp
 UNPROFILED = "unprofiled_repository_defaults"
 V2_FLEXURE = "v2_nonlinear_flexure_screening_v1"
 V2_FLEXURE_ANCHORED = "v2_nonlinear_flexure_anchored_energy_research_v1"
+# Explicit historical replay of the V2 model with the pre-freeze member spring rule (commit 66f964c1).
+V2_FLEXURE_LEGACY_IMK_REPLAY = "v2_nonlinear_flexure_screening_v1_legacy_imk_replay"
+
+FROZEN_IMK = "seisframe_imk_v2_frozen_20261029"          # Model/IMK_Spring_Mapping.FROZEN_V2
+LEGACY_IMK = "legacy_direct_interval_nominal_energy_66f964c1"   # Model/IMK_Spring_Mapping.LEGACY_REPLAY
 
 # The Structure_Parameters names every profile governs; the unprofiled identity reports the same names.
 GOVERNED_KEYS = ("ELEMENT_FORMULATION", "IMK_MATERIAL_TYPE", "IMK_APPLY_TO_BEAMS", "IMK_APPLY_TO_COLUMNS",
                  "JOINT_MODEL", "NTHA_HINGE_HISTORY_STRIDE")
 # State a profile is declared under; reported in the identity and checked, never set, by apply_profile.
+# The member spring calibration and its stiffness rule are reported since the 2026-10-29 freeze, so a design or an
+# output made under the pre-freeze rule never carries the same profile identity as one made under the frozen rule.
 REPORTED_STATE_KEYS = ("JOINT_DEFORMATION_SCOPE", "IMK_ENERGY_MAPPING_MODE", "IMK_CYCLIC_CALIBRATION_ID",
                        "IMK_CYCLIC_CALIBRATION_STATUS", "IMK_DETERIORATION_MODE", "IMK_USE_CALIBRATED_BACKBONE",
+                       "IMK_MEMBER_SPRING_CALIBRATION", "IMK_HINGE_STIFFNESS_MODE", "IMK_HINGE_STIFFNESS_FACTOR",
                        "ASCE_RISK_CATEGORY", "ASCE_IE")
 
 PROFILES = {
@@ -57,8 +71,12 @@ PROFILES = {
         "required_state": {
             # The experimentally calibrated member energy mapping stays disabled until experimentally supported
             # energies exist (user decision 2026-09-24); this profile neither enables nor certifies it. Its member
-            # energies are the coordinate-invariant canonical baseline (V6 IMK audit correction, 2026-10-23).
+            # energies are oriented by the coordinate-invariant canonical baseline (V6 IMK audit correction,
+            # 2026-10-23).
             "IMK_ENERGY_MAPPING_MODE": "canonical_physical_orientation_baseline_v1",
+            # The frozen member spring calibration (approved 2026-10-29). Required, not set: a process configured
+            # for the legacy replay is refused here rather than silently switched; the replay has its own profile.
+            "IMK_MEMBER_SPRING_CALIBRATION": FROZEN_IMK,
             "ASCE_RISK_CATEGORY": "III",
         },
         "explicit_face_slip_interfaces": False,
@@ -72,11 +90,19 @@ PROFILES = {
             "deferred": "IMKPinching joint springs and explicit face slip interfaces, with their calibration",
             "slip": ("the member hinge keeps Haselton's bar-slip share (a_sl = 1) because no face interface owns it; the "
                      "recorded quantity is total relative spring rotation, not isolated plastic flexure"),
-            "member_energy": ("canonical_physical_orientation_baseline_v1: every mode's reference energy is the base Lamda "
-                              "times the yield moment of one declared physical direction (the positive input at a "
-                              "canonically connected member's start end; hogging for a beam's vertical bending), so it "
-                              "does not depend on the spring's sign convention; the magnitudes are the provisional cyclic "
-                              "baseline, not an experimental calibration"),
+            "member_energy": ("seisframe_imk_v2_frozen_20261029 on the canonical_physical_orientation_baseline_v1 "
+                              "orientation: S and C energies lambda_H * My_canonical^2 / K0 of each spring's half-member "
+                              "reference, A and K suppressed by 1e12 * My_canonical, where My_canonical is one declared "
+                              "physical direction (hogging for a beam's vertical bending), so the energy does not depend "
+                              "on the spring's sign convention; a frozen modelling choice, not an experimental "
+                              "calibration"),
+            "member_spring_calibration": (
+                "seisframe_imk_v2_frozen_20261029 (approved 2026-10-29 by the principal researcher with the RA's "
+                "agreement; numerically equivalent to research profile v2_imk_half_member_reference_research_20261028): "
+                "member intervals converted once to native dp/dpc on a nominal half-member reference (Ls = L/2, "
+                "K0 = Kh/20, Kb = 1.05 K0); native du retained as theta_p + theta_pc + 0.005 beam / 0.004 column "
+                "padding, a provisional numerical cutoff. Not experimentally validated; not a dataset-release "
+                "certification"),
             "fidelity": ("the benefit of calibrated pinching has not been established by a matched comparison; deferral does "
                          "not establish that its effect is negligible"),
             "release": "GENERATION_RELEASE_READY stays False; a profile is not a qualification",
@@ -84,10 +110,18 @@ PROFILES = {
     },
 }
 
+_LEGACY_SPRING_DECLARATION = (
+    "legacy_direct_interval_nominal_energy_66f964c1: the pre-freeze member spring rule, member intervals installed "
+    "as native dp/dpc and Lamda = lambda times a nominal 0.005 beam / 0.004 column yield rotation; explicit "
+    "historical replay, superseded for V2 by seisframe_imk_v2_frozen_20261029 on 2026-10-29")
+
 # The same model with the provisional member energy anchor (pre-generation review, 2026-10-04). It is a
-# separate profile so that a design or a run made under the legacy mapping is never read as this one.
+# separate profile so that a design or a run made under the legacy mapping is never read as this one. The anchor
+# is a pre-freeze research convention: it is defined on the pre-freeze member spring rule, which the profile sets
+# explicitly (the frozen calibration refuses the anchored energy mapping).
 PROFILES[V2_FLEXURE_ANCHORED] = {
-    "settings": {**PROFILES[V2_FLEXURE]["settings"], "IMK_ENERGY_MAPPING_MODE": "provisional_min_yield_anchor_v1"},
+    "settings": {**PROFILES[V2_FLEXURE]["settings"], "IMK_ENERGY_MAPPING_MODE": "provisional_min_yield_anchor_v1",
+                 "IMK_MEMBER_SPRING_CALIBRATION": LEGACY_IMK},
     "required_state": {"ASCE_RISK_CATEGORY": "III"},
     "explicit_face_slip_interfaces": False,
     "joint_springs": False,
@@ -99,8 +133,30 @@ PROFILES[V2_FLEXURE_ANCHORED] = {
                           "smaller physical yield moment of the spring, so it is independent of the spring's sign "
                           "convention; a modelling convention, not an experimental calibration, an ACI requirement or a "
                           "proven bound on response; cyclic calibration stays provisional"),
+        "member_spring_calibration": _LEGACY_SPRING_DECLARATION,
         "columns": ("column hinges use a fixed strength at the gravity axial load on two independent bending axes; "
                     "changing axial load and coupled P-M-M response are not represented"),
+    },
+}
+
+# The V2 model exactly as it was before the freeze (commit 66f964c1): the canonical orientation with the pre-freeze
+# member spring rule. Explicit historical replay only; it reinstalls designs made for V2_FLEXURE (design_profile)
+# and its own identity says what it is, so its outputs are never read as V2 outputs.
+PROFILES[V2_FLEXURE_LEGACY_IMK_REPLAY] = {
+    "settings": {**PROFILES[V2_FLEXURE]["settings"], "IMK_MEMBER_SPRING_CALIBRATION": LEGACY_IMK},
+    "required_state": {"IMK_ENERGY_MAPPING_MODE": "canonical_physical_orientation_baseline_v1",
+                       "ASCE_RISK_CATEGORY": "III"},
+    "design_profile": V2_FLEXURE,
+    "explicit_face_slip_interfaces": False,
+    "joint_springs": False,
+    "declarations": {
+        **PROFILES[V2_FLEXURE]["declarations"],
+        "scope": ("explicit historical replay of the V2 nonlinear member-flexure model under the pre-freeze member "
+                  "spring rule (commit 66f964c1); not the V2 calibration and not production acceptance"),
+        "member_energy": ("canonical_physical_orientation_baseline_v1: every mode's reference energy is the base Lamda "
+                          "times the yield moment of one declared physical direction (hogging for a beam's vertical "
+                          "bending); the magnitudes are the pre-freeze provisional cyclic baseline"),
+        "member_spring_calibration": _LEGACY_SPRING_DECLARATION,
     },
 }
 
@@ -218,9 +274,20 @@ def installed_topology():
         table[str(key)] = table.get(str(key), 0) + 1
 
     slip_owners, panel_owners, slip_indicators, installed_material_types, energy_modes = {}, {}, {}, {}, {}
+    spring_calibrations = {}
     members_framing_into_a_beam_core = 0
     for entry in registry.values():
         tally(energy_modes, entry.get("energy_mapping_mode"))
+        # The calibration each installed material's own provenance records (a released end has none), so the
+        # check reads what was installed, not the configuration string.
+        for end_materials in (entry.get("installed_materials") or {}).values():
+            for material in (end_materials or {}).values():
+                material = material or {}
+                if material.get("released") or material.get("material_type") == "Elastic":
+                    continue
+                provenance = material.get("provenance") or {}
+                mapping = provenance.get("member_spring_calibration")
+                tally(spring_calibrations, mapping["calibration_id"] if mapping else LEGACY_IMK)
         if entry.get("end_node_i") != entry.get("node_i") or entry.get("end_node_j") != entry.get("node_j"):
             members_framing_into_a_beam_core += 1
         for end in ("i", "j"):
@@ -239,6 +306,7 @@ def installed_topology():
     return {
         "installed_spring_material_types": installed_material_types,
         "member_energy_mapping_modes": energy_modes,
+        "installed_member_spring_calibrations": spring_calibrations,
         "bar_slip_owner_by_end": slip_owners,
         "panel_shear_owner_by_end": panel_owners,
         "bond_slip_indicator_by_end": slip_indicators,
@@ -303,6 +371,10 @@ def verify_installed_domain(profile_id=None, *, raise_on_failure=False):
         required_mode = {**profile["settings"], **profile["required_state"]}.get("IMK_ENERGY_MAPPING_MODE")
         if required_mode and set(topology["member_energy_mapping_modes"]) - {required_mode}:
             problems.append(f"member energy mapping modes installed: {topology['member_energy_mapping_modes']}")
+        required_calibration = {**profile["settings"], **profile["required_state"]}.get("IMK_MEMBER_SPRING_CALIBRATION")
+        if required_calibration and set(topology["installed_member_spring_calibrations"]) - {required_calibration}:
+            problems.append(f"member spring calibrations installed: {topology['installed_member_spring_calibrations']}, "
+                            f"the profile requires {required_calibration}")
         if not profile["joint_springs"] and topology["joint_springs_installed"]:
             problems.append(f"{topology['joint_spring_elements_in_domain']} joint spring elements / "
                             f"{topology['joint_registry_entries']} joint registry entries are installed; the profile installs none")

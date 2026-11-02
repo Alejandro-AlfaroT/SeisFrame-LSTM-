@@ -13,6 +13,8 @@ import numpy as np
 from Data_Generation import Run_Weighted_Seismic_Calibration as run
 from Data_Generation import Build_Weighted_Seismic_Calibration_Plan as build
 from Data_Generation.Seismic_Response_Score import default_policy
+from Data_Generation.Hybrid_Exporter import HINGE_BACKBONE_VERSION
+from Model.IMK_Spring_Mapping import FROZEN_V2, LEGACY_REPLAY
 
 
 class CalibrationContracts(unittest.TestCase):
@@ -39,16 +41,26 @@ class CalibrationContracts(unittest.TestCase):
                        "hinge_history_time": np.array([.01, .02, .03]),
                        "hinge_history_commit_count": np.array([1, 2, 3])}
         np.savez(ntha / "response_arrays.npz", **self.arrays)
-        run.write_json(ntha / "global_parameters.json", {"num_floor": 1, "story_h_in": 100})
+        run.write_json(ntha / "global_parameters.json", {"num_floor": 1, "story_h_in": 100,
+                                                         "imk_member_spring_calibration": LEGACY_REPLAY})
         run.write_json(ntha / "status.json", {"failed": False, "completed_steps": count, "npts_requested": count})
-        fields = ("hinge_ele_tag", "material_type", "damage_ratio", "yielded", "theta_p", "theta_y_spring", "plastic_rotation", "rot_abs_max", "past_capping")
+        # hinge_backbone v2 (frozen IMK V2 calibration, 2026-10-29; Ground_Motion_Main._hinge_backbone_rows): each row
+        # names its layout and member spring calibration and carries the governing branch's native points and demand,
+        # damage_ratio = capping_ratio = plastic_rotation / native_dp_rad. The anchored research profile installs the
+        # explicit legacy replay, whose native dp is the member theta_p and whose native My/Kh is theta_y_spring.
+        fields = ("hinge_backbone_version", "hinge_ele_tag", "material_type", "member_spring_calibration", "end_released",
+                  "damage_ratio", "yielded", "theta_p", "theta_y_spring", "native_theta_y_rad", "native_dp_rad",
+                  "plastic_rotation", "rot_abs_max", "peak_rotation_rad", "capping_ratio", "past_capping")
         with (ntha / "hinge_backbone.csv").open("w", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=fields)
             writer.writeheader()
             for tag, plastic in ((101, .00025), (102, 0)):
-                writer.writerow(dict(hinge_ele_tag=tag, material_type="IMKPeakOriented", damage_ratio=plastic/.001,
-                    yielded=int(plastic>0), theta_p=.001, theta_y_spring=.001, plastic_rotation=plastic,
-                    rot_abs_max=.001+plastic, past_capping=0))
+                writer.writerow(dict(hinge_backbone_version=HINGE_BACKBONE_VERSION, hinge_ele_tag=tag,
+                    material_type="IMKPeakOriented", member_spring_calibration=LEGACY_REPLAY, end_released=0,
+                    damage_ratio=plastic/.001, yielded=int(plastic>0), theta_p=.001, theta_y_spring=.001,
+                    native_theta_y_rad=.001, native_dp_rad=.001, plastic_rotation=plastic,
+                    rot_abs_max=.001+plastic, peak_rotation_rad=.001+plastic, capping_ratio=plastic/.001,
+                    past_capping=0))
         axis = {"compared": True, "matched_snapshots": count, "unmatched_snapshots": 0,
                 "recorder_rows": count, "recorder_rows_that_are_not_snapshots": 0,
                 "max_abs_moment_difference_kip_in": 1e-9, "max_abs_rotation_difference_rad": 1e-13,
@@ -120,14 +132,94 @@ class CalibrationContracts(unittest.TestCase):
         np.savez(path.parent / "ntha/response_arrays.npz", **self.arrays)
         self.assertFalse(run.assess_trial(path, default_policy())["usable"])
 
+    def rewrite_hinges(self, path, change):
+        """Rewrite the trial's hinge_backbone.csv with the same columns, each row (strings) passed through change."""
+        csv_path = path.parent / "ntha/hinge_backbone.csv"
+        with csv_path.open(newline="") as stream:
+            reader = csv.DictReader(stream)
+            fields, rows = reader.fieldnames, [change(dict(row)) for row in reader]
+        with csv_path.open("w", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+
     def test_damage_is_rotation_proxy_not_arbitrary_scalar(self):
         path = self.producer()
         csv_path = path.parent / "ntha/hinge_backbone.csv"
-        text = csv_path.read_text().replace("0.25,1", "0.95,1")
-        csv_path.write_text(text)
-        value = run.assess_trial(path, default_policy())
-        self.assertFalse(value["usable"])
-        self.assertIn("inconsistent_rotation_damage_proxy", value["rejection_reasons"])
+        original = csv_path.read_text()
+        # hinge_backbone v2 (frozen IMK V2 calibration, 2026-10-29) carries the ratio twice, damage_ratio and
+        # capping_ratio, and assess_trial also refuses a row where the two disagree. Tampering both together breaks
+        # only the rotation-proxy relation (damage = plastic_rotation / native_dp_rad), so that relation is pinned on
+        # its own; tampering either one alone is refused as well.
+        for tampered in (("damage_ratio",), ("damage_ratio", "capping_ratio"), ("capping_ratio",)):
+            with self.subTest(tampered=tampered):
+                csv_path.write_text(original)
+
+                def change(row):
+                    if row["hinge_ele_tag"] == "101":
+                        for key in tampered:
+                            self.assertNotEqual(float(row[key]), .95)
+                            row[key] = "0.95"
+                    return row
+
+                self.rewrite_hinges(path, change)
+                value = run.assess_trial(path, default_policy())
+                self.assertFalse(value["usable"])
+                self.assertIn("inconsistent_rotation_damage_proxy", value["rejection_reasons"])
+                self.assertEqual(value["rejection_reasons"], ["inconsistent_rotation_damage_proxy"])
+
+    def test_unversioned_or_other_layout_hinge_table_is_refused(self):
+        # assess_trial reads only hinge_backbone v2 (frozen IMK V2 calibration, 2026-10-29). The pre-freeze unversioned
+        # table (the commit 66f964c1 fixture, verbatim) and a table with one row of another layout are refused outright.
+        path = self.producer()
+        csv_path = path.parent / "ntha/hinge_backbone.csv"
+        original = csv_path.read_text()
+        with self.subTest(table="unversioned v1"):
+            fields = ("hinge_ele_tag", "material_type", "damage_ratio", "yielded", "theta_p", "theta_y_spring",
+                      "plastic_rotation", "rot_abs_max", "past_capping")
+            with csv_path.open("w", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=fields)
+                writer.writeheader()
+                for tag, plastic in ((101, .00025), (102, 0)):
+                    writer.writerow(dict(hinge_ele_tag=tag, material_type="IMKPeakOriented", damage_ratio=plastic/.001,
+                        yielded=int(plastic>0), theta_p=.001, theta_y_spring=.001, plastic_rotation=plastic,
+                        rot_abs_max=.001+plastic, past_capping=0))
+            value = run.assess_trial(path, default_policy())
+            self.assertFalse(value["usable"])
+            self.assertEqual(value["rejection_reasons"], ["hinge_backbone_version_mismatch"])
+            self.assertNotIn("score", value)
+        for name, version in (("one unversioned row", ""), ("one row of another layout", "hinge_backbone_v1")):
+            with self.subTest(table=name):
+                csv_path.write_text(original)
+                self.rewrite_hinges(path, lambda row: {**row, "hinge_backbone_version": version}
+                                    if row["hinge_ele_tag"] == "102" else row)
+                value = run.assess_trial(path, default_policy())
+                self.assertFalse(value["usable"])
+                self.assertEqual(value["rejection_reasons"], ["hinge_backbone_version_mismatch"])
+                self.assertNotIn("score", value)
+
+    def test_trial_of_another_member_spring_calibration_is_refused(self):
+        # The anchored research profile installs the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29); a
+        # trial whose hinge rows or global parameters name another member spring calibration (the frozen default), or
+        # whose rows mix two, is never scored under this controller's metric basis.
+        path = self.producer()
+        csv_path = path.parent / "ntha/hinge_backbone.csv"
+        params_path = path.parent / "ntha/global_parameters.json"
+        original, params = csv_path.read_text(), json.loads(params_path.read_text())
+        self.assertNotEqual(FROZEN_V2, LEGACY_REPLAY)
+        cases = {"rows and global parameters": ({"101": FROZEN_V2, "102": FROZEN_V2}, FROZEN_V2),
+                 "global parameters only": ({"101": LEGACY_REPLAY, "102": LEGACY_REPLAY}, FROZEN_V2),
+                 "rows only": ({"101": FROZEN_V2, "102": FROZEN_V2}, LEGACY_REPLAY),
+                 "mixed rows": ({"101": FROZEN_V2, "102": LEGACY_REPLAY}, LEGACY_REPLAY)}
+        for name, (by_tag, declared) in cases.items():
+            with self.subTest(case=name):
+                csv_path.write_text(original)
+                self.rewrite_hinges(path, lambda row: {**row, "member_spring_calibration": by_tag[row["hinge_ele_tag"]]})
+                run.write_json(params_path, {**params, "imk_member_spring_calibration": declared})
+                value = run.assess_trial(path, default_policy())
+                self.assertFalse(value["usable"])
+                self.assertEqual(value["rejection_reasons"], ["hinge_member_spring_calibration_mismatch"])
+                self.assertNotIn("score", value)
 
     def case(self, *, open_ids=(), accepted=True, failed=0):
         folder = self.root / "designs/case_0001"

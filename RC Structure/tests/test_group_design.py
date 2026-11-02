@@ -4,7 +4,7 @@
       the solved actions, the governing member DCRs, the hoops, the capacity shears and the joint shears;
   A4  with one column group changed above a band boundary, the transition, the joint types and the
       strong-column evidence follow the physical members (two unlike columns at the boundary joints, one
-      column at the roof, no roof exemption);
+      column at the roof, with the 18.7.3.1 connection evidence on every sway state);
   A5  a factored axial load outside a section's strength domain is an error that names the group, never a
       clamped value, and the vectorised interaction used to price candidate cages is the scalar one.
 
@@ -312,8 +312,14 @@ class ChangedGroupAtABandBoundary(unittest.TestCase):
 
     def test_strong_column_evidence_is_per_physical_joint_with_one_column_at_the_roof(self):
         scwb = self.capacity["scwb"]
-        self.assertFalse(scwb["roof_exemption_applied"])
+        self.assertEqual(scwb["roof_exemption_applied"], "per connection: ACI 318-19 18.7.3.1 (SMRF_Joints.scwb_check)")
         roof = [joint for joint in scwb["joints"] if joint["is_roof"]]
+        for joint in scwb["joints"]:
+            for axis, states in joint["directions"].items():
+                for sign in ("positive", "negative"):
+                    connection = states[sign]["connection"]
+                    self.assertIs(connection["column_discontinuous_above"], joint["is_roof"])
+                    self.assertGreater(connection["column_gross_area_in2"] * connection["column_fc_ksi"], 0.0)
         self.assertEqual(len(roof), (gf.NX + 1) * (gf.NY + 1))
         self.assertEqual({joint["floor"] for joint in roof}, {gf.NZ})
         self.assertEqual(sorted(scwb["expected_combination_ids"]), sorted(self.ids))

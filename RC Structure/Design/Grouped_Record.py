@@ -45,7 +45,7 @@ from Design import Grouped_Design as gd
 from Design import Grouped_Search as gs
 from Design import SMRF_Floor_Sections as floor_sections
 from Design import SMRF_Transitions as transition_rules
-from Design.SMRF_Common import make_check, not_evaluated, summarize_checks
+from Design.SMRF_Common import awaiting_review, make_check, not_evaluated, summarize_checks
 from Model import Member_Bar_Layers as bar_layers
 from Model import Member_Groups as mg
 from Model import Member_Properties as mp
@@ -53,7 +53,10 @@ from Model import Member_Properties as mp
 SCHEMA = gd.SCHEMA
 ARTIFACT_NAME = "grouped_design.json"
 CANDIDATE_LOG_NAME = "grouped_candidates.jsonl"
-QUALIFICATION_VERSION = "grouped_qualification_v1"
+QUALIFICATION_VERSION = "grouped_qualification_v3_slab_structural_gates_fire_scope"
+# The search log's decision for a candidate that passes the preliminary screen: "screen_passed" since 2026-10-30
+# ("feasible" in records written before; it meant the same screen, never the complete code check).
+SCREEN_PASSED_DECISIONS = ("screen_passed", "feasible")
 # Placeholder cages of an explicit-section seed. Every group's reinforcement is selected by the first
 # evaluation; these only make the seed a complete MemberDesign.
 NOMINAL_COLUMN_CAGE = {"bar_size": 8, "top_bars": 3, "bot_bars": 3, "side_bars": 1, "stirrup_bar_size": 4, "stirrup_legs": 3,
@@ -221,6 +224,7 @@ def grouped_request_identity(cfg=None, seed=None, policy=None, grouping_policy_i
                "rules": {"evaluation": gd.EVALUATION_VERSION, "reinforcement_selection": selection.RULES_ID,
                          "system_reinforcement_selection": selection.SYSTEM_RULES_ID, "lever_order": gs.LEVER_ORDER_ID,
                          "column_transitions": transition_rules.RULES_ID, "bar_layers": bar_layers.RULE_ID,
+                         "joint_inventory_lanes": bar_layers.JOINT_INVENTORY_RULE_ID,
                          "capacity_design": capacity_design.METHOD_VERSION, "qualification": QUALIFICATION_VERSION,
                          "concrete_grades": cg.identity_block()}}
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -354,7 +358,8 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
     """The grouped design record of a finished search (its final feasible candidate). Raises GroupedDesignNotFound."""
     final = search.get("final")
     if final is None:
-        raise GroupedDesignNotFound(f"The grouped search found no feasible design: {search['stop']}", search)
+        raise GroupedDesignNotFound(f"The grouped search found no design passing the preliminary screen: {search['stop']}",
+                                    search)
     evidence, state = final["evidence"], final["state"]
     mg.install(state)
     slab = evidence["slab"]
@@ -410,8 +415,12 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
         "coupled_comparison": coupled,
         "dcr": {"column": final["dcr"]["column"], "beam": final["dcr"]["beam"],
                 "governing": max(final["dcr"].values()),
-                "candidate_screen_passed": bool(final["feasible"]),
+                "candidate_screen_passed": bool(final["candidate_screen_passed"]),
                 "basis": "the largest member-strength DCR of any column group and of any beam group, each on its own cage"},
+        # The authoritative code check of the final candidate (Design.Code_Check_Contract) beside the preliminary screen;
+        # the qualification below stays the gate before any analysis.
+        "code_check": final["code_check"],
+        "code_check_rows": final["code_checks"],
         "constraints": final["constraints"],
         "quantities": final["quantities"],
         "margins": final["margins"],
@@ -496,7 +505,7 @@ def _validated_record_grade(record):
                     or not trigger or trigger.get("longitudinal_grade_ksi") != 60.0
                     or not trial.get("triggers")
                     or trial["triggers"] != gs.grade80_retry_reasons(trigger.get("evaluation") or {})
-                    or not any(e.get("longitudinal_grade_ksi") == 80.0 and e.get("decision") == "feasible"
+                    or not any(e.get("longitudinal_grade_ksi") == 80.0 and e.get("decision") in SCREEN_PASSED_DECISIONS
                                for e in entries)):
                 raise ValueError("Grade 80 retry lacks reproducible Grade 60 limit and feasible Grade 80 evidence.")
         elif grade != trial.get("initial_grade_ksi"):
@@ -595,6 +604,10 @@ def apply_grouped_design(record):
         sp.SLAB_REINFORCEMENT = strength
         sp.SLAB_ACTIONS = record.get("slab_actions")
         sp.JOINT_SHEAR_CATEGORIES = None                 # the scissors joint springs are not wired for groups
+        recorded_rule = (((record.get("bar_layers") or {}).get("basis") or {}).get("joint_inventory") or {}).get("rule")
+        if recorded_rule not in (None, bar_layers.JOINT_INVENTORY_RULE_ID):
+            raise ValueError(f"The grouped record's beam lanes at column transitions were set by {recorded_rule}; this code "
+                             f"applies {bar_layers.JOINT_INVENTORY_RULE_ID} and does not reproduce the earlier rule.")
         rows = bar_layers.arrangement()
         live = _canonical({"groups": {gid: value for gid, value in rows.items() if gid != "_basis"}, "basis": rows["_basis"]})
         if differences(record.get("bar_layers"), live):
@@ -738,6 +751,38 @@ def group_detailing_checks(record, state, capacity):
     return checks
 
 
+def hoop_identity_checks(recomputed, state):
+    """The cage identity of a grouped record against its recomputed capacity design, per group (2026-10-30).
+
+    As the uniform qualifier does per member: a group with no selection is an incomplete design and an unknown cage
+    identity, never a match with the seed hoops it carries; a selected cage that differs is an identity failure; all
+    selected and matching is a pass. The recomputed capacity evidence stays usable when no selected cage differs, so
+    the known failures it carries (another group's shear, say) are still read when one selection is missing.
+    Returns {"checks", "states", "capacity_usable"}.
+    """
+    states = {} if recomputed is None else capacity_design.hoop_selection_status(recomputed, state)
+    missing = sorted(gid for gid, status in states.items() if status == "not_selected")
+    mismatched = sorted(gid for gid, status in states.items() if status == "installed_mismatch")
+    details = {"basis": "the hoops every group's members carry (model, IMK calibration, exports) must be the hoops the "
+                        "recomputed capacity design selects for that group; seed hoops of an unselected group are not a "
+                        "designed cage", "groups": states, "missing_selections": missing, "groups_that_differ": mismatched}
+    checks = []
+    if recomputed is not None:
+        checks.append(make_check("qualification.hoop_selection_complete", "Capacity-design completion",
+                                 int(not missing), 1, "==", details={"missing_selections": missing}))
+    if recomputed is None or (missing and not mismatched):
+        identity = not_evaluated("qualification.hoops_match_design", "Evidence integrity",
+                                 "Capacity design could not be recomputed." if recomputed is None else
+                                 "No capacity-design hoop selection for: " + ", ".join(missing)
+                                 + ". Installed seed values cannot establish a complete designed-cage identity.")
+        identity["details"].update(details)
+        checks.append(identity)
+    else:
+        checks.append(make_check("qualification.hoops_match_design", "Evidence integrity", int(not mismatched), 1, "==",
+                                 details=details))
+    return {"checks": checks, "states": states, "capacity_usable": recomputed is not None and not mismatched}
+
+
 def _capacity_completion_checks(capacity, state):
     """The cage-level items the detailing evaluator leaves open, settled per group from the recomputed capacity design."""
     checks = []
@@ -757,22 +802,58 @@ def _capacity_completion_checks(capacity, state):
                                  "<=", "in2/in", gid,
                                  details={"legs": hoops["legs"], "bar_size": hoops["bar_size"], "spacing_in": hoops["spacing_in"],
                                           "high_axial": confinement["high_axial"]}))
+    axial_checks = {c.get("location"): c for c in capacity.get("checks", []) if c.get("id") == "beam.axial_force_applicability"}
     for gid, data in sorted((capacity.get("beams") or {}).items()):
-        if data.get("hoops"):
-            checks.append(make_check("beam.hoop_layout_and_axial_applicability", "ACI 318-19 18.6.2.1 / 18.6.4 / 18.6.5",
-                                     int(bool(data.get("section_adequate"))), 1, "==", location=gid,
-                                     details={"hoops": data["hoops"],
-                                              "axial_basis": "frame beams carry no factored axial load above Ag fc/10"}))
-        else:
+        clause = "ACI 318-19 18.6.2.1 / 18.6.4 / 18.6.4.7 / 18.6.5"
+        if not data.get("hoops"):
             checks.append(not_evaluated("beam.hoop_layout_and_axial_applicability", "ACI 318-19 18.6.4",
                                         "no hoops are selected for this group", gid))
+            continue
+        if capacity_design.is_gravity_beam_group(state, gid):
+            # A gravity beam's axial branch is 18.14.3.2(a) (gravity.beam_hoops_for_axial_force); here only its shear section.
+            checks.append(make_check("beam.hoop_layout_and_axial_applicability", clause,
+                                     int(bool(data.get("section_adequate"))), 1, "==", location=gid,
+                                     details={"hoops": data["hoops"], "axial_basis": "gravity beam: the axial branch is "
+                                              "gravity.beam_hoops_for_axial_force (18.14.3.2(a))"}))
+            continue
+        # A frame beam: its shear section and the evaluated 18.6.4.7 axial applicability (Group_Capacity.beam_axial_check),
+        # never a statement that the axial load is small.
+        axial = axial_checks.get(gid)
+        if axial is None or axial.get("status") == "not_evaluated":
+            check = not_evaluated("beam.hoop_layout_and_axial_applicability", clause,
+                                  "the frame beam's axial applicability (18.6.4.7) is not evaluated: "
+                                  + str(((axial or {}).get("details") or {}).get("reason", "no axial check")), gid)
+            check["details"]["reason_code"] = "beam_axial_actions_missing"
+            checks.append(check)
+            continue
+        checks.append(make_check("beam.hoop_layout_and_axial_applicability", clause,
+                                 int(bool(data.get("section_adequate")) and axial["status"] == "pass"), 1, "==", location=gid,
+                                 details={"hoops": data["hoops"], "section_adequate": bool(data.get("section_adequate")),
+                                          "axial_check": {k: axial.get(k) for k in ("status", "demand", "capacity", "units")},
+                                          "axial_basis": (axial.get("details") or {}).get("branch")}))
     anchorage = [c for c in capacity.get("checks", []) if c["id"] in ("joint.through_bar_depth", "joint.terminating_bar_hook")]
+    splices = capacity.get("splices") or {}
+    couplers = capacity.get("transition_splices") or {}
+    illegal = sorted([gid for gid, splice in splices.items() if not (splice.get("placement") or {}).get("legal_placement")]
+                     + [key for key, splice in couplers.items() if not (splice.get("placement") or {}).get("legal_placement")])
     checks.append(make_check("detailing.anchorage_splices_and_cover",
-                             "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.8.5 / 20.5 / 25.4--25.5",
-                             int(bool(anchorage) and all(c["status"] == "pass" for c in anchorage)), 1, "==",
-                             details={"anchorage_items": len(anchorage), "splices": capacity.get("splices"),
-                                      "scope": "hooked anchorage, through-bar depth, splice type and location per group and "
-                                               "cover; congestion and placement are detailing.congestion_and_placement"}))
+                             "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.8.5 / 18.2.7 / 20.5 / 25.4--25.5",
+                             int(bool(anchorage) and all(c["status"] == "pass" for c in anchorage) and bool(splices)
+                                 and not illegal), 1, "==",
+                             details={"anchorage_items": len(anchorage), "splices": splices,
+                                      "groups_without_legal_splice_placement": illegal,
+                                      "scope": "hooked anchorage, through-bar depth, splice type and its permitted interval and "
+                                               "proposed location per group (detailing.splice_location) and cover; coupler "
+                                               "product qualification, congestion and placement are reviews"}))
+    mechanical = sorted([gid for gid, splice in splices.items() if str(splice.get("splice_type", "")).startswith("type_2")]
+                        + [f"transition {key}" for key in couplers])
+    if mechanical:
+        check = awaiting_review("detailing.mechanical_splice_product_qualification", "ACI 318-19 25.5.7, 18.2.7.1",
+                                f"{len(mechanical)} group(s) use Type 2 mechanical splices: the coupler's Type 2 qualification "
+                                f"for Grade {sp.FY_KSI:g} bars of the sizes used and its actual length are product evidence",
+                                "mechanical_splice_product_qualification")
+        check["details"]["groups"] = mechanical
+        checks.append(check)
     open_items = [c for c in capacity.get("checks", []) if c.get("status") == "not_evaluated"]
     failed = [c for c in capacity.get("checks", []) if c.get("status") == "fail"]
     if open_items and not failed:
@@ -798,22 +879,40 @@ def _open_checks(record, capacity):
                       "Verify biaxial P-M capacity, force signs and joint-face actions, beam axial effects, strength "
                       "reduction factors and cracked-stiffness assumptions independently."),
         {**not_evaluated("qualification.detailing_model_consistency", "Research model-to-design consistency",
-                         "Independent validation: confirm that each group's confinement zones, bar positions, cover and "
-                         "hoops propagate consistently to section strength, IMK calibration and exports."),
-         "details": {"reason": "awaiting independent validation"}},
+                         "Independent validation of the nonlinear model: confirm that each group's confinement zones, bar "
+                         "positions, cover and hoops propagate consistently to the IMK calibration and exports. The "
+                         "physical bar, hoop and strength consistency of the design is checked separately "
+                         "(grouped.record_installs, qualification.hoops_match_design, "
+                         "qualification.capacity_evidence_recomputed, grouped.beam_end_strengths_recomputed)."),
+         "details": {"reason": "awaiting independent validation",
+                     "category": "nonlinear model review: required before time-history generation, not part of the "
+                                 "candidate code check (Design.Code_Check_Contract)"}},
         not_evaluated("detailing.congestion_and_placement", "ACI 318-19 25.2 / 26.6; constructability",
                       "Bar-placement drawings, mechanical-splice staggering and congestion at joints are not designed."),
     ]
-    layout = (record.get("slab_reinforcement") or {}).get("layout")
-    if layout is not None:
+    # A selected layout is not by itself a developed slab contribution (2026-10-30): the slab record's own development
+    # check must pass on the current floor context (the eligibility the recomputed capacity design read).
+    from Design.SMRF_Slab_Reinforcement import slab_strength_eligibility
+    eligibility = (((capacity or {}).get("scwb") or {}).get("slab_eligibility")
+                   or slab_strength_eligibility(record.get("slab_reinforcement")))
+    if eligibility.get("credit") == "developed":
         checks.append(make_check("qualification.slab_contribution", "ACI 318-19 18.7.3.2 / 6.3.2", 1, 1, "==",
                                  details={"basis": "slab mats within each beam's own effective flange, developed as continuous "
-                                                   "mats at interior ends and by the perimeter hook at exterior ends, in the "
-                                                   "strong-column rule, joint shear and the beam hinges"}))
+                                                   "mats at interior ends (slab_bar_development passes) and by the perimeter "
+                                                   "hook at exterior ends: the strong-column rule credits a hook developed at "
+                                                   "either datum (support face or joint face), beam flexure only one developed "
+                                                   "at both, the beam hinges and saved end strengths the support face; joint "
+                                                   "shear and capacity shear read the probable composite strength (an upper "
+                                                   "bound); where the hook is not developed, the exterior end carries no slab "
+                                                   "bars",
+                                          "eligibility": eligibility}))
     else:
-        checks.append(not_evaluated("qualification.slab_contribution", "ACI 318-19 18.7.3.2 / 6.3.2",
-                                    "Slab reinforcement is not established; beam strengths are those of the bare beams with "
-                                    "the flange concrete. Do not read this as zero slab strength."))
+        check = not_evaluated("qualification.slab_contribution", "ACI 318-19 18.7.3.2 / 6.3.2",
+                              "The developed slab contribution is not established ("
+                              + str(eligibility.get("reason")) + "); beam strengths are not the developed composite ones. "
+                              "Do not read this as zero slab strength.")
+        check["details"].update(reason_code=eligibility.get("reason_code"), eligibility=eligibility)
+        checks.append(check)
     changing = sorted(key for key, t in (capacity.get("transitions") or {}).items() if t.get("kind") != "same_cage")
     if changing:
         check = not_evaluated("detailing.column_transition_rules_reviewed",
@@ -828,12 +927,77 @@ def _open_checks(record, capacity):
     return checks
 
 
+def grouped_scope(record):
+    """The qualification scope of a grouped record, from the system its grouping policy actually designs.
+
+    The uniform scope text (every grid line a moment frame, no collectors) cannot be borrowed: under a system
+    policy only the perimeter frames (and a core ring or core lines) are the SFRS and the interior lines are gravity
+    frames, so the floor diaphragm has to deliver the story forces to them through collectors and chords. The
+    grouped qualification evaluates no diaphragm, collector or chord design for either policy; that stays an
+    explicit unresolved requirement (diaphragm.design_and_collectors), never a statement that none is needed.
+    """
+    from Design.SMRF_Qualification import qualification_scope
+    policy_id = (((record.get("member_groups") or {}).get("policy") or {}).get("id")) or mg.POLICY_ID
+    if mg.is_system_policy(policy_id):
+        layout = mg.layout_of(policy_id)
+        system = ("RC special moment frames on the perimeter"
+                  + {mg.SFRS_LAYOUT_PERIMETER_CORE: " and the core ring", mg.SFRS_LAYOUT_PERIMETER_CORE_LINES: " and the core lines"}
+                  .get(layout, "") + "; the other frame lines are gravity frames (ACI 318-19 18.14)")
+    else:
+        system = "RC special moment frame archetype; every grid line in X and Y (band grouping policy)"
+    return {**qualification_scope(system=system, diaphragm_evaluated=False),
+            "geometry": "regular rectangular grid; sections and reinforcement by story band and plan location",
+            "grouping_policy": policy_id}
+
+
+def slab_context_check(record, state):
+    """Was the saved slab reinforcement priced on the floor context of the installed design? The context is rebuilt
+    (Grouped_Design.slab_completion_context with the record's own slab-action assertions) and compared."""
+    from Design.Config import SlabActionAssertions
+    name, clause = "slab.completion_context_current", "Evidence integrity: slab completion context of the final design"
+    saved = (record.get("slab_reinforcement") or {}).get("inputs") or {}
+    if saved.get("context") is None:
+        return not_evaluated(name, clause, "the saved slab reinforcement carries no floor context")
+    try:
+        policy = ((record.get("request_identity") or {}).get("policy") or {})
+        assertions = SlabActionAssertions(**(policy.get("slab_actions") or {}))
+        # The floor sections the record's assertions were reviewed for (absent in records that predate the field).
+        analysis = policy.get("floor_analysis") or {}
+        covered = analysis.get("slab_assertion_floor_sections")
+        view = types.SimpleNamespace(slab_actions=assertions, floor_analysis=types.SimpleNamespace(
+            slab_assertion_floor_sections=None if covered is None else tuple(covered),
+            slab_assertion_thickness_in=analysis.get("slab_assertion_thickness_in"),
+            slab_procedure=analysis.get("slab_procedure")))
+        current = gd.slab_completion_context(record["slab"], view, state)
+        from Design.SMRF_Slab_Reinforcement import _context
+        matches = _context(current) == saved["context"]
+    except (KeyError, TypeError, ValueError) as exc:
+        return not_evaluated(name, clause, f"the floor context cannot be rebuilt: {type(exc).__name__}: {exc}")
+    return make_check(name, clause, int(matches), 1, "==",
+                      details={"basis": "perimeter beam width and hoop, column cores, clear spans and stiffness ratios of the "
+                                        "installed design against those the slab completion checks used"})
+
+
+def _diaphragm_check(record):
+    """The diaphragm requirement of a grouped record, left explicitly open (no evaluator covers it here)."""
+    policy_id = (((record.get("member_groups") or {}).get("policy") or {}).get("id")) or mg.POLICY_ID
+    reason = ("the slab diaphragm, its collectors and chords (ACI 318-19 18.12 on the ASCE 7-22 12.10 forces) are not "
+              "designed for a grouped record"
+              + ("; under this system policy the story forces reach the perimeter frames through collectors that the "
+                 "uniform module's no-collector premise (frames on every grid line) does not cover"
+                 if mg.is_system_policy(policy_id) else ""))
+    check = not_evaluated("diaphragm.design_and_collectors", "ACI 318-19 18.12; ASCE 7-22 12.10", reason)
+    check["details"]["category"] = "requirement outside the implemented grouped checks"
+    return check
+
+
 def qualify_grouped_design(record):
     """The fail-closed checklist of a grouped record. The record is installed for the recomputation and the
     model is put back as it was. A record that cannot be installed is not accepted, with the reason."""
-    from Design.SMRF_Qualification import SCOPE, _apply_verification_assertions
+    from Design.SMRF_Common import split_scope_exclusions
+    from Design.SMRF_Qualification import _apply_verification_assertions
     base = {"schema_version": QUALIFICATION_VERSION, "implementation_stage": "partial_not_release_ready",
-            "scope": {**SCOPE, "geometry": "regular rectangular grid; sections and reinforcement by story band and plan location"}}
+            "scope": grouped_scope(record)}
     with scratch_state():
         try:
             apply_grouped_design(record)
@@ -843,8 +1007,8 @@ def qualify_grouped_design(record):
             return {**base, "checks": checks, **summarize_checks(checks)}
         checks = _qualification_checks(record, mg.active())
         ops.wipe()
-    checks = _apply_verification_assertions(record, checks)
-    return {**base, "checks": checks, **summarize_checks(checks)}
+    checks, excluded = split_scope_exclusions(_apply_verification_assertions(record, checks))
+    return {**base, "checks": checks, "scope_exclusions": excluded, **summarize_checks(checks)}
 
 
 def _qualification_checks(record, state):
@@ -899,13 +1063,9 @@ def _qualification_checks(record, state):
                                  details={"basis": "group capacity design rebuilt from the record's member groups, slab layout, "
                                                    "transfers and saved combination actions and compared with the saved evidence",
                                           "differences": found}))
-        hoops = None if recomputed is None else capacity_design.hoop_updates(recomputed, state)
-        checks.append(make_check("qualification.hoops_match_design", "Evidence integrity",
-                                 int(hoops is not None and not hoops), 1, "==",
-                                 details={"basis": "the hoops every group's members carry (model, IMK calibration, exports) must "
-                                                   "be the hoops the recomputed capacity design selects for that group",
-                                          "groups_that_differ": sorted(hoops or {})}))
-        if recomputed is not None and not found and not hoops:
+        identity = hoop_identity_checks(recomputed, state)
+        checks.extend(identity["checks"])
+        if recomputed is not None and not found and identity["capacity_usable"]:
             capacity = recomputed
         try:
             strengths = group_checks.strength_checks(actions, cfg, state)
@@ -1017,17 +1177,33 @@ def _qualification_checks(record, state):
     from Design.SMRF_Slab_Actions import evaluate_slab_actions
     checks.extend(evaluate_slab_actions((strength or {}).get("inputs", {}).get("demand_evidence") or record.get("slab_actions")))
 
-    # 5. Drift and stability results bound to this frame.
+    # The slab was priced on the floor context of the installed design (its cages, hoops and column cores).
+    checks.append(slab_context_check(record, state))
+
+    # 5. Drift and stability results bound to this frame, rebuilt from their saved numbers (2026-10-30): the input
+    # digest binds the model inputs, not the check rows, so the rows are reconstructed and compared, never consumed.
     drift = record.get("drift_screen")
     try:
         drift_matches = isinstance(drift, dict) and drift.get("analysis_input_sha256") == analysis_input_signature(record)
     except (KeyError, ValueError, TypeError):
         drift_matches = False
-    if drift_matches and drift.get("checks"):
-        checks.extend(drift["checks"])
+    if drift_matches:
+        from Design.SMRF_Demands import reconstruct_drift_checks
+        try:
+            # The limit basis comes from the digest-covered declaration (demand_basis.drift) and the seismic block.
+            rebuilt = reconstruct_drift_checks(drift, geometry["num_floor"], geometry["story_h_in"],
+                                               geometry.get("num_bay_x"), geometry.get("num_bay_y"),
+                                               declared=(record.get("demand_basis") or {}).get("drift") or {},
+                                               risk_category=(record.get("seismic") or {}).get("risk_category"))
+            checks.append(rebuilt["integrity"])
+            checks.extend(rebuilt["checks"])
+        except Exception as exc:                      # noqa: BLE001 -- an unreadable saved screen is a finding, not a pass
+            checks.append(not_evaluated("demands.drift_and_stability_results", "ASCE 7-22 12.8.6--12.8.7",
+                                        f"The saved drift results cannot be rebuilt: {type(exc).__name__}: {exc}"))
     else:
         checks.append(not_evaluated("demands.drift_and_stability_results", "ASCE 7-22 12.8.6--12.8.7",
                                     "Independent QEx/QEy drift/stability results are not available."))
+    checks.append(_diaphragm_check(record))
 
     # 6. The quantities the search compared candidates on.
     try:

@@ -23,6 +23,7 @@ from Model import Analysis_Profile as ap
 from Model import IMK_Hinges as hinges
 from Model.IMK_Materials import (MAPPING_VERSION, MATERIAL_TYPES, PROVISIONAL_ANCHOR_STATUS, PROVISIONAL_ANCHOR_VERSION,
                                  active_energy_modes, define_anchored_rotational_imk, define_rotational_imk)
+from Model.IMK_Spring_Mapping import FROZEN_V2, LEGACY_REPLAY
 from test_imk_energy_mapping import NEG, POS, analyze_displacements, cyclic, history, profile
 
 PROVENANCE = {"calibration_id": "synthetic", "status": "verification_only", "deformation_scope": "isolated_3d_spring"}
@@ -72,8 +73,11 @@ def member(kind, axis, reversed_nodes=False, fixed_high=False, mode=PROVISIONAL_
     fixed, free = (2, 1) if fixed_high else (1, 2)
     ops.fix(fixed, 1, 1, 1, 1, 1, 1)
     ni, nj = (2, 1) if reversed_nodes else (1, 2)
+    # Anchored / legacy_unmapped / explicit / canonical energies on a synthetic backbone with IMKBilin and asymmetric
+    # D/FMAXFY/FRESFY: the pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29).
     values = {"IMK_MATERIAL_TYPE": kind, "IMK_ENERGY_MAPPING_MODE": mode, "IMK_D_POS": .65, "IMK_D_NEG": .90,
-              "IMK_FMAXFY_POS": 1.10, "IMK_FMAXFY_NEG": 1.12, "IMK_FRESFY_POS": .10, "IMK_FRESFY_NEG": .15}
+              "IMK_FMAXFY_POS": 1.10, "IMK_FMAXFY_NEG": 1.12, "IMK_FRESFY_POS": .10, "IMK_FRESFY_NEG": .15,
+              "IMK_MEMBER_SPRING_CALIBRATION": LEGACY_REPLAY}
     # Base Lamda such that Lamda * 1000 kip-in equals the synthetic explicit profile of this material.
     values.update({f"IMK_LAMBDA_{m}": e / 1000. for m, e in profile(kind, 20.)["energies_kip_in_rad"].items()})
     bb = {"theta_p": .01, "theta_pc": .05, "theta_u": .1, "theta_p_neg": .014, "theta_pc_neg": .055, "theta_u_neg": .11,
@@ -219,10 +223,19 @@ class AnchoredProfileTests(unittest.TestCase):
             identity = ap.apply_profile(ap.V2_FLEXURE_ANCHORED)
             self.assertEqual(sp.IMK_ENERGY_MAPPING_MODE, PROVISIONAL_ANCHOR_VERSION)
             self.assertEqual(identity["state"]["IMK_ENERGY_MAPPING_MODE"], PROVISIONAL_ANCHOR_VERSION)
+            # Frozen IMK V2 calibration (2026-10-29): the anchor is a pre-freeze convention, so the research profile
+            # also sets the explicit legacy replay of the member spring rule.
+            self.assertEqual(sp.IMK_MEMBER_SPRING_CALIBRATION, LEGACY_REPLAY)
+            self.assertEqual(identity["state"]["IMK_MEMBER_SPRING_CALIBRATION"], LEGACY_REPLAY)
             self.assertIn("not an experimental calibration", identity["declarations"]["member_energy"])
             self.assertIn("P-M-M", identity["declarations"]["columns"])
             with self.assertRaises(ValueError):
                 ap.apply_profile(ap.V2_FLEXURE)                    # the screening profile requires the canonical baseline
+            # Frozen IMK V2 calibration (2026-10-29): the screening profile also requires (never sets) the frozen
+            # member spring calibration; with it restored, the anchored energy mapping alone is still refused.
+            sp.IMK_MEMBER_SPRING_CALIBRATION = FROZEN_V2
+            with self.assertRaisesRegex(ValueError, "IMK_ENERGY_MAPPING_MODE"):
+                ap.apply_profile(ap.V2_FLEXURE)
             sp.IMK_ENERGY_MAPPING_MODE = "canonical_physical_orientation_baseline_v1"
             screening = ap.apply_profile(ap.V2_FLEXURE)
             self.assertNotEqual(screening["sha256"], identity["sha256"])

@@ -26,6 +26,7 @@ import Structure_Parameters as sp  # noqa: E402
 from Data_Generation.Graph_Exporter import collect_global_parameters, installed_deterioration_policy  # noqa: E402
 from Ground_Motion_Main import OUTPUT_IDENTITY_KEYS, validate_ntha_output_compatibility  # noqa: E402
 from Model import IMK_Calibration, IMK_Hinges, IMK_Materials  # noqa: E402
+from Model import IMK_Spring_Mapping  # noqa: E402
 
 KE, FY = 1.0e6, 100.0
 PEAK = 0.02
@@ -57,7 +58,10 @@ class PeakOrientedReloading(unittest.TestCase):
         ops.wipe()
 
     def install_member_material(self, kind):
-        with mock.patch.object(sp, "IMK_DETERIORATION_MODE", "haselton_2008"), \
+        # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29): a direct
+        # low-level install of a deterioration-only backbone, and IMKBilin
+        with mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION", IMK_Spring_Mapping.LEGACY_REPLAY), \
+                mock.patch.object(sp, "IMK_DETERIORATION_MODE", "haselton_2008"), \
                 mock.patch.object(sp, "IMK_MATERIAL_TYPE", kind):
             backbone = IMK_Calibration.deterioration_for_member("beam_x", 0.0)
             IMK_Hinges._define_imk_peak_material(1, KE, FY, backbone)
@@ -153,7 +157,11 @@ class DiagnosticRunnerDefaults(unittest.TestCase):
 
 class DeteriorationModeIdentity(unittest.TestCase):
     def test_installed_policy_describes_haselton_anchors(self):
-        with mock.patch.object(sp, "IMK_DETERIORATION_MODE", "haselton_2008"), \
+        # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29): the anchors
+        # quote Lamda = lambda x the nominal theta_y,member; the frozen record is pinned by the test below
+        legacy = IMK_Spring_Mapping.LEGACY_REPLAY
+        with mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION", legacy), \
+                mock.patch.object(sp, "IMK_DETERIORATION_MODE", "haselton_2008"), \
                 mock.patch.object(sp, "IMK_MATERIAL_TYPE", "IMKPeakOriented"):
             policy = installed_deterioration_policy()
             beam = IMK_Calibration.deterioration_for_member("beam_x", 0.0)
@@ -163,12 +171,43 @@ class DeteriorationModeIdentity(unittest.TestCase):
         self.assertEqual(policy["suppressed_modes"], {"A": 1.0e12, "K": 1.0e12})
         self.assertEqual(policy["anchors"]["beam"]["lamda_opensees_rad"], beam["lambda_opensees_rad"])
         self.assertEqual(policy["anchors"]["column_nu_0"]["lamda_opensees_rad"], column["lambda_opensees_rad"])
-        with mock.patch.object(sp, "IMK_DETERIORATION_MODE", "direct"), \
+        with mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION", legacy), \
+                mock.patch.object(sp, "IMK_DETERIORATION_MODE", "direct"), \
                 mock.patch.object(sp, "IMK_MATERIAL_TYPE", "IMKPeakOriented"):
             direct = installed_deterioration_policy()
         self.assertEqual(direct["mode"], "direct")
         self.assertEqual(direct["lamda"], {"S": sp.IMK_LAMBDA_S, "C": sp.IMK_LAMBDA_C,
                                            "K": sp.IMK_LAMBDA_K, "A": sp.IMK_LAMBDA_A})
+
+    def test_installed_policy_under_the_frozen_calibration_quotes_lambda_and_the_energy_rule(self):
+        # Frozen IMK V2 calibration (2026-10-29): the energy is set per installed spring (lambda * My_canonical^2 / K0
+        # of its half-member reference), so the anchors carry the member's dimensionless lambda per spring axis only
+        # and the suppressed modes are named, their value given by the energy rule.
+        frozen = IMK_Spring_Mapping.FROZEN_V2
+        with mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION", frozen), \
+                mock.patch.object(sp, "IMK_DETERIORATION_MODE", "haselton_2008"), \
+                mock.patch.object(sp, "IMK_MATERIAL_TYPE", "IMKPeakOriented"):
+            policy = installed_deterioration_policy()
+            beam = IMK_Calibration.deterioration_for_member("beam_x", 0.0)
+            column = IMK_Calibration.deterioration_for_member("column", 0.0)
+        self.assertEqual(policy["mode"], "haselton_2008")
+        self.assertEqual(policy["basis"], column["deterioration_source"])
+        self.assertEqual(policy["calibrated_modes"], ["S", "C"])
+        self.assertEqual(policy["suppressed_mode_names"], ["A", "K"])
+        self.assertNotIn("suppressed_modes", policy)
+        self.assertEqual(policy["member_spring_calibration"], frozen)
+        self.assertEqual(policy["energy_rule"]["n"], IMK_Spring_Mapping.SPLIT_N)
+        self.assertEqual(policy["energy_rule"]["suppressed_mode_energy_over_My_canonical"], 1.0e12)
+        for name, member in (("beam", beam), ("column_nu_0", column)):
+            anchor = policy["anchors"][name]
+            self.assertEqual(anchor["lambda_haselton"], member["lambda_haselton_dimensionless"])
+            self.assertEqual(anchor["lambda_haselton_by_axis"],
+                             {axis: entry["lambda_haselton_dimensionless"]
+                              for axis, entry in member["deterioration_by_axis"].items()})
+            self.assertEqual(anchor["spacing_effective_depth_ratio"],
+                             member["deterioration_spacing_effective_depth_ratio"])
+            for key in ("lamda_opensees_rad", "theta_y_member_rad"):
+                self.assertNotIn(key, anchor)
 
     def test_identity_keys_cover_the_deterioration_mode(self):
         for key in ("imk_deterioration_mode", "imk_use_calibrated_backbone", "imk_installed_deterioration",

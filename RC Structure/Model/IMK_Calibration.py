@@ -352,6 +352,30 @@ def _stability_index(member_type, design=None):
     return (spacing / bar_diameter) * math.sqrt(sp.FY_KSI * KSI_TO_MPA / 100.0)
 
 
+def haselton_theta_p_record(member_type, nu, end=None, *, member_scope=None, design=None, depths=None):
+    """haselton_theta_p with the guards that acted on it (reporting only; the value is the same)."""
+    nu_used = _clamp(nu, NU_MIN, NU_MAX)
+    rho_sh_raw = transverse_steel_ratio(member_type, design)
+    rho_sh = _clamp(rho_sh_raw, RHO_SH_MIN, RHO_SH_MAX)
+    rho = longitudinal_steel_ratio(member_type, design, depths)
+    fc_mpa = _section_values(member_type, design)[2] * KSI_TO_MPA
+    s_n = _stability_index(member_type, design)
+
+    theta_p = (
+        0.12
+        * (1.0 + 0.55 * bond_slip_indicator(end, member_scope=member_scope))
+        * (0.16 ** nu_used)
+        * ((0.02 + 40.0 * rho_sh) ** 0.43)
+        * (0.54 ** (0.01 * fc_mpa))
+        * (0.66 ** (0.1 * s_n))
+        * (2.27 ** (10.0 * rho))
+    )
+    return {"theta_p": max(THETA_P_FLOOR, theta_p), "theta_p_regression": theta_p,
+            "theta_p_floor_active": theta_p < THETA_P_FLOOR, "nu_used": nu_used, "nu_clamped": nu_used != nu,
+            "rho_sh_input": rho_sh_raw, "rho_sh_used": rho_sh, "rho_sh_clamped": rho_sh != rho_sh_raw,
+            "rho": rho, "fc_mpa": fc_mpa, "s_n": s_n}
+
+
 def haselton_theta_p(member_type, nu, end=None, *, member_scope=None, design=None, depths=None):
     """Plastic rotation capacity to the capping point.
 
@@ -363,22 +387,19 @@ def haselton_theta_p(member_type, nu, end=None, *, member_scope=None, design=Non
     rho is the total longitudinal steel over b d (RHO_DEFINITION). Beams are the nu = 0 case, where the
     (0.16)^nu term is unity: a column regression extended to beams.
     """
-    nu = _clamp(nu, NU_MIN, NU_MAX)
-    rho_sh = _clamp(transverse_steel_ratio(member_type, design), RHO_SH_MIN, RHO_SH_MAX)
-    rho = longitudinal_steel_ratio(member_type, design, depths)
-    fc_mpa = _section_values(member_type, design)[2] * KSI_TO_MPA
-    s_n = _stability_index(member_type, design)
+    return haselton_theta_p_record(member_type, nu, end, member_scope=member_scope, design=design,
+                                   depths=depths)["theta_p"]
 
-    theta_p = (
-        0.12
-        * (1.0 + 0.55 * bond_slip_indicator(end, member_scope=member_scope))
-        * (0.16 ** nu)
-        * ((0.02 + 40.0 * rho_sh) ** 0.43)
-        * (0.54 ** (0.01 * fc_mpa))
-        * (0.66 ** (0.1 * s_n))
-        * (2.27 ** (10.0 * rho))
-    )
-    return max(THETA_P_FLOOR, theta_p)
+
+def haselton_theta_pc_record(member_type, nu, design=None):
+    """haselton_theta_pc with the guards that acted on it (reporting only; the value is the same)."""
+    nu_used = _clamp(nu, NU_MIN, NU_MAX)
+    rho_sh_raw = transverse_steel_ratio(member_type, design)
+    rho_sh = _clamp(rho_sh_raw, RHO_SH_MIN, RHO_SH_MAX)
+    theta_pc = 0.76 * (0.031 ** nu_used) * ((0.02 + 40.0 * rho_sh) ** 1.02)
+    return {"theta_pc": max(THETA_PC_FLOOR, min(THETA_PC_CAP, theta_pc)), "theta_pc_regression": theta_pc,
+            "theta_pc_floor_active": theta_pc < THETA_PC_FLOOR, "theta_pc_ceiling_active": theta_pc > THETA_PC_CAP,
+            "nu_used": nu_used, "rho_sh_input": rho_sh_raw, "rho_sh_used": rho_sh, "rho_sh_clamped": rho_sh != rho_sh_raw}
 
 
 def haselton_theta_pc(member_type, nu, design=None):
@@ -390,31 +411,37 @@ def haselton_theta_pc(member_type, nu, design=None):
 
     The cap is part of the published expression: the fit is unreliable for
     very well confined members and would otherwise predict implausibly
-    ductile post-peak behaviour.
+    ductile post-peak behaviour. It applies to the MEMBER interval; the frozen
+    calibration (Model/IMK_Spring_Mapping) converts the capped member value to a
+    native dpc, which may exceed 0.10 and is not clamped again.
     """
-    nu = _clamp(nu, NU_MIN, NU_MAX)
-    rho_sh = _clamp(transverse_steel_ratio(member_type, design), RHO_SH_MIN, RHO_SH_MAX)
-    theta_pc = 0.76 * (0.031 ** nu) * ((0.02 + 40.0 * rho_sh) ** 1.02)
-    return max(THETA_PC_FLOOR, min(THETA_PC_CAP, theta_pc))
+    return haselton_theta_pc_record(member_type, nu, design)["theta_pc"]
 
 
-def deterioration_for_member(member_type, nu, design=None, depths=None):
+def deterioration_for_member(member_type, nu, design=None, depths=None, *, calibration=None):
     """Explicit OpenSees energy convention; PEER 2007/03 Eq. 3.20, for each spring axis.
 
         lambda = 170.7 (0.27)^nu (0.10)^(s/d)
 
     with s the hoop spacing and d the effective depth of the spring's bending axis (effective_depths:
     d of spring y across h, of spring z across b; EQ_3_20_VERSION). Eq. 3.20 is a column regression,
-    extended here to zero-axial beams and to a beam's lateral axis. The member yield rotation is a declared
-    nominal assumption, NOT the artificially small My/Ke of a stiff numerical zeroLength spring.
-    Conversion: Lambda_OpenSees = lambda_Haselton * theta_y_member. The top-level lambda keys are spring y's
+    extended here to zero-axial beams and to a beam's lateral axis. The top-level lambda keys are spring y's
     (the strong axis); ``deterioration_by_axis`` holds both springs'.
+
+    Under the frozen V2 calibration (Model/IMK_Spring_Mapping, the default since 2026-10-29) only the
+    dimensionless lambda is a member quantity: each spring's reference energy is lambda * My_canonical^2 / K0 of
+    its own half-member reference, computed where the spring is installed. The pre-freeze conversion
+    (Lambda_OpenSees = lambda * a nominal 0.005 beam / 0.004 column yield rotation) is kept as labelled source
+    metadata (``deterioration_historical_nominal``), not as an installed value. Under the legacy replay
+    (LEGACY_REPLAY) the pre-freeze conversion is returned exactly as before.
     """
+    from Model import IMK_Spring_Mapping as mapping
     mode = getattr(sp, "IMK_DETERIORATION_MODE", "direct")
     if mode == "direct":
         return {"deterioration_source": "direct_opensees"}
     if mode != "haselton_2008":
         raise ValueError(f"Unknown IMK_DETERIORATION_MODE: {mode!r}")
+    frozen = mapping.is_frozen(calibration)
     values = _section_values(member_type, design)
     spacing = values[9]
     depths = depths if depths is not None else effective_depths(member_type, design)
@@ -435,6 +462,35 @@ def deterioration_for_member(member_type, nu, design=None, depths=None):
                          "spacing_in": spacing, "effective_depth_in": depths[axis]["d_in"],
                          "spacing_effective_depth_ratio": ratio}
     strong = by_axis["y"]
+    if frozen:
+        historical = {axis: {"lambda_opensees_rad": entry.pop("lambda_opensees_rad"),
+                             "lambda_opensees_by_mode_rad": entry.pop("lambda_opensees_by_mode_rad")}
+                      for axis, entry in by_axis.items()}
+        return {"deterioration_source": "haselton_2008_eq3_20_member_reference_energy",
+                "deterioration_calibration_id": mapping.FROZEN_V2,
+                "deterioration_equation_version": EQ_3_20_VERSION,
+                "deterioration_energy_rule": ("per spring: theta_y_ref,E = My_canonical / K0 (half-member reference); "
+                                              "Eref_S = Eref_C = lambda * My_canonical * theta_y_ref,E; "
+                                              "Eref_A = Eref_K = 1e12 * My_canonical (Model/IMK_Spring_Mapping)"),
+                "lambda_haselton_dimensionless": strong["lambda_haselton_dimensionless"],
+                "deterioration_by_axis": by_axis,
+                "deterioration_effective_depths": depths,
+                "deterioration_mode_basis": "haselton_2008_section_2_1_2_1_strength_only",
+                "deterioration_suppressed_modes": ["A", "K"],
+                "deterioration_suppression_lambda_rad": mapping.SUPPRESSED_MODE_LAMDA,
+                "deterioration_spacing_effective_depth_ratio": strong["spacing_effective_depth_ratio"],
+                "deterioration_axial_ratio_used": nu_used,
+                "deterioration_axial_ratio_clamped": nu_used != nu,
+                "deterioration_beam_extrapolation": member_type != "column",
+                "deterioration_unsupported_extensions": (
+                    [] if member_type == "column" else
+                    ["column regression applied to a beam",
+                     "one canonical (hogging) depth for both signs of vertical bending",
+                     "lateral-axis (z) spring of a beam"]),
+                "deterioration_historical_nominal": {
+                    "status": ("source metadata of the pre-freeze rule (commit 66f964c1): lambda times a nominal "
+                               "member yield rotation; NOT installed"),
+                    "nominal_member_theta_y_rad": theta_y, "by_axis": historical}}
     return {"deterioration_source": "haselton_2008_eq3_20_nominal_member_theta_y",
             "deterioration_equation_version": EQ_3_20_VERSION,
             "lambda_haselton_dimensionless": strong["lambda_haselton_dimensionless"],
@@ -495,16 +551,38 @@ def backbone_for_member(member_type, axial_kip=0.0, pm_diagram=None, end=None, *
             **deterioration_for_member(member_type, nu, design, depths),
         }
 
-    theta_p = haselton_theta_p(member_type, nu, end, member_scope=member_scope, design=design, depths=depths)
-    theta_pc = haselton_theta_pc(member_type, nu, design)
+    from Model import IMK_Spring_Mapping as mapping
+    calibration = mapping.active_calibration()
+    p_record = haselton_theta_p_record(member_type, nu, end, member_scope=member_scope, design=design, depths=depths)
+    pc_record = haselton_theta_pc_record(member_type, nu, design)
+    theta_p, theta_pc = p_record["theta_p"], pc_record["theta_pc"]
+    # The retained native ultimate cutoff: the member intervals plus a legacy padding (0.005 beam / 0.004 column). It
+    # is installed unchanged under the frozen calibration and is not the member yield rotation of its energy rule.
+    padding = mapping.legacy_cutoff_padding(member_type, calibration)
+    guards = {"axial_kip": axial_kip, "nu_tension_set_to_zero": axial_kip < 0.0,
+              "nu_input": nu, "nu_used": p_record["nu_used"], "nu_clamped": p_record["nu_clamped"],
+              "nu_bounds": [NU_MIN, NU_MAX],
+              "rho_sh_input": p_record["rho_sh_input"], "rho_sh_used": p_record["rho_sh_used"],
+              "rho_sh_clamped": p_record["rho_sh_clamped"], "rho_sh_bounds": [RHO_SH_MIN, RHO_SH_MAX],
+              "theta_p_regression": p_record["theta_p_regression"], "theta_p_floor": THETA_P_FLOOR,
+              "theta_p_floor_active": p_record["theta_p_floor_active"],
+              "theta_pc_regression": pc_record["theta_pc_regression"], "theta_pc_floor": THETA_PC_FLOOR,
+              "theta_pc_floor_active": pc_record["theta_pc_floor_active"],
+              "theta_pc_published_ceiling": THETA_PC_CAP, "theta_pc_ceiling_active": pc_record["theta_pc_ceiling_active"],
+              "beam_extrapolation": member_type != "column",
+              "status": ("existing regression guards, reported; extrapolation outside the fit bounds is not "
+                         "empirically verified")}
     return {
         **slip,
         "axial_kip": axial_kip,
         "axial_ratio": nu,
         "theta_p": theta_p,
         "theta_pc": theta_pc,
-        "theta_u": theta_p + theta_pc + (sp.IMK_COLUMN_THETA_Y if member_type == "column" else sp.IMK_BEAM_THETA_Y),
+        "theta_u": theta_p + theta_pc + padding,
+        "legacy_cutoff_padding_rad": padding,
+        "member_spring_calibration": calibration,
+        "regression_guards": guards,
         "source": "haselton_2008",
         "theta_p_longitudinal_steel": longitudinal_steel_record(member_type, design, depths),
-        **deterioration_for_member(member_type, nu, design, depths),
+        **deterioration_for_member(member_type, nu, design, depths, calibration=calibration),
     }

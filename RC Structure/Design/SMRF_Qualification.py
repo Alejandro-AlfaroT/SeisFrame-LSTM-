@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 
-from Design.SMRF_Common import make_check, not_evaluated, summarize_checks
+from Design.SMRF_Common import SCOPE_EXCLUSIONS, make_check, not_evaluated, split_scope_exclusions, summarize_checks
 from Design.SMRF_Demands import demand_scope_checks
 from Design.SMRF_Detailing import evaluate_detailing
 from Design.SMRF_Joints import evaluate_joints
@@ -16,18 +16,36 @@ from Design.SMRF_Slab import evaluate_slab
 from Design.SMRF_Slab_Reinforcement import evaluate_slab_reinforcement
 
 
-QUALIFICATION_VERSION = "smrf_qualification_v4_incomplete_cage_evidence"
+QUALIFICATION_VERSION = "smrf_qualification_v6_slab_structural_gates_fire_scope"
 # This gate is lifted only after required design algorithms and independent
 # verification exist. A passing subset of unit tests is not release approval.
 GENERATION_RELEASE_READY = False
-SCOPE = {
-    "system": "RC special moment frame archetype; every grid line in X and Y",
-    "geometry": "regular rectangular grid; shared beam and column section families",
-    "diaphragm": "rigid idealization; diaphragm/collector design not included",
-    "foundation": "fixed supports; foundation design not included",
-    "basis": ["ACI 318-19", "ASCE 7-22"],
-    "claim": "research frame qualification, NOT full building-code certification",
-}
+
+
+def qualification_scope(system="RC special moment frame archetype; every grid line in X and Y",
+                        diaphragm_evaluated=True):
+    """The declared scope of a qualification, from the system it checks and the checks it runs (2026-10-30).
+
+    The uniform path runs SMRF_Diaphragm.evaluate_slab_diaphragm (ACI 318-19 18.12 on the ASCE 7-22 12.10.1.1
+    forces, with the no-collector premise of frames on every grid line); a path that runs no diaphragm check says
+    so and keeps the requirement open instead of inheriting that premise.
+    """
+    return {
+        "system": system,
+        "geometry": "regular rectangular grid; shared beam and column section families",
+        "diaphragm": ("rigid idealization in the frame analysis; the slab diaphragm is checked by SMRF_Diaphragm "
+                      "(18.12 on the 12.10.1.1 forces, no collectors: frames on every grid line)" if diaphragm_evaluated
+                      else "rigid idealization in the frame analysis; diaphragm, collector and chord design NOT evaluated "
+                           "(diaphragm.design_and_collectors stays open)"),
+        "foundation": "fixed supports; foundation design not included",
+        "nonlinear_model": "the nonlinear (IMK) model review is separate from the code checks and does not replace them",
+        "basis": ["ACI 318-19", "ASCE 7-22"],
+        "excluded": dict(SCOPE_EXCLUSIONS),
+        "claim": "research frame qualification, NOT full building-code certification",
+    }
+
+
+SCOPE = qualification_scope()
 
 
 def reinforcement_consistency_checks(record):
@@ -141,8 +159,6 @@ _VERIFICATION_ITEMS = {
     "floor.independent_hand_verification": "floor_hand_check_verified",
     "qualification.strength_model_verification": "strength_model_verified",
     "qualification.detailing_model_consistency": "detailing_model_consistency_verified",
-    "slab_column_local_minimum_steel": "slab_column_local_steel_assessed",
-    "slab_fire_resistance": "fire_resistance_scope_accepted",
     "detailing.congestion_and_placement": "congestion_and_placement_accepted",
     "floor.compatibility_idealization_reviewed": "floor_frame_compatibility_reviewed",
 }
@@ -255,6 +271,59 @@ def recomputed_evidence(record):
     return {"capacity": capacity, "strengths": strengths, "families": families, "checks": checks}
 
 
+def uniform_slab_context_check(record):
+    """Was the saved slab reinforcement priced on the record's own frame (2026-10-30)? The cage- and section-dependent
+    fields of its floor context (Design_Driver._slab_completion_context: clear spans, perimeter beam width, cover and
+    hoop, column core, beam f'c, the corner hooks) are rebuilt from the record and compared; a hoop or cage installed
+    after the slab was priced makes the slab completion rows stale."""
+    name, clause = "slab.completion_context_current", "Evidence integrity: slab completion context of the saved frame"
+    context = ((record.get("slab_reinforcement") or {}).get("inputs") or {}).get("context")
+    if context is None:
+        return not_evaluated(name, clause, "the saved slab reinforcement carries no floor context")
+    try:
+        sections, rebar, geometry = record["sections"], record["reinforcement"], record["geometry"]
+        rebuilt = {"clear_span_x_in": geometry["bay_x_in"] - sections["h_col_in"],
+                   "clear_span_y_in": geometry["bay_y_in"] - sections["b_col_in"],
+                   "beam_width_in": sections["b_beam_in"],
+                   "column_core_width_in": min(sections["b_col_in"], sections["h_col_in"])
+                                           - 2.0 * rebar["col_longitudinal_centroid_offset_in"],
+                   "beam_clear_cover_in": rebar["beam_clear_cover_in"],
+                   "beam_hoop_diameter_in": rebar["beam_stirrup_diameter_in"],
+                   "fc_beam_ksi": sections["fc_beam_ksi"]}
+        differ = sorted(key for key, value in rebuilt.items()
+                        if not math.isclose(float(context.get(key)), float(value), rel_tol=1e-9, abs_tol=1e-9))
+        # The corner hooks of the slab's own anchorage row and screen, from the same sections, covers and hoops.
+        from Design.SMRF_Beam_Slab_Strength import uniform_perimeter_hook_corners
+        rebuilt["perimeter_hook_corners"] = uniform_perimeter_hook_corners(
+            sections["h_col_in"], sections["b_col_in"], rebar["col_clear_cover_in"], rebar["col_stirrup_diameter_in"],
+            sections["b_beam_in"], rebar["beam_stirrup_diameter_in"], rebar["beam_clear_cover_in"])
+        if context.get("perimeter_hook_corners") != rebuilt["perimeter_hook_corners"]:
+            differ.append("perimeter_hook_corners")
+    except (KeyError, TypeError, ValueError) as exc:
+        return not_evaluated(name, clause, f"the floor context cannot be rebuilt: {type(exc).__name__}: {exc}")
+    return make_check(name, clause, int(not differ), 1, "==", details={"fields_that_differ": differ, "rebuilt": rebuilt})
+
+
+def uniform_beam_axial_check(record):
+    """ACI 318-19 18.6.4.7 for the uniform frame beams from the record's validated solved actions (2026-10-30).
+
+    Every beam member of every canonical combination, both ends, compression positive; the beam web of the record's
+    section. Actions that do not validate leave the check not evaluated (never an assumed low axial load).
+    """
+    from Design.SMRF_Capacity_Design import beam_axial_check, beam_axial_envelope
+    from Design.SMRF_Design_Evidence import validated_combinations
+    sections = record.get("sections") or {}
+    try:
+        actions, expected = validated_combinations(record)
+        tags = sorted({tag for action in actions for tag, member in (action.get("members") or {}).items()
+                       if isinstance(member, dict) and member.get("member_type") != "column"})
+        envelope = beam_axial_envelope([("strength", a) for a in actions], tags, sections["b_beam_in"],
+                                       sections["h_beam_in"], sections["fc_beam_ksi"], "beam", expected_ids=expected)
+    except (KeyError, ValueError, TypeError) as exc:
+        envelope = {"group_id": "beam", "status": "unknown", "problems": [f"{type(exc).__name__}: {exc}"]}
+    return beam_axial_check(envelope)
+
+
 def _apply_capacity_design_evidence(record, checks, evidence):
     """Settle the checks the recomputed capacity design and slab strengths answer.
 
@@ -297,22 +366,46 @@ def _apply_capacity_design_evidence(record, checks, evidence):
                 conf["hx_in"], limit, "<=", "in",
                 details={"scope": "hx is the supported-bar spacing of the generated arrangement (detailing.cage_layout)"})
         beam_hoops = beams.get("hoops")
+        axial = uniform_beam_axial_check(record)
+        checks = checks + [axial]
         if beam_hoops:
-            replaced["beam.hoop_layout_and_axial_applicability"] = make_check(
-                "beam.hoop_layout_and_axial_applicability", "ACI 318-19 18.6.2.1 / 18.6.4 / 18.6.5",
-                int(bool(beams.get("section_adequate"))), 1, "==",
-                details={"hoops": beam_hoops, "vc_zero_hinge_zone": beams.get("vc_zero_hinge_zone"),
-                         "axial_basis": "frame beams carry no factored axial load above Ag fc/10"})
+            # The shear section and the evaluated 18.6.4.7 axial applicability (never a statement that axial load is small).
+            if axial["status"] == "not_evaluated":
+                replaced["beam.hoop_layout_and_axial_applicability"] = not_evaluated(
+                    "beam.hoop_layout_and_axial_applicability", "ACI 318-19 18.6.2.1 / 18.6.4 / 18.6.4.7 / 18.6.5",
+                    "the frame beams' axial applicability (18.6.4.7) is not evaluated: " + str(axial["details"].get("reason")))
+            else:
+                replaced["beam.hoop_layout_and_axial_applicability"] = make_check(
+                    "beam.hoop_layout_and_axial_applicability", "ACI 318-19 18.6.2.1 / 18.6.4 / 18.6.4.7 / 18.6.5",
+                    int(bool(beams.get("section_adequate")) and axial["status"] == "pass"), 1, "==",
+                    details={"hoops": beam_hoops, "vc_zero_hinge_zone": beams.get("vc_zero_hinge_zone"),
+                             "section_adequate": bool(beams.get("section_adequate")),
+                             "axial_check": {k: axial.get(k) for k in ("status", "demand", "capacity", "units")},
+                             "axial_basis": axial["details"].get("branch")})
         splices = capacity.get("splices")
         if splices:
+            legal = all((splices.get(member) or {}).get("placement", {}).get("legal_placement") is True
+                        for member in ("beam", "column"))
             replaced["detailing.anchorage_splices_and_cover"] = make_check(
-                "detailing.anchorage_splices_and_cover", "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.8.5 / 20.5 / 25.4--25.5",
-                int(capacity.get("anchorage", {}).get("all_pass", False)), 1, "==",
+                "detailing.anchorage_splices_and_cover",
+                "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.8.5 / 18.2.7 / 20.5 / 25.4--25.5",
+                int(capacity.get("anchorage", {}).get("all_pass", False) and legal), 1, "==",
                 details={"anchorage": capacity.get("anchorage", {}).get("directions"),
                          "beam_splice": splices["beam"], "column_splice": splices["column"],
+                         "splice_locations_legal": legal,
                          "cover": "member clear covers audited by reinforcement consistency checks",
-                         "scope": "hooked anchorage, through-bar depth, splice type/location and cover; "
-                                  "congestion and placement are detailing.congestion_and_placement"})
+                         "scope": "hooked anchorage, through-bar depth, splice type, permitted interval and proposed "
+                                  "location (detailing.splice_location) and cover; coupler product qualification, "
+                                  "congestion and placement are reviews"})
+            mechanical = [member for member in ("beam", "column")
+                          if str((splices.get(member) or {}).get("splice_type", "")).startswith("type_2")]
+            if mechanical:
+                from Design.SMRF_Common import awaiting_review
+                review = awaiting_review("detailing.mechanical_splice_product_qualification", "ACI 318-19 25.5.7, 18.2.7.1",
+                                         "Type 2 mechanical splices are selected for: " + ", ".join(mechanical)
+                                         + "; the coupler's Type 2 qualification for the bar grade and sizes used and its "
+                                           "actual length are product evidence", "mechanical_splice_product_qualification")
+                checks = checks + [review]
             replaced["detailing.congestion_and_placement"] = not_evaluated(
                 "detailing.congestion_and_placement", "ACI 318-19 25.2 / 26.6; constructability",
                 "Bar-placement drawings, mechanical-splice staggering and congestion at joints are not designed.")
@@ -394,10 +487,13 @@ def _apply_capacity_design_evidence(record, checks, evidence):
                               "sign (rectangular hogging, flange-concrete sagging)",
                      "undeveloped_exterior_ends": undeveloped_ends})
     else:
+        from Design.SMRF_Slab_Reinforcement import slab_strength_eligibility
+        eligibility = slab_strength_eligibility(record.get("slab_reinforcement"))
         replaced["qualification.slab_contribution"] = not_evaluated(
             "qualification.slab_contribution", "ACI 318-19 18.7.3.2 / 6.3.2",
-            "Slab reinforcement is not established (slab action evidence not asserted as verified); beam strengths "
-            "in the screen and hinges are rectangular proxies. Do not read this as zero slab strength.")
+            "The developed slab contribution is not established (" + str(eligibility.get("reason")) + "); beam "
+            "strengths in the screen and hinges are rectangular proxies. Do not read this as zero slab strength.")
+        replaced["qualification.slab_contribution"]["details"].update(reason_code=eligibility.get("reason_code"))
     result = []
     seen = set()
     for check in checks:
@@ -478,6 +574,7 @@ def qualify_design(record):
                                  int(matches), 1, "=="))
         if not matches:
             strength = None  # Never display capacities for a different slab as current checks.
+        checks.append(uniform_slab_context_check(record))
     checks.extend(evaluate_slab_reinforcement(strength))
     from Design.SMRF_Slab_Actions import evaluate_slab_actions
     # Asserted evidence lives in the reinforcement inputs (audited by exact
@@ -507,8 +604,22 @@ def qualify_design(record):
         drift_matches = isinstance(drift, dict) and drift.get("analysis_input_sha256") == analysis_input_signature(record)
     except (KeyError, ValueError, TypeError):
         drift_matches = False
-    if drift_matches and drift.get("checks"):
-        checks.extend(drift["checks"])
+    if drift_matches:
+        # The input digest binds the model inputs, not the check rows: the checks are rebuilt from the saved
+        # numbers and compared, and the rebuilt ones are consumed (2026-10-30).
+        from Design.SMRF_Demands import reconstruct_drift_checks
+        geometry = record.get("geometry") or {}
+        try:
+            # The limit basis comes from the digest-covered declaration (demand_basis.drift) and the seismic block.
+            rebuilt = reconstruct_drift_checks(drift, geometry["num_floor"], geometry["story_h_in"],
+                                               geometry.get("num_bay_x"), geometry.get("num_bay_y"),
+                                               declared=(record.get("demand_basis") or {}).get("drift") or {},
+                                               risk_category=(record.get("seismic") or {}).get("risk_category"))
+            checks.append(rebuilt["integrity"])
+            checks.extend(rebuilt["checks"])
+        except Exception as exc:                      # noqa: BLE001 -- an unreadable saved screen is a finding, not a pass
+            checks.append(not_evaluated("demands.drift_and_stability_results", "ASCE 7-22 12.8.6--12.8.7",
+                                        f"The saved drift results cannot be rebuilt: {type(exc).__name__}: {exc}"))
     else:
         checks.append(not_evaluated("demands.drift_and_stability_results", "ASCE 7-22 12.8.6--12.8.7",
                                     "Independent QEx/QEy drift/stability results are not available."))
@@ -516,9 +627,9 @@ def qualify_design(record):
     checks.append(not_evaluated("qualification.strength_model_verification", "ACI 318-19 Chapters 6, 18, 21, 22",
                                 "Verify biaxial P-M capacity, force signs and joint-face actions, beam axial effects, "
                                 "strength reduction factors and cracked-stiffness assumptions independently."))
-    checks = _apply_verification_assertions(record, checks)
+    checks, excluded = split_scope_exclusions(_apply_verification_assertions(record, checks))
     return {"schema_version": QUALIFICATION_VERSION, "scope": SCOPE.copy(),
-            "implementation_stage": "partial_not_release_ready", "checks": checks,
+            "implementation_stage": "partial_not_release_ready", "checks": checks, "scope_exclusions": excluded,
             **summarize_checks(checks)}
 
 

@@ -331,7 +331,36 @@ def gravity_group_induced(compatibility, cfg, state=None):
     return result
 
 
-def gravity_frame_evidence(compatibility, cfg, state, beams, columns, actions):
+def gravity_column_capacity_shear(data):
+    """The 18.7.6 capacity shear of a gravity column group, demand and strength in the same direction (ACI 318-19
+    22.5.1.1 with 18.7.6.1.1; 18.14.3.2(b), 18.14.3.3(c)).
+
+    ``data`` is the group's column shear design (Design.Group_Capacity.column_group_capacity). In each direction the
+    Ve of the story with the largest required Vs (``worst_by_direction``) is compared with the phi Vn of the selected
+    hoops in that direction (``hoops.by_direction``: that story's Vc plus Av fyt d / s, uncapped, since
+    column.capacity_shear_section enforces 22.5.1.2 per direction), and the direction with the larger ratio is
+    reported, the governing one on a tie. The hoops' scalar ``phi_vn_kip`` is the lighter direction's and belongs to
+    no one direction's demand. Without selected hoops, or without a direction's record, phi Vn is None (the check is
+    not evaluated) and Ve stays the governing direction's (2026-10-31)."""
+    governing = data.get("governing") or {}
+    worst = data.get("worst_by_direction") or {}
+    hoop_directions = (data.get("hoops") or {}).get("by_direction") or {}
+    by_direction = {}
+    for axis in sorted(worst):
+        ve, phi_vn = worst[axis].get("ve_kip"), (hoop_directions.get(axis) or {}).get("phi_vn_kip")
+        if ve is None or phi_vn is None:
+            by_direction = {}
+            break
+        by_direction[axis] = {"ve_kip": ve, "phi_vn_kip": phi_vn, "ratio": ve / phi_vn if phi_vn > 0 else math.inf}
+    if not by_direction:
+        return {"ve_kip": governing.get("ve_kip"), "phi_vn_capacity_kip": None, "capacity_shear_axis": None,
+                "capacity_shear_by_direction": {}}
+    axis = max(by_direction, key=lambda a: (by_direction[a]["ratio"], a == governing.get("axis")))
+    return {"ve_kip": by_direction[axis]["ve_kip"], "phi_vn_capacity_kip": by_direction[axis]["phi_vn_kip"],
+            "capacity_shear_axis": axis, "capacity_shear_by_direction": by_direction}
+
+
+def gravity_frame_evidence(compatibility, cfg, state, beams, columns, actions, expected_ids=None):
     """ACI 318-19 18.14 evidence of every gravity group: its branch from the compatibility run and the checks of
     that branch on the hoops the capacity design selected (``beams``/``columns`` of
     Design.Group_Capacity.build_group_capacity_design). Without a compatibility run the effects of delta_u are
@@ -356,16 +385,23 @@ def gravity_frame_evidence(compatibility, cfg, state, beams, columns, actions):
                                                 if hoops.get("ash_provided_per_in") and confinement.get("bc_in") else None),
                          "ash_ratio_table_18_7_5_4": confinement.get("ash_ratio_required"),
                          "configuration_18_7_5_2_ok": bool(hoops) and bool(confinement.get("hx_within_8in_when_required"))}
-            strengths = {"ve_kip": governing.get("ve_kip"), "phi_vn_capacity_kip": hoops.get("phi_vn_kip")}
+            strengths = gravity_column_capacity_shear(data)
             checks_of = gravity_rules.evaluate_gravity_column(gid, branch_input, strengths, section, detailing)
         else:
             data = beams[gid]
             hoops = data.get("hoops") or {}
             ab = sp.rebar_area(design.bar_size)
-            pu = max((abs(float(a["members"][str(tag)]["local_force_kip_kipin"][0])) for a in actions for tag in tags), default=0.0)
+            # Both ends, every strength combination and every compatibility case (the design displacement with the
+            # 5.3 gravity combinations, 18.14.2.1), as magnitudes: tension counted as if compression, conservatively,
+            # as before. A missing or nonfinite force leaves Pu unknown (the branch check is then not evaluated).
+            from Design.Group_Capacity import beam_axial_envelope
+            cases = [("strength", a) for a in actions] + [("compatibility", c) for c in (compatibility or {}).get("cases", [])]
+            axial = beam_axial_envelope(gid, state, cases, expected_ids=expected_ids)
+            pu = (max(abs(axial["governing_compression"]["axial_kip"]), abs(axial["governing_tension"]["axial_kip"]))
+                  if axial["status"] == "evaluated" else None)
             section = {"b_in": design.b_in, "d_in": data["effective_depth_in"], "ag_in2": design.gross_area_in2,
                        "fc_ksi": design.fc_ksi, "fy_ksi": sp.FY_KSI, "as_top_in2": design.top_bars * ab,
-                       "as_bot_in2": design.bot_bars * ab, "pu_kip": pu}
+                       "as_bot_in2": design.bot_bars * ab, "pu_kip": pu, "axial_envelope": axial}
             detailing = {"stirrup_spacing_in": hoops.get("spacing_in", design.stirrup_spacing_in), "smallest_bar_db_in": db,
                          "hoops": bool(hoops)}
             strengths = {"ve_kip": max((m["governing_ve_kip"] for m in data["members"]), default=None),

@@ -27,6 +27,14 @@ The rotation is the TOTAL relative spring rotation of a member calibration that 
 Haselton's bar-slip share wherever no face interface owns it (Model/Deformation_Ownership); it is not
 experimentally isolated plastic flexure. Hinge histories alone do not establish a unique global
 solution: floor motion, story drift and base shear are kept beside them as reference data.
+
+hinge_moment_rotation_v2 (frozen IMK V2 calibration, 2026-10-29): the spring table states each installed
+spring's member-to-native calibration. theta_p / theta_pc are the MEMBER Haselton intervals and theta_u the
+retained native du; under the frozen calibration the installed native dp / dpc differ from the member
+intervals, so the native points per sign (My/Kh, dp, dpc, My/Kh + dp, du), the half-member reference (K0, Kb,
+My/K0, the member cap) and the energy anchor (energy reference yield rotation, lambda_H) are separate columns
+(Model/IMK_Spring_Mapping.spring_points). A v1 table has none of them: its theta_p / theta_pc were the
+installed native values only because the pre-freeze rule installed the member intervals directly.
 """
 from __future__ import annotations
 
@@ -37,8 +45,11 @@ from pathlib import Path
 import numpy as np
 
 import Structure_Parameters as sp
+from Model import IMK_Spring_Mapping as spring_mapping
 
-SCHEMA_VERSION = "hinge_moment_rotation_v1"
+# v2 (frozen IMK V2 calibration, 2026-10-29): member intervals and native spring points are separate columns of the
+# spring table, and the schema states the installed member spring calibration. Not to be mixed with v1 tables.
+SCHEMA_VERSION = "hinge_moment_rotation_v2"
 NPZ_NAME = "hinge_moment_rotation.npz"
 SCHEMA_NAME = "hinge_moment_rotation_schema.json"
 SPRINGS_NAME = "hinge_springs.csv"
@@ -65,6 +76,14 @@ ARRAYS = {
     "spring_material_tag": "(n_springs,) uniaxial material tag, -1 if not recorded",
 }
 
+# Native and member-reference points of an installed spring (Model/IMK_Spring_Mapping.spring_points), one column per
+# native input sign.
+SIGNS = ("positive", "negative")
+SPRING_POINT_NAMES = ("native_theta_y_rad", "native_dp_rad", "native_dpc_rad", "native_theta_cap_rad", "native_du_rad",
+                      "member_theta_p_rad", "member_theta_pc_rad", "member_theta_y_reference_rad",
+                      "member_theta_cap_reference_rad")
+SPRING_POINT_COLUMNS = tuple(f"{name}_{sign}" for name in SPRING_POINT_NAMES for sign in SIGNS)
+
 SPRING_COLUMNS = (
     "spring_index", "hinge_element_tag", "physical_member_tag", "member_class", "member_type", "end", "end_id",
     "local_axis", "spring_local_direction", "material_tag", "material_type", "global_rotation_axis",
@@ -76,7 +95,41 @@ SPRING_COLUMNS = (
     # Energy basis of the installed material (added 2026-10-04; older tables do not have these columns).
     "energy_anchor_policy", "energy_calibration_status", "energy_reference_moment_kip_in",
     "reference_energy_by_mode_kip_in_rad", "installed_lamda_by_mode_rad",
+    # Member-to-native calibration of the installed spring (added 2026-10-29 with the frozen IMK V2 calibration,
+    # hinge_moment_rotation_v2; v1 tables do not have these columns). Per native input sign: <name>_positive and
+    # <name>_negative (positive_moment_meaning / negative_moment_meaning).
+    "energy_reference_theta_y_rad", "lambda_haselton", "member_spring_calibration",
+    "Kh_kip_in_per_rad", "K0_kip_in_per_rad", "Kb_kip_in_per_rad", *SPRING_POINT_COLUMNS,
 )
+
+# What the calibration columns of hinge_springs.csv mean (written into the schema).
+SPRING_TABLE_DEFINITIONS = {
+    "theta_p": ("member Haselton plastic interval of the end (theta_p,member); the installed native dp only under the "
+                "legacy replay, NOT under the frozen calibration"),
+    "theta_pc": ("member Haselton post-capping interval, its 0.10 ceiling applied to the member value; the installed "
+                 "native dpc only under the legacy replay"),
+    "theta_u": ("the retained native du = theta_p + theta_pc + legacy padding (0.005 beam / 0.004 column): a provisional "
+                "numerical cutoff, not a collapse rotation"),
+    "elastic_stiffness_kip_in_per_rad": "the spring stiffness Kh of the registry (Kh_kip_in_per_rad is read from the installed material)",
+    "<name>_positive / <name>_negative": "per native input sign of the spring",
+    "native_theta_y_rad": "native spring yield My/Kh",
+    "native_dp_rad": "the installed command's dp",
+    "native_dpc_rad": "the installed command's dpc (may exceed 0.10 under the frozen calibration; not clamped again)",
+    "native_theta_cap_rad": "native capping rotation My/Kh + dp",
+    "native_du_rad": "the installed command's du (the retained cutoff, equal to theta_u)",
+    "member_theta_p_rad / member_theta_pc_rad": "member intervals of the branch (equal to native dp/dpc under the legacy replay)",
+    "member_theta_y_reference_rad": "member-reference yield My/K0 (frozen calibration only; blank under the legacy replay)",
+    "member_theta_cap_reference_rad": "member-reference capping My/K0 + theta_p,member (frozen calibration only)",
+    "K0_kip_in_per_rad": "half-member reference stiffness K0 = 3 EI0 / (L/2) = Kh / 20 (frozen calibration only)",
+    "Kb_kip_in_per_rad": "elastic element of the reference Kb = 1.05 K0; chord rotation of the end = rotation + moment / Kb",
+    "energy_reference_theta_y_rad": ("My_canonical / K0, the member-reference yield rotation the S/C reference energies "
+                                     "are scaled by (frozen calibration only; blank under the legacy replay, whose energy "
+                                     "used the nominal 0.005 beam / 0.004 column member yield rotation)"),
+    "lambda_haselton": "dimensionless Haselton (2008) Eq. 3.20 lambda of the spring's axis",
+    "member_spring_calibration": ("the member-to-native calibration the installed material records "
+                                  f"({spring_mapping.FROZEN_V2} or the replay {spring_mapping.LEGACY_REPLAY})"),
+    "blank": "a released (elastic) gravity-beam end has no IMK backbone: its calibration and point columns are blank",
+}
 
 
 # Appended to the spring table only when the model was built from a grouped design: which design group each
@@ -112,6 +165,8 @@ def spring_table(hinge_tag_order, registry=None):
             material = ((entry.get("installed_materials") or {}).get(end) or {}).get(axis) or {}
             provenance = material.get("provenance") or {}
             context = provenance.get("spring_context") or {}
+            # The installed spring's native and member-reference points; None for a released end or no record.
+            points = spring_mapping.spring_points(material) if material else None
             if axis == "y" and is_beam:
                 hogging = entry.get(f"yield_moment_y_hogging_{end}_kip_in")
                 sagging = entry.get(f"yield_moment_y_sagging_{end}_kip_in")
@@ -142,6 +197,8 @@ def spring_table(hinge_tag_order, registry=None):
                 "yield_moment_positive_kip_in": "" if positive is None else positive,
                 "yield_moment_negative_kip_in": "" if negative is None else negative,
                 "elastic_stiffness_kip_in_per_rad": "" if stiffness is None else stiffness,
+                # Member intervals of this end and the retained native du (SPRING_TABLE_DEFINITIONS); the native
+                # dp/dpc of the installed command are the native_* columns.
                 "theta_p": backbone.get("theta_p", ""), "theta_pc": backbone.get("theta_pc", ""), "theta_u": backbone.get("theta_u", ""),
                 "calibration_id": provenance.get("calibration_id", ""), "calibration_status": provenance.get("status", ""),
                 "deterioration_source": provenance.get("deterioration_source", ""),
@@ -152,14 +209,19 @@ def spring_table(hinge_tag_order, registry=None):
                 "ownership_policy": owned.get("policy", ""), "bar_slip_owner": owned.get("bar_slip", ""),
                 "panel_shear_owner": "" if owned.get("panel_shear") is None else owned.get("panel_shear"),
                 "parameter_sha256": material.get("parameter_sha256", ""),
-                **_energy_basis(material, provenance, entry),
+                **_energy_basis(material, provenance, entry, points),
+                **_spring_point_columns(points, provenance),
             })
             if entry.get("group_id") is not None:
                 rows[-1].update({key: entry.get(key, "") for key in GROUP_COLUMNS})
     return rows
 
 
-def _energy_basis(material, provenance, entry):
+def _blank(value):
+    return "" if value is None else value
+
+
+def _energy_basis(material, provenance, entry, points=None):
     """What anchors the cyclic energy of one installed spring: read from the installed material's own record."""
     mapping = provenance.get("energy_mapping") or {}
     cyclic = material.get("cyclic") or {}
@@ -169,12 +231,43 @@ def _energy_basis(material, provenance, entry):
     reference = mapping.get("reference_moment_kip_in")
     if reference is None and policy == "legacy_unmapped":
         reference = (material.get("positive") or {}).get("fy")          # E_ref = Lamda * My of the positive input branch
+    # lambda_H of the spring's axis and the member-reference yield rotation My_canonical / K0 its S/C energy is scaled
+    # by (frozen calibration only; the legacy replay used the nominal member yield rotation, which is no column here).
+    energy = (points or {}).get("energy") or {}
+    deterioration = provenance.get("deterioration") or {}
+    if energy:
+        lambda_h, theta_y = energy["lambda_haselton_dimensionless"], energy["energy_reference_theta_y_rad"]
+    else:
+        by_axis = (deterioration.get("deterioration_by_axis") or {}).get(deterioration.get("spring_axis")) or {}
+        lambda_h = by_axis.get("lambda_haselton_dimensionless", deterioration.get("lambda_haselton_dimensionless"))
+        theta_y = None
     return {"energy_anchor_policy": policy,
             "energy_calibration_status": mapping.get("status") or (provenance.get("energy_calibration") or {}).get("status")
                                          or provenance.get("status", ""),
             "energy_reference_moment_kip_in": "" if reference is None else reference,
             "reference_energy_by_mode_kip_in_rad": json.dumps(energies) if energies else "",
-            "installed_lamda_by_mode_rad": json.dumps(lamda) if energies else ""}
+            "installed_lamda_by_mode_rad": json.dumps(lamda) if energies else "",
+            "energy_reference_theta_y_rad": _blank(theta_y), "lambda_haselton": _blank(lambda_h)}
+
+
+def _spring_point_columns(points, provenance):
+    """The installed spring's member-to-native calibration, Kh, its half-member reference and its native and
+    member-reference points per native sign; blank for a released (elastic) end or a spring without a record."""
+    keys = ("member_spring_calibration", "Kh_kip_in_per_rad", "K0_kip_in_per_rad", "Kb_kip_in_per_rad")
+    if points is None:
+        return {key: "" for key in keys + SPRING_POINT_COLUMNS}
+    mapping = provenance.get("member_spring_calibration")
+    reference = points.get("member_reference") or {}
+    # A member material installed without a frozen mapping record followed the pre-freeze rule (as
+    # Model/Analysis_Profile.installed_topology reads it).
+    row = {"member_spring_calibration": mapping["calibration_id"] if mapping else spring_mapping.LEGACY_REPLAY,
+           "Kh_kip_in_per_rad": points["Kh_kip_in_per_rad"],
+           "K0_kip_in_per_rad": _blank(reference.get("K0_kip_in_per_rad")),
+           "Kb_kip_in_per_rad": _blank(reference.get("Kb_kip_in_per_rad"))}
+    for name in SPRING_POINT_NAMES:
+        for sign in SIGNS:
+            row[f"{name}_{sign}"] = _blank(points[sign].get(name))
+    return row
 
 
 def _identity():
@@ -192,6 +285,9 @@ def _identity():
         "member_cyclic_calibration_status": getattr(sp, "IMK_CYCLIC_CALIBRATION_STATUS", None),
         "member_energy_mapping_mode": getattr(sp, "IMK_ENERGY_MAPPING_MODE", None),
         "member_deterioration_mode": getattr(sp, "IMK_DETERIORATION_MODE", None),
+        # The configured member-to-native spring calibration; the installed tally is added from the spring table.
+        "member_spring_calibration": getattr(sp, "IMK_MEMBER_SPRING_CALIBRATION", None),
+        "spring_points_version": spring_mapping.SPRING_POINTS_VERSION,
         "joint_model": getattr(sp, "JOINT_MODEL", None),
         "deformation_ownership_policy": own.POLICY_ID,
         "face_slip_interfaces_registered": len(own.slip_interfaces()),
@@ -251,6 +347,12 @@ def assemble(results, registry=None):
     }
     missing_rows = int(np.isnan(rotation).sum() + np.isnan(moment).sum())
     stride = int(results.get("hinge_history_stride") or 0)
+    identity = _identity()
+    installed = {}
+    for row in rows:
+        if row["member_spring_calibration"] != "":                      # a released end has no IMK backbone
+            installed[row["member_spring_calibration"]] = installed.get(row["member_spring_calibration"], 0) + 1
+    identity["installed_member_spring_calibrations"] = installed
     schema = {
         **base,
         "files": {"arrays": NPZ_NAME, "springs": SPRINGS_NAME},
@@ -262,7 +364,10 @@ def assemble(results, registry=None):
             "rotation_rad": ("total relative spring rotation: member hinge-node rotation minus retained joint-node rotation, "
                              "projected on the spring's local axis. It belongs to a member calibration that includes Haselton's "
                              "bar-slip share wherever no face interface owns it (bond_slip_indicator per spring); it is not "
-                             "experimentally isolated plastic flexure"),
+                             "experimentally isolated plastic flexure. It is the NATIVE spring rotation, read against the "
+                             "native points of hinge_springs.csv (yield My/Kh, capping My/Kh + dp, cutoff du), not a story "
+                             "drift; under the frozen calibration the member-reference chord rotation of the end is "
+                             "rotation + moment / Kb (Kb_kip_in_per_rad per spring)"),
             "moment_kip_in": ("the spring's conjugate moment: zeroLength basicForce, equal to the material stress, in the same "
                               "local direction and sign as the rotation and read from the same committed state"),
         },
@@ -273,7 +378,11 @@ def assemble(results, registry=None):
             "column": "both axes are symmetric; the global axis of each spring is in hinge_springs.csv (global_rotation_axis)",
             "asymmetry": "slab-driven hogging/sagging asymmetry of beam hinges is physical and kept; see yield_moment_positive/negative per spring",
             "cyclic_energy": ("per spring in hinge_springs.csv: energy_anchor_policy, the reference moment, the reference energy "
-                              "of every deterioration mode and the Lamda installed on the positive input branch"),
+                              "of every deterioration mode, the Lamda installed on the positive input branch, the yield "
+                              "rotation the S/C energy is built on (energy_reference_theta_y_rad) and lambda_haselton"),
+            "spring_points": ("per native input sign of each spring (<name>_positive / <name>_negative): the native points of "
+                              "the installed command and the member-reference points of the frozen calibration "
+                              "(spring_table_columns)"),
             "relation_to_member_end_moment": ("the spring's own conjugate pair is stored; its relation to the elastic member's local "
                                               "end moments depends on the member type and axis (Analysis/Pushover_Diagnostic and "
                                               "Hinge_Hysteresis_Diagnostic.column_story_shears_from_hinges) and is not restated here"),
@@ -302,7 +411,8 @@ def assemble(results, registry=None):
         "member_groups": {"present": len(spring_columns(rows)) > len(SPRING_COLUMNS),
                           "columns": list(GROUP_COLUMNS) if len(spring_columns(rows)) > len(SPRING_COLUMNS) else [],
                           "note": "under a grouped design every spring row names its member's design group and grid position"},
-        "identity": _identity(),
+        "spring_table_columns": SPRING_TABLE_DEFINITIONS,
+        "identity": identity,
         "global_reference_outputs": {
             "kept_in": "response_arrays.npz and time_history.csv beside this file",
             "floor_acceleration": "relative to the ground (UniformExcitation formulation); absolute = relative + ground acceleration",
@@ -313,6 +423,12 @@ def assemble(results, registry=None):
             "hinge moment-rotation histories alone do not establish a unique global solution",
             "the rotation is not isolated plastic flexure",
             f"the member energy mapping ({getattr(sp, 'IMK_ENERGY_MAPPING_MODE', None)}, provisional) is not certified by this export",
+            (f"the member spring calibration ({getattr(sp, 'IMK_MEMBER_SPRING_CALIBRATION', None)}) is not experimentally "
+             f"validated: {spring_mapping.FROZEN_V2} is an approved V2 modelling choice (2026-10-29), "
+             f"{spring_mapping.LEGACY_REPLAY} a historical replay of the pre-freeze rule"),
+            "theta_p / theta_pc are member intervals, not the native dp / dpc of the installed command under the frozen calibration",
+            "the retained native du (theta_u) is a provisional numerical cutoff, not a collapse rotation",
+            "the spring rotation is a local native rotation, not a story drift",
             "rigid_centerline joints create no clear spans or rigid end offsets",
         ],
     }

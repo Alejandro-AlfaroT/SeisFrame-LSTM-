@@ -661,18 +661,40 @@ IMK_USE_CALIBRATED_BACKBONE = True
 # for reproducing legacy runs, with its own argument signature.
 IMK_MATERIAL_TYPE = "IMKPeakOriented"
 
+# Member-to-native calibration of the member-end springs (Model/IMK_Spring_Mapping).
+#   "seisframe_imk_v2_frozen_20261029": the frozen V2 calibration, approved on
+#           2026-10-29 by the principal researcher with the RA's agreement and
+#           numerically equivalent to research profile
+#           v2_imk_half_member_reference_research_20261028. Member intervals are
+#           converted once to native dp/dpc on a nominal half-member reference
+#           (Ls = L/2, K0 = Kh/20, Kb = 1.05 K0); S/C energy is
+#           lambda * My_canonical^2 / K0; the retained native du is the old
+#           theta_p + theta_pc + 0.005/0.004 padding. Not experimentally
+#           validated; it freezes a modelling choice and releases nothing.
+#   "legacy_direct_interval_nominal_energy_66f964c1": the pre-freeze rule
+#           (member intervals installed as native values, Lamda = lambda times
+#           the nominal IMK_*_THETA_Y below), for explicit historical replay
+#           only (profile v2_nonlinear_flexure_screening_v1_legacy_imk_replay).
+# The frozen calibration refuses settings that would mix it with another policy
+# (IMK_Spring_Mapping.configuration_problems): another material, stiffness rule,
+# energy mapping, deterioration mode, Mc/My, Mr/My, c or D.
+IMK_MEMBER_SPRING_CALIBRATION = "seisframe_imk_v2_frozen_20261029"
+
 # Cyclic deterioration capacities handed to the member materials.
 #   "haselton_2008": Eq. 3.20 of PEER 2007/03, lambda = 170.7 (0.27)^nu
-#           (0.10)^(s/d), times the nominal MEMBER yield rotation below, which
-#           converts Haselton's Et = lambda My theta_y to the modern OpenSees
-#           Et = Lambda My (Model/IMK_Calibration.deterioration_for_member).
+#           (0.10)^(s/d). Under the frozen calibration above each spring's S/C
+#           energy is lambda * My_canonical * (My_canonical / K0) on its own
+#           half-member reference (Model/IMK_Spring_Mapping); under the legacy
+#           replay lambda is multiplied by the nominal MEMBER yield rotation
+#           below, the pre-freeze conversion of Haselton's Et = lambda My
+#           theta_y to the modern OpenSees Et = Lambda My
+#           (Model/IMK_Calibration.deterioration_for_member).
 #           The fitted capacity applies to the strength modes S and C only;
 #           Haselton's calibration excluded A and K, which receive a
 #           documented large-capacity approximation to zero deterioration.
-#           Peak-oriented reloading is unchanged. The nominal 0.005/0.004 rad
-#           yield rotations remain modeling assumptions, and extending a
-#           column regression to beams is a research calibration, so the
-#           calibration status stays provisional.
+#           Peak-oriented reloading is unchanged. Extending a column regression
+#           to beams is a research calibration, so the calibration status stays
+#           provisional.
 #   "direct": pass IMK_LAMBDA_* below unchanged (legacy energy convention).
 IMK_DETERIORATION_MODE = "haselton_2008"
 IMK_ENERGY_CONVENTION = "opensees_ref_energy_equals_lamda_times_fy"
@@ -710,6 +732,11 @@ IMK_MEMBER_ENERGY_CALIBRATIONS = {}
 # hinge remains stiff until its backbone reaches yield strength.
 IMK_HINGE_STIFFNESS_MODE = "member_stiffness_factor"
 IMK_HINGE_STIFFNESS_FACTOR = 20.0
+# Nominal member yield rotations. Under the frozen calibration they are NOT an
+# active energy yield rotation and not the du padding (which is the frozen
+# constant 0.005 beam / 0.004 column in Model/IMK_Spring_Mapping); they remain
+# the target of the unused "yield_rotation" stiffness mode, historical source
+# metadata, and the legacy replay's energy rotation and du padding.
 IMK_BEAM_THETA_Y = 0.005
 IMK_COLUMN_THETA_Y = 0.004
 IMK_LAMBDA_S = 10.0

@@ -290,6 +290,12 @@ def status_fields(record, probe, probe_date, stages_run, stage_results=None):
             "accepted_by_checklist": bool(qualification.get("accepted")), "counts": qualification.get("counts"),
             "failed": group_ids(failed), "not_evaluated": group_ids(open_items),
             "note": "the qualification checklist of the saved record under its own assertions; not a certification",
+            # A grouped record also carries its final candidate's scoped code check (Design.Code_Check_Contract) and the
+            # preliminary screen it passed, reported beside the checklist, never in its place.
+            "candidate_code_check": ({key: (record.get("code_check") or {}).get(key)
+                                      for key in ("status", "counts", "unknown_reason_codes", "review_dependencies")}
+                                     if record.get("code_check") else None),
+            "candidate_screen_passed": (record.get("dcr") or {}).get("candidate_screen_passed"),
         },
         "independent_verification": {
             "mode": "PROBE assertions (pipeline exercise; NOT a verification)" if probe else "committed Design/Config.py",

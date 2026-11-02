@@ -804,9 +804,14 @@ def complete_run(root, case, run):
     paths = run_paths_for(root, case, run)
     if not paths["sample"].exists():
         return False
-    from Hybrid_Exporter import _sample_is_stale
+    from Hybrid_Exporter import SCHEMA_VERSION, _sample_is_stale
     try:
         if _sample_is_stale(paths["status"].parent, paths["sample"]):
+            return False
+        # A sample of another hybrid schema (for example a v3 sample written before the frozen IMK V2 calibration,
+        # 2026-10-29) is not this dataset's sample: resuming must not count it, or one folder would mix schemas.
+        sidecar = json.loads(paths["sample"].with_name("hybrid_metadata.json").read_text(encoding="utf-8"))
+        if sidecar.get("schema_version") != SCHEMA_VERSION:
             return False
         if successful_status(paths["status"]):
             return True

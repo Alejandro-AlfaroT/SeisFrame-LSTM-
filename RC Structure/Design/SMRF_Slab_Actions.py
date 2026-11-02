@@ -8,11 +8,12 @@ combination and every required live-load pattern, on one common floor that
 represents all floors.
 
 Load cases (ACI 318-19 5.3.1): 1.4D and 1.2D + 1.6L. Live-load patterns
-follow 6.4.3.3: when L <= 0.75 D, full factored live load on all panels
-governs (6.4.3.3(a)); otherwise 3/4 of the factored live load on alternate
-panels (checkerboards, for positive moments) and on the two panels adjacent
-to each interior support line (for negative moments), never less than the
-all-panel case (6.4.3.3(b) and (c)).
+follow 6.4.3: when L is variable and does not exceed 0.75 D, or all panels
+are loaded together, full factored live load on all panels governs (6.4.3.2);
+otherwise 3/4 of the factored live load on the panel and alternate panels
+(checkerboards, for positive moments; 6.4.3.3(a)) and on the panels adjacent
+to each interior support line (for negative moments; 6.4.3.3(b)), never less
+than the all-panel case (6.4.3).
 
 Twisting is resolved with the Wood-Armer rules for orthogonal x/y
 reinforcement, using the floor model's sagging-positive mx, my and raw mxy.
@@ -50,9 +51,10 @@ from Design.SMRF_Common import make_check, not_evaluated, assertion_provenance_v
 
 METHOD_VERSION = "smrf_slab_actions_physical_faces_sagging_bound_v5"
 PATTERN_LIVE_FRACTION = 0.75
-PATTERN_RULE_ALL = "ACI 318-19 6.4.3.3(a): L <= 0.75 D, full factored live load on all panels governs"
-PATTERN_RULE_PARTIAL = ("ACI 318-19 6.4.3.3(b)/(c): 3/4 factored live load on alternate panels and on the "
-                        "panels adjacent to each interior support line, enveloped with the all-panel case")
+PATTERN_RULE_ALL = ("ACI 318-19 6.4.3.2: L variable and not more than 0.75 D (or all panels loaded together), full factored live load on all panels governs")
+PATTERN_RULE_PARTIAL = ("ACI 318-19 6.4.3.3(a)/(b): 3/4 factored live load on the panel and alternate panels "
+                        "(positive moment) and on the panels adjacent to each interior support line (negative "
+                        "moment), never less than the all-panel case (6.4.3)")
 _FLAGS = ("verified", "analysis_applicability_verified", "all_floors_enveloped",
           "load_pattern_envelope_verified", "spatial_envelope_per_unit_width",
           "twisting_moment_resolution_verified", "zero_membrane_force_verified")
@@ -384,7 +386,7 @@ def evaluate_slab_actions(evidence):
                "cases": [c["id"] for c in evidence.get("cases", [])],
                "engineering_assertions": evidence.get("engineering_assertions")}
     if flags_ok:
-        checks.append(make_check("floor.qualified_slab_actions", "ACI 318-19 5.3.1, 6.4.3.3, 8.4; Wood-Armer",
+        checks.append(make_check("floor.qualified_slab_actions", "ACI 318-19 5.3.1, 6.4.3, 8.4; Wood-Armer",
                                  1, 1, "==", details=details))
     else:
         missing = [flag for flag in _FLAGS if evidence.get(flag) is not True]
@@ -393,7 +395,7 @@ def evaluate_slab_actions(evidence):
         if not assertion_provenance_valid(assertions):
             missing.append("named_dated_assertion_basis")
         missing.extend("assertion." + flag for flag in _FLAGS if assertions.get(flag) is not True)
-        checks.append({**not_evaluated("floor.qualified_slab_actions", "ACI 318-19 5.3.1, 6.4.3.3, 8.4; Wood-Armer",
+        checks.append({**not_evaluated("floor.qualified_slab_actions", "ACI 318-19 5.3.1, 6.4.3, 8.4; Wood-Armer",
                                        f"Slab action evidence is computed but not asserted as verified: {missing}. "
                                        "Assert in Design.Config.SlabActionAssertions after independent review."),
                        "details": {**details, "reason": f"unasserted or unmet: {missing}"}})

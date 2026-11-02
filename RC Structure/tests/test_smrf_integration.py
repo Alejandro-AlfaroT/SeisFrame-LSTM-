@@ -568,8 +568,10 @@ class IntegrationTests(unittest.TestCase):
         params = collect_global_parameters()
         self.assertEqual(params["floor_dead_load_ksf"], sp.floor_dead_load_ksf())
         self.assertEqual(params["floor_loads"]["slab_thickness_in"], sp.SLAB_THICKNESS_IN)
-        self.assertEqual(len(GLOBAL_FEATURE_KEYS), 43)
-        self.assertEqual(len(_json_to_feature_array(params, GLOBAL_FEATURE_KEYS)), 43)
+        # 38 numeric global features in the hybrid_gnn_lstm_v4 contract (frozen IMK V2 calibration, 2026-10-29; 43 in
+        # v3, which also carried the nominal IMK theta_y and global IMK rotation constants); the slab loads stay a sidecar.
+        self.assertEqual(len(GLOBAL_FEATURE_KEYS), 38)
+        self.assertEqual(len(_json_to_feature_array(params, GLOBAL_FEATURE_KEYS)), 38)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             (path / "global_parameters.json").write_text(json.dumps(params), encoding="utf-8")

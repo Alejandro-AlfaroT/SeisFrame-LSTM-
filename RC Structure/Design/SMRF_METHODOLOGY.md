@@ -719,7 +719,7 @@ person must decide; each is part of the design request identity:
    `declaration_basis`.
 3. `IndependentVerification` -- after the item-7 hand checks, assert the
    floor hand check, strength-model verification, detailing/model
-   consistency, the 8.6.1.2 assessment, fire scope, congestion/placement
+   consistency, congestion/placement
    acceptance and the floor/frame compatibility idealization (informed by
    the saved coupled comparison), with `asserted_by` and `assertion_basis`.
    The hoop/crosstie arrangement is generated and checked by code
@@ -959,9 +959,10 @@ the assessment), and the check is `not_evaluated` without all three.
 `Design/SMRF_Slab_Actions.build_slab_action_evidence` produces the demand
 evidence the strip routine requires, from the same flexible-beam floor model
 as the transfer: 1.4D and 1.2D+1.6L (ACI 5.3.1), with live-load patterns per
-6.4.3.3 -- all panels when L <= 0.75D (the project's office floors), otherwise
-3/4 factored live on checkerboards and on the panels adjacent to each interior
-support line, enveloped with the all-panel case. At every Gauss point outside
+6.4.3 -- all panels when L is variable and does not exceed 0.75D (6.4.3.2; the
+project's office floors), otherwise 3/4 factored live on checkerboards and on
+the panels adjacent to each interior support line (6.4.3.3(a) and (b)), never
+less than the all-panel case (6.4.3). At every Gauss point outside
 the beam widths the sagging-positive mx, my and raw mxy are resolved with the
 Wood-Armer rules into x/y top and bottom design moments; the panel envelope is
 the maximum over those points, cases and (identical) floors. Raw moment and
@@ -1050,7 +1051,37 @@ take the whole panel shear, ACI 318-14 Table 8.10.8.1 at alpha_f1 l2/l1 >=
 318-19 8.4.3.1; no slab-column critical section, 8.4.4.1.1) is a code
 interpretation and is settled only when `two_way_shear_path_assessed` is
 asserted; otherwise it stays `not_evaluated` with the reasoning recorded.
-Fire resistance and the 8.6.1.2 applicability question stay `not_evaluated`.
+The perimeter hook of the mats (25.4.3.1) takes its location factor psi_o
+from Table 25.4.3.2 at the least favourable building corner (since
+2026-11-01): 1.0 where the outermost bar's hook ends inside the corner
+column core with side cover >= 2.5 in, or has side cover >= 6 db, else
+1.25; where both its side cover and its in-plane cover are below 2.5 in,
+25.4.3.4 requires ties enclosing the hook, which the mats do not have, so
+the hook is not developed. The plan geometry follows a declared convention
+(`SMRF_Beam_Slab_Strength.HOOK_CORNER_CONVENTION`: webs and columns on the
+grid lines, the slab edge at the edge beam's outer face, the outermost bar
+just inside the edge beam's hoop, the hook turned down into the
+perimeter beam). The anchorage row and the layout screen apply it; a
+member's exterior end records its hook at two datums, the support face
+and the joint face: the strong-column rule credits the mats where the hook
+develops at either (an envelope only that rule reads), beam flexure only
+where it develops at both, and the hinges and saved end strengths read the
+support face; Mpr stays the member-wide composite at 1.25 fy (an upper
+bound).
+The slab-column local steel (8.6.1.2) is settled on its own, as not
+applicable to the beam-supported floor, only when
+`SlabActionAssertions.slab_column_local_steel_assessed` is asserted. Since
+2026-11-01 both are structural items, not non-blocking reviews: unresolved,
+each is an unknown row with its own reason code
+(`two_way_shear_path_assessment_required`,
+`slab_column_local_steel_assessment_required`, or `*_not_implemented` when
+the beam-supported premise fails), both are required completion rows of the
+code-check contract, and either keeps a design from qualifying. Fire
+resistance is excluded from the declared research scope by the user's
+decision of 2026-11-01 (`SMRF_Common.SCOPE_EXCLUSIONS`): its row is
+`not_evaluated` with `details.scope_exclusion`, it is listed apart as "not
+checked, not passed", no assertion can pass it, and a pass, fail or review
+row for it is invalid.
 The selected record is `design.json['slab_reinforcement']`, recomputed by
 the qualification audit and restored by `apply_design`. Within the approved
 #4/#5/#6 family, the 2h spacing limit governs a 5-in slab, so the mats are
@@ -1068,9 +1099,15 @@ checks; the driver installs the hoops before the state is captured, so
 - SCWB screen: members are uniform over height, so the governing joint is an
   interior roof joint -- one column at the low roof axial load against a
   hogging beam and a sagging beam: Mnc >= 1.2 (Mnb- + Mnb+) of the strongest
-  family. Floor joints need only 0.6 (Mnb- + Mnb+) and never govern. There is
-  no roof exemption in the code text and the joint qualification applies
-  none. Candidate rungs are priced with at least 1% steel (18.7.4.1). The
+  family. Floor joints need only 0.6 (Mnb- + Mnb+) and never govern. Where
+  the 18.7.3.1 exception holds at the roof (user decision 2026-10-02; the
+  screen's proxy is 1.5 x the roof tributary gravity axial load against
+  Ag f'c/10), the governing joint is the floor below. The joint
+  qualification decides the exception per connection on the solved
+  joint-face axial loads, on both routes (the grouped route since
+  2026-11-01), and records Pu against the column's own Ag f'c/10; the
+  grouped selection applies the same per-connection exemption. Candidate
+  rungs are priced with at least 1% steel (18.7.4.1). The
   screen sizes the section; acceptance is the per-joint check below.
 - SCWB at every joint, inside the search: each steel iteration runs the
   joint adapter and `scwb_check` on the installed cage with the solved

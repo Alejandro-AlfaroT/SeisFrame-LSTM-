@@ -14,6 +14,7 @@ import openseespy.opensees as ops
 import Structure_Parameters as sp
 from Model import IMK_Hinges
 from Model.IMK_Materials import CyclicParameters, RotationalBackbone, define_rotational_imk, ENERGY_CONVENTION
+from Model.IMK_Spring_Mapping import FROZEN_V2, LEGACY_REPLAY
 
 PROVENANCE = {"calibration_id": "synthetic_material_fixture_v1", "status": "verification_only",
               "deformation_scope": "isolated_rotational_spring; no_joint_physics_claim"}
@@ -174,8 +175,11 @@ class ModernIMKTests(unittest.TestCase):
 
     def test_member_adapter_preserves_asymmetric_limits_and_rejects_joint_material(self):
         with contextlib.ExitStack() as stack:
+            # A direct low-level call with the global IMK_THETA_* limits installed as native values: the pre-freeze
+            # rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29).
             for name, value in {"IMK_MATERIAL_TYPE": "IMKPeakOriented", "IMK_LAMBDA_A": 10., "IMK_C_A": 1.,
-                                "IMK_THETA_P_NEG": .031, "IMK_THETA_PC_NEG": .071, "IMK_THETA_U_NEG": .151}.items():
+                                "IMK_THETA_P_NEG": .031, "IMK_THETA_PC_NEG": .071, "IMK_THETA_U_NEG": .151,
+                                "IMK_MEMBER_SPRING_CALIBRATION": LEGACY_REPLAY}.items():
                 stack.enter_context(mock.patch.object(sp, name, value))
             call = stack.enter_context(mock.patch.object(ops, "uniaxialMaterial"))
             metadata = IMK_Hinges._define_imk_peak_material(1, 1e5, 100., yield_moment_negative=70.)
@@ -184,6 +188,14 @@ class ModernIMKTests(unittest.TestCase):
             sp.IMK_MATERIAL_TYPE = "IMKPinching"
             with self.assertRaisesRegex(ValueError, "joint"):
                 IMK_Hinges._define_imk_peak_material(2, 1e5, 100.)
+
+    def test_frozen_calibration_refuses_the_direct_low_level_member_material(self):
+        # Frozen IMK V2 calibration (2026-10-29): only the canonical path with a Haselton backbone built under it.
+        with mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION", FROZEN_V2), \
+                mock.patch.object(ops, "uniaxialMaterial") as call:
+            with self.assertRaisesRegex(ValueError, FROZEN_V2):
+                IMK_Hinges._define_imk_peak_material(1, 1e5, 100., yield_moment_negative=70.)
+            call.assert_not_called()
 
     def test_modern_diagnostics_do_not_claim_bilin_plastic_rotation(self):
         from Analysis import Hinge_Hysteresis_Diagnostic as hd

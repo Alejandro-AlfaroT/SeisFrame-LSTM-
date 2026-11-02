@@ -34,7 +34,8 @@ load the record pair with its component ids; run Analysis.NTHA.run_ntha
 with Rayleigh damping from the reference modes; save the production
 outputs; read the recorders within the retained window; evaluate every
 spring against its own installed backbone (path-aware and virgin-backbone
-yield calls); justify a history stride against the full rate; plot the
+yield calls; native capping My/Kh + dp and the retained native du per sign,
+Analysis/Hinge_Hysteresis_Diagnostic); justify a history stride against the full rate; plot the
 yielded loops; write manifest.json. A failed or empty solve still writes the
 manifest with the observed failure and no fabricated response.
 
@@ -132,13 +133,52 @@ def install_record(record, case_label, profile_id=None):
     from Design.Grouped_Record import apply_record
     apply_record(record)                                    # a uniform or a grouped record, each by its own rules
     if profile_id:
-        from Model.Analysis_Profile import apply_profile
-        designed_for = ((((record.get("request_identity") or {}).get("policy") or {}).get("model_profile")) or {}).get("id")
-        if designed_for != profile_id:
+        from Model.Analysis_Profile import PROFILES, apply_profile
+        recorded = (((record.get("request_identity") or {}).get("policy") or {}).get("model_profile")) or {}
+        designed_for = recorded.get("id")
+        # A replay profile reinstalls designs made for the profile it replays (Analysis_Profile design_profile).
+        accepted = {profile_id, (PROFILES.get(profile_id) or {}).get("design_profile")} - {None}
+        if designed_for not in accepted:
             raise RuntimeError(f"the record was designed for profile {designed_for!r}, not {profile_id!r}; use the profile it was designed "
                                "for, or redesign the case.")
-        site_check["analysis_profile"] = {"record": designed_for, "installed": apply_profile(profile_id)["id"], "match": True}
+        installed = apply_profile(profile_id)
+        site_check["analysis_profile"] = {"record": designed_for, "installed": installed["id"], "match": True,
+                                          "model_differences": recorded_model_differences(recorded, installed)}
     return overrides, site_check
+
+
+def recorded_model_differences(recorded, installed):
+    """The governed and reported model keys whose value in the saved record's profile identity differs from the
+    profile now installed. Reported, never applied and never refused: the saved design (sections, cage, slab) does
+    not depend on these keys, and the reinstalled model is the CURRENT one. A key the record does not carry (for
+    example IMK_MEMBER_SPRING_CALIBRATION in a design made before the 2026-10-29 freeze, whose springs followed the
+    pre-freeze rule) is reported with record value None."""
+    differences = []
+    for part in ("settings", "state"):
+        old, new = recorded.get(part) or {}, installed.get(part) or {}
+        for key in sorted(set(old) | set(new)):
+            if old.get(key) != new.get(key):
+                differences.append({"key": key, "record": old.get(key), "installed": new.get(key)})
+    return differences
+
+
+def installed_material_calibrations():
+    """Member springs per provenance calibration_id and per status, read from the hinge registry after the build
+    (released and elastic ends excluded, as in Analysis_Profile.installed_topology): what the installed materials
+    record, beside the configured IMK_CYCLIC_CALIBRATION_* constants of the manifest."""
+    from Model.IMK_Hinges import hinge_registry
+    ids, statuses = {}, {}
+    for entry in hinge_registry().values():
+        for end_materials in (entry.get("installed_materials") or {}).values():
+            for material in (end_materials or {}).values():
+                material = material or {}
+                if material.get("released") or material.get("material_type") == "Elastic":
+                    continue
+                provenance = material.get("provenance") or {}
+                key_id, key_status = str(provenance.get("calibration_id")), str(provenance.get("status"))
+                ids[key_id] = ids.get(key_id, 0) + 1
+                statuses[key_status] = statuses.get(key_status, 0) + 1
+    return {"installed_material_calibration_ids": ids, "installed_material_calibration_statuses": statuses}
 
 
 def parse_run(text):
@@ -175,7 +215,10 @@ def run_pushover(args):
         print(f"[{args.case}] run {name}: du {args.du} in, {args.max_steps} steps max, target drift {args.target_drift}, "
               f"gravity D x {args.gravity_dead} + L x {args.gravity_live}, pattern {args.pattern}", flush=True)
         summary = run_diagnostic(settings, out_root / name, verbose=args.verbose)
-        manifest["runs"][name] = {"stop_reason": summary["stop_reason"], "completed_steps": summary["completed_steps"],
+        # The run's event classification follows its diagnostic version (v2: installed native spring points per sign,
+        # frozen IMK V2 calibration, 2026-10-29), so event counts of different versions are never compared silently.
+        manifest["runs"][name] = {"diagnostic_version": summary["diagnostic_version"],
+                                  "stop_reason": summary["stop_reason"], "completed_steps": summary["completed_steps"],
                                   "peak_base_shear_kip": summary["peak_base_shear_kip"], "checks": summary["checks"],
                                   "event_count": summary["event_count"], "elapsed_sec": summary["elapsed_sec"]}
         print(f"[{args.case}] {name}: {summary['stop_reason']} after {summary['completed_steps']} steps, peak base shear "
@@ -251,10 +294,19 @@ def run_ground_motion(args):
             "material_type": sp.IMK_MATERIAL_TYPE, "energy_convention": sp.IMK_ENERGY_CONVENTION,
             "deterioration_mode": deterioration_mode,
             "installed_deterioration": installed_deterioration_policy(),
-            "calibration_id": sp.IMK_CYCLIC_CALIBRATION_ID, "status": sp.IMK_CYCLIC_CALIBRATION_STATUS,
+            # The configured cyclic constants. They name what is installed only in direct deterioration mode without a
+            # backbone lambda; the frozen calibration (2026-10-29) and the Haselton route write their own id and status
+            # into each material's provenance, tallied below once the model is built.
+            "configured_cyclic_calibration_id": sp.IMK_CYCLIC_CALIBRATION_ID,
+            "configured_cyclic_calibration_status": sp.IMK_CYCLIC_CALIBRATION_STATUS,
+            "installed_material_calibration_ids": None, "installed_material_calibration_statuses": None,
             "lamda_a": sp.IMK_LAMBDA_A if diagnostic_a_mode else None,
             "c_a": sp.IMK_C_A if diagnostic_a_mode else None,
             "energy_mapping_mode": sp.IMK_ENERGY_MAPPING_MODE,
+            # The configured member-to-native spring calibration (frozen IMK V2 calibration, 2026-10-29, or the
+            # explicit legacy replay); what the installed materials record follows once the model is built (below).
+            "member_spring_calibration": getattr(sp, "IMK_MEMBER_SPRING_CALIBRATION", None),
+            "installed_member_spring_calibrations": None,
             "joint_model_configured": sp.JOINT_MODEL,
             # Stated from the installed model once it is built (below), not from the configuration.
             "joint_springs_installed": None,
@@ -281,6 +333,9 @@ def run_ground_motion(args):
         manifest["installed_topology"] = topology
         manifest["member_material_profile"]["joint_springs_installed"] = bool(topology["joint_springs_installed"])
         manifest["member_material_profile"]["face_slip_interfaces_registered"] = topology["face_slip_interfaces_registered"]
+        # Springs per calibration id, read from each installed material's own provenance (released ends excluded).
+        manifest["member_material_profile"]["installed_member_spring_calibrations"] = topology["installed_member_spring_calibrations"]
+        manifest["member_material_profile"].update(installed_material_calibrations())
         if profile_id and not topology["consistent"]:
             raise RuntimeError(f"the installed model does not match profile {profile_id}: " + "; ".join(topology["problems"]))
         verification = hd.verify_installed_design(record)
@@ -432,7 +487,8 @@ def run_ground_motion(args):
         if time_history:
             print(f"[{args.case}] peak interstory drift X {100 * peak_x:.3f}% (story {manifest['response']['peak_story_drift_x_story']}), "
                   f"Y {100 * peak_y:.3f}% (story {manifest['response']['peak_story_drift_y_story']}); yielded springs {summary['yielded_springs']} / "
-                  f"{summary['springs']} on {summary['yielded_members']} members; max plastic rotation {summary['max_plastic_rotation_peak']:.4f} rad", flush=True)
+                  f"{summary['springs']} on {summary['yielded_members']} members; max native plastic spring rotation "
+                  f"{summary['max_plastic_rotation_peak']:.4f} rad; max native capping ratio {summary['max_capping_ratio']:.3f}", flush=True)
     except Exception:                                   # noqa: BLE001 -- the observed failure is the result
         manifest["status"] = "error"
         manifest["error"] = traceback.format_exc()

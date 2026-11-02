@@ -57,6 +57,9 @@ class CyclicMeasurementFixture(unittest.TestCase):
         # itself is tested in tests/test_imk_deterioration_mapping.py.
         cls.stack.enter_context(mock.patch.object(sp, "IMK_MATERIAL_TYPE", "IMKBilin"))
         cls.stack.enter_context(mock.patch.object(sp, "IMK_DETERIORATION_MODE", "direct"))
+        # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29)
+        cls.stack.enter_context(mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION",
+                                                  "legacy_direct_interval_nominal_energy_66f964c1"))
         # The PROBE configuration asserts the slab-action evidence, so the design establishes a slab
         # reinforcement layout and the beam hinges carry the composite, per-end asymmetric strengths
         # of a qualified record (hogging with the slab mats, sagging with the flange, lower exterior ends).
@@ -193,12 +196,14 @@ class CyclicMeasurementFixture(unittest.TestCase):
         yielded = [r for r in self.rows if r["yielded"]]
         elastic = [r for r in self.rows if not r["yielded"] and r["plastic_steps"] == 0]
         self.assertTrue(yielded and elastic)
+        # dissipated_energy_kip_in was renamed net_work_minus_initial_ke_storage_kip_in, same figure (diagnostic v4,
+        # frozen IMK V2 calibration, 2026-10-29)
         for r in yielded:
-            self.assertGreater(r["dissipated_energy_kip_in"], 0.0, r["hinge_tag"])
+            self.assertGreater(r["net_work_minus_initial_ke_storage_kip_in"], 0.0, r["hinge_tag"])
         for r in elastic:
             scale = max(1.0, abs(r["moment_max_kip_in"]) * max(abs(r["rotation_max"]), abs(r["rotation_min"])))
-            self.assertLess(abs(r["dissipated_energy_kip_in"]), 1e-6 * scale, r["hinge_tag"])
-        self.assertGreater(self.summary["total_dissipated_energy_kip_in"], 0.0)
+            self.assertLess(abs(r["net_work_minus_initial_ke_storage_kip_in"]), 1e-6 * scale, r["hinge_tag"])
+        self.assertGreater(self.summary["total_net_work_minus_initial_ke_storage_kip_in"], 0.0)
         # The summary counts what the rows say.
         self.assertEqual(self.summary["yielded_springs"], len(yielded))
 
@@ -242,13 +247,14 @@ class CyclicMeasurementFixture(unittest.TestCase):
         self.assertAlmostEqual(row["plastic_rotation_positive_accumulated"], (theta_a - ty_pos) - (m_a - fy_pos) / ke, delta=1e-9)
         self.assertAlmostEqual(row["plastic_rotation_negative_accumulated"], (theta_b - theta_c) - (m_b - m_c) / ke, delta=1e-9)
         self.assertAlmostEqual(row["plastic_rotation_peak_negative"], 0.0)                      # the production one-sided measure
-        self.assertGreater(row["dissipated_energy_kip_in"], 0.0)
+        # renamed from dissipated_energy_kip_in, same figure (diagnostic v4, frozen IMK V2 calibration, 2026-10-29)
+        self.assertGreater(row["net_work_minus_initial_ke_storage_kip_in"], 0.0)
         rot = np.linspace(0.0, 0.5 * ty_pos, 30)
         rec = {"hinge_tag_order": [1], "y": {"time": np.arange(30.0), "moment": (ke * rot)[:, None], "rotation": rot[:, None], "rows": 30}}
         row = hd.evaluate_hinge_histories(rec, [hinge])[0]
         self.assertFalse(row["yielded"] or row["virgin_yielded"])
         self.assertEqual(row["plastic_steps"], 0)
-        self.assertAlmostEqual(row["dissipated_energy_kip_in"], 0.0, delta=1e-12)
+        self.assertAlmostEqual(row["net_work_minus_initial_ke_storage_kip_in"], 0.0, delta=1e-12)
 
     def test_recorder_reader_handles_recovery_substeps_and_failed_attempts(self):
         """Rows outnumber steps when NTHA subdivides a step; a failed attempt commits nothing; a window limit drops trailing rows."""

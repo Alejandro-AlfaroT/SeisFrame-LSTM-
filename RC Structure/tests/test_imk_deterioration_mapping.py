@@ -4,6 +4,10 @@ Pins the arithmetic (Lamda = lambda_Haselton x theta_y,member for S and C,
 a large finite capacity for A and K), the command slots the values land in
 for both member materials, and the provenance recorded. Not an experimental
 calibration: the status the material records stays provisional.
+
+Every test here pins the pre-freeze rule (nominal lambda x theta_y,member, direct low-level installs with synthetic
+backbones, IMKBilin), which the frozen IMK V2 calibration (2026-10-29) keeps only as the explicit legacy replay; the
+class selects that replay. The frozen rule is pinned by test_imk_frozen_v2_calibration.
 """
 from pathlib import Path
 import sys
@@ -14,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import Structure_Parameters as sp
 from Model import IMK_Hinges
 from Model.IMK_Calibration import deterioration_for_member
+from Model.IMK_Spring_Mapping import LEGACY_REPLAY
 
 BACKBONE = {"theta_p": .02, "theta_pc": .06, "theta_u": .12, "source": "haselton_2008",
             "deterioration_source": "haselton_2008_eq3_20_nominal_member_theta_y",
@@ -23,6 +28,12 @@ BACKBONE = {"theta_p": .02, "theta_pc": .06, "theta_u": .12, "source": "haselton
 
 
 class HaseltonTranslationTests(unittest.TestCase):
+    def setUp(self):
+        # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29)
+        patcher = mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION", LEGACY_REPLAY)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_column_lambda_is_eq_3_20_times_the_member_yield_rotation(self):
         with mock.patch.multiple(sp, IMK_DETERIORATION_MODE="haselton_2008", COL_STIRRUP_SPACING=4., H_COL=24.,
                                  IMK_COLUMN_THETA_Y=.004, BEAM_STIRRUP_SPACING=3., H_BEAM=20., IMK_BEAM_THETA_Y=.005):

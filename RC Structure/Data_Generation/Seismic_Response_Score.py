@@ -19,8 +19,15 @@ import math
 from numbers import Real
 
 
-POLICY_SCHEMA_VERSION = "seisframe_seismic_response_score_policy_v1"
-SCORE_SCHEMA_VERSION = "seisframe_seismic_response_score_v1"
+# v2 (frozen IMK V2 calibration, 2026-10-29): both hinge metrics measure each axis and native sign on the end's own
+# spring (Data_Generation/Hybrid_Exporter.DAMAGE_METRIC_DEFINITIONS). peak_hinge_damage_ratio is the native capping
+# ratio, plastic native spring rotation of the governing branch over its native dp; fraction_hinges_yielded is the
+# fraction of hinge ends with some native branch past its own My/Kh. v1 took max |rotation| of both springs less the
+# larger branch-minimum yield, over the member theta_p. Weights, references and aggregation are unchanged, but the
+# values differ from v1 even under the legacy replay (native dp = theta_p there, so only the denominator agrees), and
+# a v1 policy or score is not read as a v2 one.
+POLICY_SCHEMA_VERSION = "seisframe_seismic_response_score_policy_v2"
+SCORE_SCHEMA_VERSION = "seisframe_seismic_response_score_v2"
 AGGREGATION = "weighted_reference_ratios_uncapped"
 METRIC_NAMES = (
     "fraction_hinges_yielded",
@@ -101,7 +108,9 @@ def score_response(metrics, policy=None):
     """Return an uncapped weighted score and its complete component accounting.
 
     ``metrics`` must contain exactly ``METRIC_NAMES``. Drift ratios and yielded
-    fraction are fractions (0.0125 means 1.25%); damage ratio is dimensionless.
+    fraction are fractions (0.0125 means 1.25%); the yielded fraction counts hinge
+    ends with some native branch past its own My/Kh, and damage ratio is the
+    dimensionless native capping ratio (1 at the native capping point).
     Missing, nonfinite or negative data are rejected, never treated as zero.
     Completion/convergence must be checked independently before accepting a run.
     """

@@ -244,7 +244,7 @@ def beam_flexural_strengths(design, rows):
     return result
 
 
-BEAM_STRENGTH_BASIS = "member_composite_t_l_actual_rows_developed_mats_v1"
+BEAM_STRENGTH_BASIS = "member_composite_t_l_actual_rows_developed_mats_v2_two_datum_hooks"
 
 
 def beam_section_context(member):
@@ -258,9 +258,13 @@ def beam_section_context(member):
         return ("no_slab",)
     flange = mp.effective_flange(member)
     edge = mp.perimeter_beam(member).design
+    # Each exterior end's own perimeter beam, joint depth and corner hook decide its datums (2026-11-01).
+    hooks = tuple((end, tuple((key, tuple(sorted(value.items())) if isinstance(value, dict) else value)
+                              for key, value in sorted(inputs.items())))
+                  for end, inputs in sorted(mp.exterior_end_anchorage_inputs(member).items()))
     return (flange["flange_width_in"], flange["clear_span_in"], flange["slab_sides"],
             tuple((o["overhang_in"], o["clear_to_adjacent_web_in"]) for o in flange["overhangs"]),
-            tuple(mp.exterior_ends(member).items()), edge.b_in, edge.fc_ksi, edge.stirrup_bar_size)
+            tuple(mp.exterior_ends(member).items()), edge.b_in, edge.fc_ksi, edge.stirrup_bar_size, hooks)
 
 
 def beam_group_representatives(state, gid):
@@ -277,6 +281,9 @@ def resolved_beam_flexural_strengths(member, rows):
     The available action record contains full-span maxima, not moments paired with their x coordinate.
     Applying the weakest available section to that envelope is conservative; exterior anchorage is
     never inferred from an interior section. Web minimum/maximum-steel rules remain on the web bars.
+    An exterior end's mats count only where its hook develops at both datums (the support face and the
+    joint face; S, 2026-11-01). For the 18.6.3.2 checks the negative strength at each face on the
+    strong-column basis (either datum, the larger) is given beside it (``nominal_negative_faces_18_6_3_2``).
     """
     design = member.design
     result = beam_flexural_strengths(design, rows)
@@ -284,11 +291,10 @@ def resolved_beam_flexural_strengths(member, rows):
         return result
     section = mp.beam_strengths(member)
     family = section["family"]
-    anchorage = section["basis"]["exterior_anchorage"]
-    exterior = mp.exterior_ends(member)
+    by_end = section["basis"]["exterior_anchorage_by_end"]
     nominal_sections = {}
     for where in ("i", "j", "span"):
-        undeveloped = where != "span" and exterior[where] and anchorage is not None and not anchorage["developed"]
+        undeveloped = where in by_end and not by_end[where]["developed_both"]
         nominal_sections[where] = family["undeveloped" if undeveloped else "composite"]
     for sign in ("positive", "negative"):
         choices = []
@@ -309,6 +315,9 @@ def resolved_beam_flexural_strengths(member, rows):
                              "slab_sides": family["slab_sides"], "section_capacities": choices})
     result["nominal_sections"] = {where: {sign: values[sign]["mn_kip_in"] for sign in ("positive", "negative")}
                                   for where, values in nominal_sections.items()}
+    result["nominal_negative_faces_18_6_3_2"] = {
+        where: family["undeveloped" if (where in by_end and not by_end[where]["developed_either"]) else "composite"]
+        ["negative"]["mn_kip_in"] for where in ("i", "j")}
     result["basis"] = section["basis"]
     return result
 
@@ -352,12 +361,18 @@ def beam_group_strength(design, rows, bar_rows, state=None):
 
 
 def beam_detailing_strengths(member, rows):
-    """Nominal (not phi-reduced) end/span strengths for the 18.6.3.2 detailing checks."""
+    """Nominal (not phi-reduced) end/span strengths for the 18.6.3.2 detailing checks.
+
+    Each side of a comparison on its more demanding basis (2026-11-01): the negative strength at a face is the
+    larger of the sizing and strong-column values, the positive face and along-span strengths the sizing ones.
+    """
     values = resolved_beam_flexural_strengths(member, rows)
     sections = values.get("nominal_sections") or {
         end: {sign: values[sign]["phi_mn_kip_in"] / PHI_FLEX for sign in ("positive", "negative")}
         for end in ("i", "j", "span")}
-    return {**{f"mn_{sign}_{label}_kipin": sections[end][sign]
+    faces = values.get("nominal_negative_faces_18_6_3_2") or {}
+    return {**{f"mn_{sign}_{label}_kipin": (max(sections[end][sign], faces.get(end, 0.0)) if sign == "negative"
+                                             else sections[end][sign])
                for end, label in (("i", "left"), ("j", "right")) for sign in ("positive", "negative")},
             **{f"mn_{sign}_min_along_kipin": min(s[sign] for s in sections.values())
                for sign in ("positive", "negative")}}

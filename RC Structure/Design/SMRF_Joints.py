@@ -119,7 +119,12 @@ def scwb_check(state, *, location="", check_id="scwb"):
             raise ValueError("Positive total beam flexural strength is required.")
         exception = _discontinuous_column_exception(state, columns)
     except ValueError as exc:
-        return not_evaluated(check_id, SCWB_CLAUSE, str(exc), location)
+        check = not_evaluated(check_id, SCWB_CLAUSE, str(exc), location)
+        upstream = upstream_reasons(state)
+        if upstream:
+            check["details"].update(upstream_reasons=upstream,
+                                    reason_codes=sorted({item["reason_code"] for item in upstream}))
+        return check
     if exception is not None:
         return make_check(
             check_id, SCWB_EXCEPTION_CLAUSE, exception["pu_max_kip"], exception["limit_kip"],
@@ -141,6 +146,41 @@ def scwb_check(state, *, location="", check_id="scwb"):
     )
 
 
+def upstream_reasons(state):
+    """The specific upstream causes a sway state carries for its members, as producers recorded them.
+
+    A producer may give each column or beam capacity record a ``reason_code`` (with ``reason``) and each beam a
+    ``slab_reason_code`` (with ``slab_reason``): the missing action review, no slab layout, a failed development
+    check, a missing column action, an axial load outside a section's domain. They are listed with the member
+    they belong to, so a repair can act on the cause instead of on the generic message. Nothing is inferred.
+    """
+    if not isinstance(state, Mapping):
+        return []
+    found = []
+    for kind, key in (("column", "column_capacities"), ("beam", "beam_capacities")):
+        records = state.get(key)
+        for record in records if isinstance(records, (list, tuple)) else []:
+            if not isinstance(record, Mapping):
+                continue
+            for code_key, text_key in (("reason_code", "reason"), ("slab_reason_code", "slab_reason")):
+                code = record.get(code_key)
+                if code is None and record.get(text_key):
+                    code = "unclassified"
+                if code is not None:
+                    found.append({"member": kind, "tag": record.get("tag"), "end": record.get("end"),
+                                  "group_id": record.get("group_id"), "reason_code": str(code),
+                                  "reason": record.get(text_key)})
+    return found
+
+
+def discontinuous_column_exempt(pu_max_kip, gross_area_in2, fc_ksi):
+    """(exempt, limit_kip) of the 18.7.3.1 exception for a column discontinuous above its connection: the switch
+    is on and its largest factored axial compression is strictly below Ag f'c / 10 (at the limit the rule
+    applies). One helper for the check and the sizing estimates, so both use one strictness and one switch."""
+    limit = gross_area_in2 * fc_ksi / 10.0
+    return bool(SCWB_DISCONTINUOUS_COLUMN_EXCEPTION and pu_max_kip < limit), limit
+
+
 def _discontinuous_column_exception(state, columns):
     """The 18.7.3.1 exception at this connection, or None when 18.7.3.2 applies.
 
@@ -158,8 +198,8 @@ def _discontinuous_column_exception(state, columns):
     area = _number(connection.get("column_gross_area_in2"), "column_gross_area_in2", positive=True)
     fc = _number(connection.get("column_fc_ksi"), "column_fc_ksi", positive=True)
     pu_max = _number(columns[0].get("axial_max_kip"), "axial_max_kip")
-    limit = area * fc / 10.0
-    if not pu_max < limit:
+    exempt, limit = discontinuous_column_exempt(pu_max, area, fc)
+    if not exempt:
         return None
     return {"clause": "ACI 318-19 18.7.3.1", "pu_max_kip": pu_max, "limit_kip": limit,
             "column_gross_area_in2": area, "column_fc_ksi": fc,

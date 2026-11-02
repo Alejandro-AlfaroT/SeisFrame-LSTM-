@@ -54,17 +54,38 @@ class HookDevelopmentTests(unittest.TestCase):
         self.assertEqual(exterior_ends("beam_y", 0, 3, 1), {"i": True, "j": True})
 
 
-def record(bar=4, area=0.20, beam_width=10.0):
+def record(bar=4, area=0.20, beam_width=10.0, development="pass"):
+    # The slab record's own interior development check (slab_bar_development: ld within half the shortest clear span,
+    # here 102 in) is what credits the mats as developed at interior ends (2026-10-30); "fail" or None leaves it open.
+    from Design.SMRF_Common import make_check
+    from Design.SMRF_Slab_Reinforcement import development_length_in
+    checks = [] if development is None else [make_check(
+        "slab_bar_development", "ACI 318-19 25.4.2.4 with 8.7.4.1 continuity", development_length_in(bar, 4.0, 60.0),
+        51.0 if development == "pass" else 6.0, "<=", "in")]
     return {"geometry": {"num_bay_x": 3, "num_bay_y": 3, "num_floor": 1, "bay_x_in": 120.0, "bay_y_in": 120.0},
             "sections": {"b_beam_in": beam_width, "h_beam_in": 18.0, "fc_beam_ksi": 4.0, "h_col_in": 18.0, "b_col_in": 18.0},
             "reinforcement": {"beam_bar_size": 7, "beam_top_bars": 2, "beam_bot_bars": 2,
                               "beam_longitudinal_centroid_offset_in": 2.4375, "beam_clear_cover_in": 1.5,
                               "beam_stirrup_diameter_in": 0.5},
             "materials": {"fy_ksi": 60.0}, "slab": {"thickness_in": 5.0},
-            "slab_reinforcement": {"layout": layout(bar, area)}}
+            "slab_reinforcement": {"layout": layout(bar, area), "checks": checks}}
 
 
 class ExteriorEndCreditTests(unittest.TestCase):
+    def test_mats_whose_development_is_not_established_are_unknown_except_at_undeveloped_hook_ends(self):
+        # 2026-10-30: a selected layout is not by itself a developed contribution; with slab_bar_development failed or
+        # absent the interior ends are unknown (never zero), and an exterior end whose hook does not fit keeps its basis.
+        for development, code in (("fail", "slab_bar_development_failed"), (None, "slab_bar_development_unknown")):
+            with self.subTest(development=development):
+                entries, _families = beam_slab_strengths(record(4, development=development))
+                interior = entries["17/j/negative"]
+                self.assertEqual((interior["slab_basis"], interior["slab_mn_kip_in"]), ("unknown", None))
+                self.assertFalse(interior["section_compatibility_verified"])
+                self.assertEqual(interior["reason_code"], code)
+                entries, _families = beam_slab_strengths(record(6, 0.44, development=development))
+                self.assertEqual(entries["17/i/negative"]["slab_basis"], "terminated_undeveloped")
+                self.assertEqual(entries["17/j/negative"]["slab_basis"], "unknown")
+
     def test_developed_mats_are_credited_everywhere_with_the_hook_recorded(self):
         entries, families = beam_slab_strengths(record(4))
         self.assertTrue(families["x_edge"]["exterior_anchorage"]["developed"])
@@ -183,13 +204,15 @@ class ExteriorEndCreditTests(unittest.TestCase):
 
 class LadderTests(unittest.TestCase):
     def test_ladder_refuses_a_bar_whose_hook_does_not_fit_the_perimeter_beam(self):
-        from test_smrf_slab_reinforcement import inputs, evidence
+        from test_smrf_slab_reinforcement import CORNERS, inputs, evidence
         from Design.SMRF_Slab_Reinforcement import design_slab_reinforcement
         context = {"clear_span_x_in": 102.0, "clear_span_y_in": 102.0, "beam_width_in": 10.0,
                    "alpha_f_min": 5.6, "alpha_f_l2_l1_min": 5.6, "thickness_screen_passed": True,
                    "column_core_width_in": 13.0,
-                   "two_way_shear_path_assessed": True, "columns_at_beam_intersections": True,
-                   "beam_clear_cover_in": 1.5, "beam_hoop_diameter_in": 0.5, "fc_beam_ksi": 4.0}
+                   "two_way_shear_path_assessed": True, "slab_column_local_steel_assessed": False,
+                   "columns_at_beam_intersections": True,
+                   "beam_clear_cover_in": 1.5, "beam_hoop_diameter_in": 0.5, "fc_beam_ksi": 4.0,
+                   "perimeter_hook_corners": CORNERS}
         result = design_slab_reinforcement(inputs(), evidence(), policy={"bar_sizes": [6]}, context=context)
         self.assertIsNone(result["layout"])
         self.assertIn("Hook development", result["trial_history"][0]["reason"])
@@ -201,13 +224,15 @@ class LadderTests(unittest.TestCase):
 
     def test_hook_is_checked_at_each_candidate_spacing_not_the_tightest_offered(self):
         """Fourth cross-check: spacings 3-12 rejected every #5 layout because the hook was priced at 3 in (psi_r = 1.6)."""
-        from test_smrf_slab_reinforcement import inputs, evidence
+        from test_smrf_slab_reinforcement import CORNERS, inputs, evidence
         from Design.SMRF_Slab_Reinforcement import design_slab_reinforcement
         context = {"clear_span_x_in": 102.0, "clear_span_y_in": 102.0, "beam_width_in": 10.0,
                    "alpha_f_min": 5.6, "alpha_f_l2_l1_min": 5.6, "thickness_screen_passed": True,
                    "column_core_width_in": 13.0,
-                   "two_way_shear_path_assessed": True, "columns_at_beam_intersections": True,
-                   "beam_clear_cover_in": 1.5, "beam_hoop_diameter_in": 0.5, "fc_beam_ksi": 4.0}
+                   "two_way_shear_path_assessed": True, "slab_column_local_steel_assessed": False,
+                   "columns_at_beam_intersections": True,
+                   "beam_clear_cover_in": 1.5, "beam_hoop_diameter_in": 0.5, "fc_beam_ksi": 4.0,
+                   "perimeter_hook_corners": CORNERS}
         spacings = [float(s) for s in range(3, 13)]
         result = design_slab_reinforcement(inputs(), evidence(), policy={"bar_sizes": [5], "spacing_options_in": spacings},
                                            context=context)

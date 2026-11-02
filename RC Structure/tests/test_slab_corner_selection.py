@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_smrf_slab_reinforcement import inputs, evidence
+from test_smrf_slab_reinforcement import CORNERS, inputs, evidence
 from Design.SMRF_Slab_Reinforcement import (
     design_slab_reinforcement, evaluate_slab_reinforcement, explain_unsized_layers,
 )
@@ -20,9 +20,9 @@ from Design.SMRF_Slab_Reinforcement import (
 def context(**changes):
     return dict(clear_span_x_in=240.0, clear_span_y_in=240.0, beam_width_in=24.0,
                 alpha_f_min=5.6, alpha_f_l2_l1_min=5.6, thickness_screen_passed=True,
-                column_core_width_in=25.0, two_way_shear_path_assessed=True,
+                column_core_width_in=25.0, two_way_shear_path_assessed=True, slab_column_local_steel_assessed=True,
                 columns_at_beam_intersections=True, beam_clear_cover_in=1.5,
-                beam_hoop_diameter_in=0.5, fc_beam_ksi=5.0) | changes
+                beam_hoop_diameter_in=0.5, fc_beam_ksi=5.0, perimeter_hook_corners=CORNERS) | changes
 
 
 def asymmetric_evidence(axis="x"):

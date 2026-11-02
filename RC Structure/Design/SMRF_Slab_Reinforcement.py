@@ -22,10 +22,11 @@ import hashlib
 import json
 import math
 
-from .SMRF_Common import make_check, not_evaluated, summarize_checks
+from .SMRF_Common import SCOPE_EXCLUDED_ROWS, make_check, not_evaluated, scope_exclusion, summarize_checks
 
 
-METHOD_VERSION = "aci318_19_verified_slab_strip_strength_v3_corner_selection"
+METHOD_VERSION = "aci318_19_verified_slab_strip_strength_v5_structural_gates_corner_hooks"
+ELIGIBILITY_VERSION = "slab_strength_credit_eligibility_v2_scope_exclusions"
 _BARS = {4: (0.5, 0.20), 5: (0.625, 0.31), 6: (0.75, 0.44)}
 _DEFAULT_POLICY = {"bar_sizes": [4, 5, 6], "spacing_options_in": list(range(3, 13)),
                    "clear_cover_in": 0.75, "outer_axis": "x"}
@@ -252,7 +253,8 @@ def _layer_checks(layout, demand, inputs, location):
 
 _CONTEXT_KEYS = {"clear_span_x_in", "clear_span_y_in", "beam_width_in", "alpha_f_min", "alpha_f_l2_l1_min",
                  "thickness_screen_passed", "column_core_width_in", "two_way_shear_path_assessed",
-                 "columns_at_beam_intersections", "beam_clear_cover_in", "beam_hoop_diameter_in", "fc_beam_ksi"}
+                 "slab_column_local_steel_assessed", "columns_at_beam_intersections", "beam_clear_cover_in",
+                 "beam_hoop_diameter_in", "fc_beam_ksi", "perimeter_hook_corners"}
 
 
 def _context(context):
@@ -267,9 +269,26 @@ def _context(context):
         result[key] = _number(context[key], key)
     result["alpha_f_min"] = _number(context["alpha_f_min"], "alpha_f_min", True)
     result["alpha_f_l2_l1_min"] = _number(context["alpha_f_l2_l1_min"], "alpha_f_l2_l1_min", True)
-    for key in ("thickness_screen_passed", "two_way_shear_path_assessed", "columns_at_beam_intersections"):
+    for key in ("thickness_screen_passed", "two_way_shear_path_assessed", "slab_column_local_steel_assessed",
+                "columns_at_beam_intersections"):
         if context[key] is not True and context[key] is not False:
             raise ValueError(f"{key} must be a boolean.")
+    # The least favourable building-corner hook of each axis (SMRF_Beam_Slab_Strength.corner_hook_geometry).
+    from Design.SMRF_Beam_Slab_Strength import CORNER_HOOK_KEYS, HOOK_CORNER_CONVENTION
+    corners = context["perimeter_hook_corners"]
+    if not isinstance(corners, dict) or set(corners) != {"x", "y"}:
+        raise ValueError("perimeter_hook_corners must give the corner hook of the x and y mats.")
+    result["perimeter_hook_corners"] = {}
+    for axis in ("x", "y"):
+        corner = corners[axis]
+        if (not isinstance(corner, dict) or set(corner) != set(CORNER_HOOK_KEYS)
+                or corner["convention"] != HOOK_CORNER_CONVENTION or type(corner["in_column_core"]) is not bool):
+            raise ValueError(f"perimeter_hook_corners.{axis} must give {CORNER_HOOK_KEYS} under {HOOK_CORNER_CONVENTION}.")
+        result["perimeter_hook_corners"][axis] = {
+            "side_cover_in": _number(corner["side_cover_in"], f"perimeter_hook_corners.{axis}.side_cover_in", True),
+            "in_plane_cover_in": _number(corner["in_plane_cover_in"], f"perimeter_hook_corners.{axis}.in_plane_cover_in",
+                                         True),
+            "in_column_core": corner["in_column_core"], "convention": corner["convention"]}
     return result
 
 
@@ -292,8 +311,10 @@ def _completion_checks(inputs, layout, demands, context):
 
     Continuous uniform top and bottom mats through every support satisfy the
     extension/continuity provisions of 8.7.4.1 by construction; what remains
-    to verify numerically is listed here. Fire resistance and the slab-column
-    local-steel provision are reported as open.
+    to verify numerically is listed here. The two-way shear path and the
+    slab-column local steel (8.6.1.2) are each resolved as passing (assessed
+    not applicable to this beam-supported floor) or stay unknown with their
+    own reason code; fire resistance is a declared scope exclusion.
     """
     if context is None:
         return [not_evaluated("slab_completion_context", "ACI 318-19 8.3, 8.7, 22.6, 24.3, 25.4",
@@ -311,14 +332,24 @@ def _completion_checks(inputs, layout, demands, context):
                                       "shortest clear span; the perimeter is slab_perimeter_bar_anchorage"}))
     from Design.SMRF_Beam_Slab_Strength import perimeter_slab_bar_anchorage
     for axis in ("x", "y"):
+        # The least favourable bar of the mat is the outermost one at a building corner (psi_o by Table 25.4.3.2 on
+        # the declared corner convention, 25.4.3.4 where the slab confines the hook on one side only).
         anchorage = perimeter_slab_bar_anchorage(layout, axis, context["beam_width_in"], context["beam_clear_cover_in"],
-                                                 context["beam_hoop_diameter_in"], context["fc_beam_ksi"], fy)
-        checks.append(make_check("slab_perimeter_bar_anchorage", "ACI 318-19 25.4.3.1 / 8.7.4.1.3 at a discontinuous edge",
+                                                 context["beam_hoop_diameter_in"], context["fc_beam_ksi"], fy,
+                                                 corner=context["perimeter_hook_corners"][axis])
+        details = {**{k: v for k, v in anchorage.items() if k not in ("axis",)},
+                   "requirement": "the mats parallel to this axis terminate at the building edge with a standard hook "
+                                  "into the perimeter beam, developed at its support face (8.7.4.1.1(b)); the least "
+                                  "favourable bar is the outermost one at a building corner"}
+        if anchorage["confinement_required_25_4_3_4"]:
+            # The hook fits or not, it needs ties enclosing it (25.4.3.4) that the slab mats do not have.
+            checks.append(make_check("slab_perimeter_bar_anchorage",
+                                     "ACI 318-19 25.4.3.4 / 8.7.4.1.1(b) at a discontinuous edge", 1, 0, "<=",
+                                     "enclosing ties (1 = required)", axis, details=details))
+            continue
+        checks.append(make_check("slab_perimeter_bar_anchorage", "ACI 318-19 25.4.3.1 / 8.7.4.1.1(b) at a discontinuous edge",
                                  anchorage["ldh_required_in"], anchorage["embedment_available_in"], "<=", "in", axis,
-                                 details={**{k: v for k, v in anchorage.items() if k not in ("axis",)},
-                                          "requirement": "the mats parallel to this axis terminate at the building edge with a "
-                                                         "standard hook into the perimeter beam; the same anchorage is what "
-                                                         "credits the slab bars in the beam strength at exterior ends"}))
+                                 details=details))
     checks.append(make_check("slab_continuity_and_extensions", "ACI 318-19 8.7.4.1.3 / Fig. 8.7.4.1.3",
                              1, 1, "==", details={"basis": "top and bottom mats continuous through all supports at "
                                                   "uniform spacing; no cutoffs, so every minimum extension is exceeded"}))
@@ -351,8 +382,7 @@ def _completion_checks(inputs, layout, demands, context):
     # two_way_shear_path_assessed.
     shear_clause = ("ACI 318-19 8.4.3.1 / 8.4.4.1.1 / 22.6.4; ACI 318-14 Table 8.10.8.1, 8.10.8.3, 8.10.8.4 "
                     "via 318-19 R8.2.1")
-    path_ok = (context["alpha_f_min"] >= 1.0 and context["alpha_f_l2_l1_min"] >= 1.0
-               and context["columns_at_beam_intersections"])
+    path_ok = _beam_supported(context)
     if path_ok and context["two_way_shear_path_assessed"]:
         checks.append(make_check("slab_two_way_shear_applicability", shear_clause,
                                  1.0, context["alpha_f_l2_l1_min"], "<=", "alpha_f1 l2/l1",
@@ -370,17 +400,21 @@ def _completion_checks(inputs, layout, demands, context):
                                                    "checked for one-way shear at the beam faces (8.4.3.1, the strip "
                                                    "check above)"}))
     elif path_ok:
-        checks.append(not_evaluated("slab_two_way_shear_applicability", shear_clause,
-                                    f"alpha_f >= 1.0 (min {context['alpha_f_min']:.2f}) and alpha_f1 l2/l1 >= 1.0 (min "
-                                    f"{context['alpha_f_l2_l1_min']:.2f}) on every edge, and every column is at a beam "
-                                    "intersection; whether the beam-supported shear path (318-14 8.10.8) replaces a "
-                                    "slab-column two-way shear check for a plate-analysed slab is an engineering "
-                                    "assessment to assert in Design.Config.SlabActionAssertions.two_way_shear_path_assessed."))
+        # A structural item, not a non-blocking review: unresolved, it is an unknown row (2026-11-01).
+        checks.append(_unresolved("slab_two_way_shear_applicability", shear_clause,
+                                  f"alpha_f >= 1.0 (min {context['alpha_f_min']:.2f}) and alpha_f1 l2/l1 >= 1.0 (min "
+                                  f"{context['alpha_f_l2_l1_min']:.2f}) on every edge, and every column is at a beam "
+                                  "intersection; whether the beam-supported shear path (318-14 8.10.8) replaces a "
+                                  "slab-column two-way shear check for a plate-analysed slab is an engineering "
+                                  "assessment to assert in Design.Config.SlabActionAssertions.two_way_shear_path_assessed; "
+                                  "until then the two-way shear item is unresolved.",
+                                  "two_way_shear_path_assessment_required"))
     else:
-        checks.append(not_evaluated("slab_two_way_shear_applicability", "ACI 318-19 8.4.4.1.1 / 22.6",
-                                    f"alpha_f1 l2/l1 < 1.0 on some edge (min {context['alpha_f_l2_l1_min']:.2f}; alpha_f min "
-                                    f"{context['alpha_f_min']:.2f}) or a column bears on the slab directly: the beams do not "
-                                    "take the whole panel shear and slab-column two-way shear is not implemented."))
+        checks.append(_unresolved("slab_two_way_shear_applicability", "ACI 318-19 8.4.4.1.1 / 22.6",
+                                  f"alpha_f1 l2/l1 < 1.0 on some edge (min {context['alpha_f_l2_l1_min']:.2f}; alpha_f min "
+                                  f"{context['alpha_f_min']:.2f}) or a column bears on the slab directly: the beams do not "
+                                  "take the whole panel shear and slab-column two-way shear is not implemented.",
+                                  "slab_two_way_shear_not_implemented"))
     checks.append(make_check("slab_deflection_control", "ACI 318-19 8.3.2.1 via 8.3.1.2 minimum thickness",
                              int(context["thickness_screen_passed"]), 1, "==",
                              details={"basis": "thickness at or above the Table 8.3.1.2 minimum; deflections need not be calculated"}))
@@ -391,22 +425,24 @@ def _completion_checks(inputs, layout, demands, context):
     max_positive = _corner_moment_demand(demands, context)
     for name in ("x_top", "y_top", "x_bottom", "y_bottom"):
         checks.append(_corner_check(layout["layers"][name], max_positive, name))
-    checks.extend(_open_checks())
+    checks.extend(_open_checks(context))
     return checks
 
 
 def _hook_rejected_spacings(bar, inputs, policy, context):
-    """Spacings whose perimeter hook does not fit the perimeter beam (ACI 318-19 25.4.3.1), with the embedment
-    offered: ({spacing: ldh}, embedment). Without floor context nothing is rejected."""
+    """Spacings whose perimeter hook is not developed at the least favourable building corner of either axis (ACI
+    318-19 25.4.3.1 with psi_o by Table 25.4.3.2, and 25.4.3.4), with the embedment offered: ({spacing: ldh},
+    embedment). Without floor context nothing is rejected."""
     if context is None:
         return {}, None
-    from Design.SMRF_Beam_Slab_Strength import hook_development_length_in
+    from Design.SMRF_Beam_Slab_Strength import perimeter_hook
     embedment = context["beam_width_in"] - context["beam_clear_cover_in"] - context["beam_hoop_diameter_in"]
     rejected = {}
     for spacing in policy["spacing_options_in"]:
-        ldh, _factors = hook_development_length_in(bar, context["fc_beam_ksi"], inputs["fy_ksi"], spacing)
-        if ldh > embedment:
-            rejected[spacing] = ldh
+        hooks = [perimeter_hook(bar, spacing, context["fc_beam_ksi"], inputs["fy_ksi"], embedment,
+                                context["perimeter_hook_corners"][axis]) for axis in ("x", "y")]
+        if not all(hook["developed"] for hook in hooks):
+            rejected[spacing] = max(hook["ldh_in"] for hook in hooks)
     return rejected, embedment
 
 
@@ -501,11 +537,60 @@ def explain_unsized_layers(record):
     return explanation
 
 
-def _open_checks():
-    return [not_evaluated("slab_column_local_minimum_steel", "ACI 318-19 8.6.1.2",
-                          "Applicability of the slab-column local minimum steel provision to a beam-supported slab has not been assessed."),
-            not_evaluated("slab_fire_resistance", "ACI 318-19 4.11 / applicable building code",
-                          "Required fire-resistance rating and cover/thickness for it are outside this design scope.")]
+def _beam_supported(context):
+    """The beam-supported premise: beams take the whole panel shear on every edge (318-14 Table 8.10.8.1) and
+    every column stands at a beam intersection, so the slab has no slab-column critical section of its own."""
+    return (context["alpha_f_min"] >= 1.0 and context["alpha_f_l2_l1_min"] >= 1.0
+            and context["columns_at_beam_intersections"])
+
+
+def _unresolved(check_id, clause, reason, code, location=""):
+    """A not_evaluated structural row with its reason code: an unknown, never a non-blocking review."""
+    row = not_evaluated(check_id, clause, reason, location)
+    row["details"]["reason_code"] = code
+    return row
+
+
+def _local_steel_check(context):
+    """ACI 318-19 8.6.1.2, the slab-column local minimum steel, resolved on its own (2026-11-01).
+
+    The provision applies at a two-way critical section around a column whose shear stress exceeds its
+    threshold. On a beam-supported floor (_beam_supported) the slab has no such section, which is an engineering
+    assessment asserted in SlabActionAssertions.slab_column_local_steel_assessed; the two-way shear assessment
+    does not settle it. Without the premise the provision may apply and is not computed here.
+    """
+    clause = "ACI 318-19 8.6.1.2 (two-way critical sections, 22.6.4)"
+    if context is None:
+        return _unresolved("slab_column_local_minimum_steel", clause,
+                           "No floor context: the beam-supported premise cannot be established.",
+                           "slab_column_local_steel_assessment_required")
+    if not _beam_supported(context):
+        return _unresolved("slab_column_local_minimum_steel", clause,
+                           f"alpha_f1 l2/l1 < 1.0 on some edge (min {context['alpha_f_l2_l1_min']:.2f}; alpha_f min "
+                           f"{context['alpha_f_min']:.2f}) or a column bears on the slab directly: a slab-column critical "
+                           "section exists and its local minimum steel is not computed.",
+                           "slab_column_local_steel_not_implemented")
+    if context["slab_column_local_steel_assessed"]:
+        return make_check("slab_column_local_minimum_steel", clause, 1.0, context["alpha_f_l2_l1_min"], "<=",
+                          "alpha_f1 l2/l1",
+                          details={"columns_at_beam_intersections": True, "alpha_f_min": context["alpha_f_min"],
+                                   "alpha_f_l2_l1_min": context["alpha_f_l2_l1_min"],
+                                   "basis": "assessed not applicable: the slab bears on beams on every edge and every "
+                                            "column is at a beam intersection, so no slab-column two-way critical "
+                                            "section exists at which 8.6.1.2 would require local steel (asserted in "
+                                            "SlabActionAssertions.slab_column_local_steel_assessed)"})
+    return _unresolved("slab_column_local_minimum_steel", clause,
+                       "The floor meets the beam-supported premise; whether 8.6.1.2 applies to it is an engineering "
+                       "assessment to assert in Design.Config.SlabActionAssertions.slab_column_local_steel_assessed; "
+                       "until then the local-steel item is unresolved.",
+                       "slab_column_local_steel_assessment_required")
+
+
+def _open_checks(context=None):
+    return [_local_steel_check(context),
+            scope_exclusion("slab_fire_resistance", "ACI 318-19 4.11 / applicable building code",
+                            "Fire-resistance design is excluded from the declared research scope (user decision "
+                            "2026-11-01): not checked, not passed.", "fire_resistance")]
 
 
 def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context=None):
@@ -563,8 +648,9 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
                             "context": resolved_context}
         demands = _demands(saved_evidence, inputs)
     except (ValueError, TypeError, OverflowError) as exc:
+        # The local-steel gate on the saved floor context when there is one (none when the context itself failed).
         checks = [not_evaluated("slab_verified_strip_action_inputs", "ACI 318-19 8.4 / Chapter 6",
-                                str(exc)), *_open_checks()]
+                                str(exc)), *_open_checks((record.get("inputs") or {}).get("context"))]
         return {**record, "checks": checks, "summary": summarize_checks(checks)}
     candidates = []
     envelopes = _envelopes(demands)
@@ -587,10 +673,16 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
         hook_rejected, embedment = _hook_rejected_spacings(bar, inputs, resolved_policy, resolved_context)
         if resolved_context is not None:
             if len(hook_rejected) == len(resolved_policy["spacing_options_in"]):
+                from Design.SMRF_Beam_Slab_Strength import hook_location_factor
                 ldh = min(hook_rejected.values())
+                ties = any(hook_location_factor(bar, resolved_context["perimeter_hook_corners"][axis])
+                           ["confinement_required_25_4_3_4"] for axis in ("x", "y"))
                 record["trial_history"].append({"bar_size": bar, "passed": False,
-                                                "reason": f"Hook development {ldh:.2f} in exceeds the {embedment:.2f} in "
-                                                          "the perimeter beam offers (25.4.3.1) at every spacing offered."})
+                                                "reason": (f"Hook development {ldh:.2f} in exceeds the {embedment:.2f} in "
+                                                           "the perimeter beam offers (25.4.3.1) at every spacing offered."
+                                                           if not ties else
+                                                           "The corner hook needs ties enclosing it (25.4.3.4: side and "
+                                                           "in-plane covers below 2.5 in), which the slab mats do not have.")})
                 continue
         layers = {}
         for axis in ("x", "y"):
@@ -620,7 +712,7 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
     if not candidates:
         checks = [make_check("slab_strip_reinforcement_ladder", "ACI 318-19 Chapters 8, 20, 21, 22, 25",
                              1, 0, details={"reason": "No allowed four-layer layout passes; increase slab thickness or revisit demands/policy."}),
-                  *_open_checks()]
+                  *_open_checks(resolved_context)]
     else:
         _, _, selected = min(candidates, key=lambda item: (item[0], item[1]))
         record["layout"] = selected
@@ -650,3 +742,107 @@ def evaluate_slab_reinforcement(record):
     match = record == expected
     return [make_check("slab_strip_saved_evidence", "Deterministic slab strip strength evidence audit", int(match), 1, "=="),
             *expected["checks"]]
+
+
+def _status_of(rows):
+    """pass / fail / unknown of the rows for one check (unknown when there is none, or more than one)."""
+    if len(rows) != 1:
+        return "unknown"
+    return {"pass": "pass", "fail": "fail"}.get(rows[0].get("status"), "unknown")
+
+
+def slab_strength_eligibility(record, current_context=None):
+    """What a slab reinforcement record establishes for the beam-plus-slab strength credit (2026-10-30).
+
+    A selected layout, or a layout that stayed the same on re-pricing, is not by itself proof that the slab
+    design passed: ``design_slab_reinforcement`` keeps the selected layout when a completion check fails. The
+    slab mats are credited in a beam's strength (as developed) only where the record's own
+    ``slab_bar_development`` check passes on the current floor context; a failed or unknown development check
+    leaves the credit not established, never zero. The exterior ends whose perimeter hook does not fit keep
+    their own, separate treatment (no slab bars, flange concrete in sagging: Model.Member_Properties
+    .beam_strengths), which needs no development and is not decided here.
+
+    ``current_context`` is the completion context rebuilt on the final design
+    (Design.Grouped_Design.slab_completion_context); when given and different from the record's, the record
+    is stale for this design and nothing is established. Returns a JSON-safe dict with ``layout_selected``,
+    ``slab_checks_complete`` (no computed check left unevaluated), ``slab_checks_passed``, the development
+    and perimeter-anchorage statuses, ``credit`` ("developed" or "not_established"), ``reason_code`` and
+    ``reason``, the failed, unknown and review-dependent checks, and a ``signature`` of everything read.
+    """
+    result = {"version": ELIGIBILITY_VERSION, "record_present": isinstance(record, dict), "layout_selected": False,
+              "slab_checks_complete": False, "slab_checks_passed": False, "interior_development": "unknown",
+              "perimeter_anchorage": {"x": "unknown", "y": "unknown"}, "context_current": None,
+              "credit": "not_established", "reason_code": "no_slab_action_evidence",
+              "reason": "no slab action evidence was computed (no floor transfer to the frame, or no strip demands)",
+              "failed_checks": [], "unknown_checks": [], "review_dependencies": [], "scope_exclusions": [],
+              "signature": None}
+    # No record, and a record written without any demand evidence (the placeholder a record keeps when the floor
+    # transfer is disabled), are the same state and say the same thing.
+    if not isinstance(record, dict) or (record.get("layout") is None and isinstance(record.get("inputs"), dict)
+                                        and record["inputs"].get("demand_evidence") is None):
+        return result
+    checks = [c for c in (record.get("checks") or []) if isinstance(c, dict)]
+    layout = record.get("layout")
+
+    def label(check):
+        return {"id": check.get("id"), "location": check.get("location", ""),
+                "reason": (check.get("details") or {}).get("reason")}
+    review = [label(c) | {"item": (c.get("details") or {})["review_dependency"].get("item")} for c in checks
+              if c.get("status") == "not_evaluated" and isinstance((c.get("details") or {}).get("review_dependency"), dict)]
+    # A declared scope exclusion (SMRF_Common.SCOPE_EXCLUDED_ROWS) is not checked and not passed: listed apart.
+    excluded = [label(c) | {"item": (c.get("details") or {})["scope_exclusion"].get("item")} for c in checks
+                if c.get("status") == "not_evaluated" and c.get("id") in SCOPE_EXCLUDED_ROWS
+                and isinstance((c.get("details") or {}).get("scope_exclusion"), dict)
+                and (c.get("details") or {})["scope_exclusion"].get("item") == SCOPE_EXCLUDED_ROWS[c.get("id")]]
+    unknown = [label(c) for c in checks if c.get("status") == "not_evaluated"
+               and not isinstance((c.get("details") or {}).get("review_dependency"), dict)
+               and label(c)["id"] not in {e["id"] for e in excluded}]
+    failed = [label(c) for c in checks if c.get("status") == "fail"]
+    complete = layout is not None and bool(checks) and not unknown
+    result.update(layout_selected=layout is not None, slab_checks_complete=complete,
+                  slab_checks_passed=complete and not failed, failed_checks=failed, unknown_checks=unknown,
+                  review_dependencies=review, scope_exclusions=excluded)
+    if layout is None:
+        by_id = {c.get("id"): c for c in checks}
+        if "slab_verified_strip_action_inputs" in by_id:
+            reason = (by_id["slab_verified_strip_action_inputs"].get("details") or {}).get("reason") or ""
+            code = ("slab_action_refinement_incomplete" if "refinement" in reason
+                    else "slab_action_review_missing" if ("verification is incomplete" in reason or "assertion" in reason)
+                    else "slab_action_evidence_not_accepted")
+            result.update(reason_code=code, reason=f"no slab layout: the strip action evidence was not accepted ({reason})")
+        elif "slab_strip_reinforcement_ladder" in by_id:
+            result.update(reason_code="no_admissible_slab_layout",
+                          reason="no slab layout: no allowed four-layer layout passes the strip checks")
+        else:
+            result.update(reason_code="no_slab_layout", reason="no slab layout is selected")
+        return result
+    saved_context = (record.get("inputs") or {}).get("context")
+    if current_context is not None:
+        try:
+            current = _context(current_context)
+        except (ValueError, TypeError):
+            current = None
+        result["context_current"] = current is not None and current == saved_context
+        if not result["context_current"]:
+            result.update(reason_code="slab_evidence_stale",
+                          reason="the slab completion checks were made on another floor context than the final design's "
+                                 "(cages, hoops, cover or column cores changed after the slab was priced)")
+            return result
+    development = _status_of([c for c in checks if c.get("id") == "slab_bar_development"])
+    anchorage = {axis: _status_of([c for c in checks if c.get("id") == "slab_perimeter_bar_anchorage"
+                                   and c.get("location") == axis]) for axis in ("x", "y")}
+    result.update(interior_development=development, perimeter_anchorage=anchorage)
+    if development == "pass":
+        result.update(credit="developed", reason_code="developed",
+                      reason="slab_bar_development passes on this floor context: the mats are developed by continuity")
+    elif development == "fail":
+        result.update(reason_code="slab_bar_development_failed",
+                      reason="slab_bar_development fails: the mats are not shown developed within half the shortest clear "
+                             "span, so their strength is not established (it is not zero)")
+    else:
+        result.update(reason_code="slab_bar_development_unknown",
+                      reason="slab_bar_development was not evaluated (no floor context) or is not unique")
+    payload = {"layout": layout, "slab": (record.get("inputs") or {}).get("slab"), "context": saved_context,
+               "development": development, "anchorage": anchorage, "method_version": record.get("method_version")}
+    result["signature"] = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return result

@@ -24,6 +24,33 @@ def rows(path):
 
 BEAM_TYPES = {'beam', 'beam_x', 'beam_y'}
 
+# The hinge_backbone.csv generations this plotter reads (its hinge_backbone_version column; the v1 table has none),
+# each with the moment/rotation export written beside it, what its damage_ratio means, and the figure note. v2 (frozen
+# IMK V2 calibration, 2026-10-29; Ground_Motion_Main.HINGE_BACKBONE_VERSION) is accepted deliberately: damage_ratio :=
+# the native capping ratio of the governing axis and sign. It is NOT interchangeable with the v1 basis, even under the
+# legacy replay: v1 took max |rotation| over both axes less the larger of the two axes' branch-minimum yields, so near
+# yield the two can differ and select a different peak hinge. A run mixing generations is refused.
+DAMAGE_BASIS = {
+    None: ('hinge_moment_rotation_v1',
+           'max(0, rot_abs_max - theta_y_spring) / theta_p, rot_abs_max over both axes and theta_y_spring the larger '
+           'axis branch-minimum My/Kh; hinge-end proxy shared across its axes',
+           'Damage is a rotation-demand proxy, not fatigue damage.'),
+    'hinge_backbone_v2_native_spring_demand': (
+        'hinge_moment_rotation_v2',
+        'capping_ratio of the governing branch of the hinge end: max(0, peak native spring rotation - native My/Kh) / '
+        'native dp, each axis and sign against its own installed spring; 1 = native capping point My/Kh + dp',
+        'Damage = native capping ratio (1 at My/Kh + dp), a rotation-demand proxy, not fatigue damage.'),
+}
+
+
+def damage_generation(backbone):
+    """(hinge_backbone_version, expected export schema, damage basis, figure note) of one run's hinge_backbone.csv."""
+    versions = {r.get('hinge_backbone_version') or None for r in backbone}
+    if len(versions) != 1 or next(iter(versions)) not in DAMAGE_BASIS:
+        raise ValueError(f'Unsupported or mixed hinge_backbone generations: {sorted(map(str, versions))}')
+    version = next(iter(versions))
+    return (version, *DAMAGE_BASIS[version])
+
 
 def peak_row(backbone, member_scope='beam'):
     if member_scope not in ('beam', 'all'):
@@ -134,10 +161,14 @@ def render_manifest(manifest_path, output, policy=None, context=None, member_sco
     if not math.isclose(float(structure_peak['damage_ratio']), assessment['metrics']['peak_hinge_damage_ratio'], rel_tol=1e-12, abs_tol=1e-14):
         raise ValueError('Peak hinge does not reproduce the calibration damage metric')
     chosen, ties = peak_row(backbone, member_scope=member_scope)
+    backbone_version, export_version, damage_basis, damage_note = damage_generation(backbone)
     schema = runner.read_json(ntha/'hinge_moment_rotation_schema.json')
-    if (schema.get('schema_version') != 'hinge_moment_rotation_v1' or schema.get('available') is not True
+    if (schema.get('schema_version') != export_version or schema.get('available') is not True
             or schema['status'].get('failed') is not False or schema['status'].get('truncated') is not False):
-        raise ValueError('Moment/rotation export is not a complete supported history')
+        raise ValueError('Moment/rotation export is not a complete supported history of the same generation as hinge_backbone.csv')
+    if backbone_version is not None and not math.isclose(float(chosen['capping_ratio']), float(chosen['damage_ratio']),
+                                                         rel_tol=1e-12, abs_tol=1e-14):
+        raise ValueError('Saved damage ratio is not the native capping ratio it is defined as')
     with np.load(ntha/'hinge_moment_rotation.npz', allow_pickle=False) as archive:
         arrays = {key: archive[key] for key in archive.files}
     selected = select_histories(arrays, rows(ntha/'hinge_springs.csv'), chosen)
@@ -163,7 +194,8 @@ def render_manifest(manifest_path, output, policy=None, context=None, member_sco
     if 'element' in where and where['element'].get('element_type') != chosen.get('member_type'):
         raise ValueError('Backbone and element member types disagree')
     context = dict(context or {})
-    identity = {'schema_version': 'peak_hinge_plot_v2', 'case_id': manifest.get('case_id'),
+    # v3 (2026-10-29): the damage basis follows the export schema (DAMAGE_BASIS) and the report states it.
+    identity = {'schema_version': 'peak_hinge_plot_v3', 'case_id': manifest.get('case_id'),
                 'selection_scope': member_scope,
                 'context': context, 'input_sha256': hashes, 'plotter_sha256': runner.digest(__file__)}
     report_path = output/'peak_hinge.json'
@@ -218,7 +250,7 @@ def render_manifest(manifest_path, output, policy=None, context=None, member_sco
     fig.suptitle(f"{manifest.get('case_id', 'Saved run')} | {title} {chosen['hinge_ele_tag']}\n"
                  f"{where['member_type']} {where['physical_member_tag']}, end {where['end']} | {loc}\n"
                  f"Damage proxy = {float(chosen['damage_ratio']):.4g} | {trial_label}", fontsize=12)
-    fig.text(.5, .012, 'Scheduled committed snapshots; absolute spring response includes gravity. Damage is a rotation-demand proxy, not fatigue damage.', ha='center', fontsize=8)
+    fig.text(.5, .012, f'Scheduled committed snapshots; absolute spring response includes gravity. {damage_note}', ha='center', fontsize=8)
     fig.tight_layout(rect=(0, .035, 1, .96), h_pad=2.0)
     png = output/'peak_hinge_history.png'
     fig.savefig(png, dpi=160, facecolor='white'); plt.close(fig)
@@ -231,7 +263,9 @@ def render_manifest(manifest_path, output, policy=None, context=None, member_sco
               'selection_rule': f'maximum recorded damage ratio among {"beam hinge ends only" if member_scope == "beam" else "all hinge ends"}; exact ties use smallest hinge tag',
               'structure_peak_hinge_element_tag': int(structure_peak['hinge_ele_tag']),
               'structure_peak_hinge_damage_ratio': float(structure_peak['damage_ratio']),
-              'damage_basis': 'max(0, rot_abs_max - theta_y_spring) / theta_p; hinge-end proxy shared across its axes',
+              'damage_basis': damage_basis, 'hinge_backbone_version': backbone_version,
+              'moment_rotation_schema_version': schema['schema_version'],
+              'member_spring_calibration': chosen.get('member_spring_calibration') or (schema.get('identity') or {}).get('member_spring_calibration'),
               'history_basis': 'absolute, gravity included, scheduled committed snapshots; no sign reversal or interpolation',
               'samples': len(t), 'backbone_row': chosen, 'spring_rows': {a: v['spring'] for a, v in selected.items()},
               'score': assessment['score'], 'analysis_profile': manifest.get('analysis_profile'),

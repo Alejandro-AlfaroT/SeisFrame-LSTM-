@@ -31,8 +31,10 @@ beam-plus-slab versus beam-only sections, not As*fy times a guessed arm.
 Positive/negative here denote sagging/hogging beam flexure, not sway.
 
 All joints include the actual beams and columns, including the SINGLE roof
-column. No roof exemption, development, column capacity shear, probable joint
-shear, beam capacity shear or complete model qualification is inferred.
+column. The 18.7.3.1 exception is decided per connection by SMRF_Joints.scwb_check
+on the connection evidence built here, never assumed; no development, column
+capacity shear, probable joint shear, beam capacity shear or complete model
+qualification is inferred.
 
 Primary basis: ACI 318-19 18.7.3.2, 18.8.2.3, 22.2.1--22.2.3:
 https://www.ocf.berkeley.edu/~chiep/wp-content/uploads/2024/01/CE-123-ACI-318-19.pdf
@@ -430,7 +432,12 @@ def build_joint_evidence(record, combination_actions, *, expected_combination_id
                     if isinstance(supplied, Mapping) and supplied.get("section_compatibility_verified") is True:
                         cap.update({key: supplied.get(key) for key in ("slab_basis", "slab_mn_kip_in")})
                     else:
-                        cap["slab_reason"] = "Developed beam-plus-slab section compatibility evidence is missing."
+                        cap["slab_reason"] = ("Developed beam-plus-slab section compatibility evidence is missing"
+                                              + (f": {supplied.get('reason')}" if isinstance(supplied, Mapping)
+                                                 and supplied.get("reason") else "."))
+                        cap["slab_reason_code"] = ((supplied.get("reason_code") if isinstance(supplied, Mapping) else None)
+                                                   or ("slab_strength_entry_missing" if supplied is None
+                                                       else "slab_strength_not_established"))
                     state["beam_capacities"].append(cap)
                 states[sign] = state
             entry["directions"][axis] = states

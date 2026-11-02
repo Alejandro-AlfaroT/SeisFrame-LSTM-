@@ -148,6 +148,17 @@ class SystemRules(unittest.TestCase):
             self.assertIn("gravity.column_hoop_spacing_full_length", ids)
             self.assertIn("gravity.beam_transverse_spacing", ids)
             self.assertIn("gravity.column_capacity_shear", ids)
+            # the gravity column capacity shear: one direction's Ve against that direction's hoop phi Vn (22.5.1.1)
+            column = gravity["groups"]["s01_04__column__interior"]
+            strengths, record = column["strengths"], capacity["columns"]["s01_04__column__interior"]
+            axis = strengths["capacity_shear_axis"]
+            self.assertIn(axis, ("x", "y"))
+            self.assertEqual(strengths["ve_kip"], record["worst_by_direction"][axis]["ve_kip"])
+            self.assertEqual(strengths["phi_vn_capacity_kip"], record["hoops"]["by_direction"][axis]["phi_vn_kip"])
+            row = next(c for c in column["checks"] if c["id"] == "gravity.column_capacity_shear")
+            self.assertEqual((row["demand"], row["capacity"], row["details"]["axis"]),
+                             (strengths["ve_kip"], strengths["phi_vn_capacity_kip"], axis))
+            self.assertEqual(row["status"], "pass")
             self.assertEqual(set(systems.gravity_induced_from_capacity(capacity)), GRAVITY_GROUPS)
             stage = systems.compatibility_stage(compatibility, systems.gravity_induced_from_capacity(capacity))
             self.assertEqual(set(stage["groups"]), GRAVITY_GROUPS)

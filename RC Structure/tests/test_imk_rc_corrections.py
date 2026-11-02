@@ -4,13 +4,15 @@ from unittest import mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import Structure_Parameters as sp
 from Model import IMK_Hinges as h, IMK_Calibration as c
+from Model.IMK_Spring_Mapping import LEGACY_REPLAY
 import openseespy.opensees as ops
 
 class RCCorrections(unittest.TestCase):
     def tearDown(self): ops.wipe()
 
     def test_peak_signature_and_negative_backbone(self):
-        with mock.patch.object(sp,'IMK_MATERIAL_TYPE','IMKPeakOriented'), mock.patch.object(ops,'uniaxialMaterial') as fn:
+        # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29)
+        with mock.patch.object(sp,'IMK_MEMBER_SPRING_CALIBRATION',LEGACY_REPLAY), mock.patch.object(sp,'IMK_MATERIAL_TYPE','IMKPeakOriented'), mock.patch.object(ops,'uniaxialMaterial') as fn:
             h._define_imk_peak_material(1,1e6,100,{'theta_p':.02,'theta_pc':.06,'theta_u':.12,'theta_p_neg':.03,'lambda_opensees_rad':.5},80)
         a=fn.call_args.args
         self.assertEqual(len(a),25)
@@ -21,7 +23,8 @@ class RCCorrections(unittest.TestCase):
 
     def test_energy_conversion_and_numerical_stiffness_independence(self):
         with contextlib.ExitStack() as st:
-            for k,v in {'IMK_DETERIORATION_MODE':'haselton_2008','H_BEAM':18.,'BEAM_STIRRUP_SPACING':3.,'IMK_BEAM_THETA_Y':.005}.items():st.enter_context(mock.patch.object(sp,k,v))
+            # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29)
+            for k,v in {'IMK_MEMBER_SPRING_CALIBRATION':LEGACY_REPLAY,'IMK_DETERIORATION_MODE':'haselton_2008','H_BEAM':18.,'BEAM_STIRRUP_SPACING':3.,'IMK_BEAM_THETA_Y':.005}.items():st.enter_context(mock.patch.object(sp,k,v))
             a=c.deterioration_for_member('beam_x',0)
             d=18.-sp.longitudinal_cover_in('beam')      # Eq. 3.20 uses s/d, d = h - d' (2026-10-23; s/h before)
             self.assertAlmostEqual(a['lambda_opensees_rad'],170.7*.10**(3./d)*.005)
@@ -54,7 +57,8 @@ class RCCorrections(unittest.TestCase):
     def test_cyclic_strength_loss_is_active_and_legacy_available(self):
         for kind in ['IMKBilin','IMKPeakOriented']:
             ops.wipe()
-            with mock.patch.object(sp,'IMK_MATERIAL_TYPE',kind):
+            # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29)
+            with mock.patch.object(sp,'IMK_MEMBER_SPRING_CALIBRATION',LEGACY_REPLAY), mock.patch.object(sp,'IMK_MATERIAL_TYPE',kind):
                 h._define_imk_peak_material(1,1e6,100,{'theta_p':.08,'theta_pc':.1,'theta_u':.2,'lambda_opensees_rad':.5})
             ops.testUniaxialMaterial(1);old=0.;peaks=[]
             for _ in range(6):

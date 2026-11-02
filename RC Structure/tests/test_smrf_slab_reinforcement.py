@@ -6,6 +6,10 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from Design.SMRF_Beam_Slab_Strength import HOOK_CORNER_CONVENTION
+# Building-corner hooks that keep psi_o = 1.0 and need no 25.4.3.4 ties (covers of 7 in, inside the column core).
+CORNERS = {axis: {"side_cover_in": 7.0, "in_plane_cover_in": 7.0, "in_column_core": True,
+                  "convention": HOOK_CORNER_CONVENTION} for axis in ("x", "y")}
 from Design.SMRF_Slab_Reinforcement import (
     design_slab_reinforcement, evaluate_slab_reinforcement,
     one_way_shear_strength, rectangular_strip_strength, slab_input_signature,
@@ -97,8 +101,10 @@ class SlabReinforcementTests(unittest.TestCase):
         context = {"clear_span_x_in": 102.0, "clear_span_y_in": 102.0, "beam_width_in": 10.0,
                    "alpha_f_min": 5.6, "alpha_f_l2_l1_min": 5.6, "thickness_screen_passed": True,
                    "column_core_width_in": 13.0,
-                   "two_way_shear_path_assessed": True, "columns_at_beam_intersections": True,
-                   "beam_clear_cover_in": 1.5, "beam_hoop_diameter_in": 0.5, "fc_beam_ksi": 4.0}
+                   "two_way_shear_path_assessed": True, "slab_column_local_steel_assessed": False,
+                   "columns_at_beam_intersections": True,
+                   "beam_clear_cover_in": 1.5, "beam_hoop_diameter_in": 0.5, "fc_beam_ksi": 4.0,
+                   "perimeter_hook_corners": CORNERS}
         result = design_slab_reinforcement(inputs(), evidence(), context=context)
         self.assertTrue(result["screen_passed"])
         ids = {c["id"]: c for c in result["checks"] if c["location"] in ("", "x_top", "x")}

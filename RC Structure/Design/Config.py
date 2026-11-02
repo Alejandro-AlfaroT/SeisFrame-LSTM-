@@ -16,8 +16,9 @@ Usage
 """
 from __future__ import annotations
 
+import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import List, Optional, Tuple, Union
 
 import Structure_Parameters as sp
@@ -77,6 +78,9 @@ class RebarConfig:
         constructability and to hold down the joint shear the beam bars
         deliver (18.8.4.1). The code checks keep the code limit; a beam that
         needs more steel takes a larger section or a higher grade instead.
+        A run may raise it up to BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX (0.0175,
+        user authorization 2026-10-31) through with_beam_practical_ratio,
+        never above; the default stays 0.015.
 
     cover_in
         Distance from concrete face to longitudinal bar centroid (in),
@@ -327,6 +331,9 @@ class SlabActionAssertions:
     strengths are not established, and the joint SCWB checks stay
     not_evaluated. These fields are part of the design request identity, so
     a design made under an assertion records who made it and on what basis.
+    The two-way shear path and slab-column local steel flags are not part of
+    ``all_asserted``: each settles only its own completion row, on its own,
+    and an unsettled row keeps the design from qualifying (2026-11-01).
     """
     analysis_applicability_verified: bool = False
     all_floors_enveloped: bool = False
@@ -336,6 +343,8 @@ class SlabActionAssertions:
     zero_membrane_force_verified: bool = False
     verified: bool = False
     two_way_shear_path_assessed: bool = False
+    # ACI 318-19 8.6.1.2 assessed not applicable to the beam-supported floor (SMRF_Slab_Reinforcement._local_steel_check).
+    slab_column_local_steel_assessed: bool = False
     asserted_by: str = ""
     assertion_date: str = ""
     assertion_basis: str = ""
@@ -403,8 +412,8 @@ class IndependentVerification:
     floor_hand_check_verified: bool = False          # floor.independent_hand_verification
     strength_model_verified: bool = False            # qualification.strength_model_verification
     detailing_model_consistency_verified: bool = False   # qualification.detailing_model_consistency
-    slab_column_local_steel_assessed: bool = False   # slab_column_local_minimum_steel (8.6.1.2)
-    fire_resistance_scope_accepted: bool = False     # slab_fire_resistance
+    # slab_column_local_minimum_steel is SlabActionAssertions.slab_column_local_steel_assessed; slab_fire_resistance is
+    # a declared scope exclusion (SMRF_Common.SCOPE_EXCLUSIONS), never asserted (2026-11-01).
     congestion_and_placement_accepted: bool = False  # detailing.congestion_and_placement
     floor_frame_compatibility_reviewed: bool = False   # floor.compatibility_idealization_reviewed
     # demands.torsional_irregularity, strength-distribution branch (review item
@@ -488,6 +497,24 @@ class FloorAnalysisConfig:
     # slab actions cannot select reinforcement without a plan. This does not
     # change frame-transfer stiffness/kinematics.
     slab_refinement: Optional[dict] = None
+    # The floor section sets (Design/SMRF_Floor_Sections signatures) the slab
+    # action assertions were reviewed for (Design/Design_Evidence_Profile,
+    # 2026-11-01). None keeps the earlier rule (no floor restriction); with a
+    # tuple, a candidate whose distinct floors are not all in it is evaluated
+    # unasserted (Grouped_Design.slab_assertion_scope), never on another
+    # floor's review. In the request identity like the plan.
+    slab_assertion_floor_sections: Optional[tuple] = None
+    # The slab thickness the assertions were reviewed at (same profile); a
+    # candidate whose slab in force has another thickness is evaluated
+    # unasserted. None keeps the earlier rule.
+    slab_assertion_thickness_in: Optional[float] = None
+    # The procedure-based slab evidence path (Design/SMRF_Slab_Procedure, a
+    # schema v2 design-evidence profile, 2026-11-01): {"status", "identity",
+    # "procedure"}. Every candidate floor is checked against its domain and
+    # protocol and its flags are masked unless it passes under an active
+    # procedure; it replaces the two fields above. None: no procedure. In the
+    # request identity like the plan.
+    slab_procedure: Optional[dict] = None
 
 
 # The one PROBE refinement plan both probe factories (Design/Verify_Designs
@@ -633,3 +660,21 @@ class DesignConfig:
                 dcr_band_hi=sp.DESIGN_DCR_MAX,
             ),
         )
+
+
+# The largest practical beam face ratio a run may configure (user authorization 2026-10-31): a run sets
+# RebarConfig.rho_beam_practical_max up to this value through with_beam_practical_ratio, never above it; the
+# 18.6.3.1 code limit (Structure_Parameters.beam_rho_max_code) still governs wherever it is lower.
+BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX = 0.0175
+
+
+def with_beam_practical_ratio(cfg, value):
+    """A copy of ``cfg`` whose practical beam face ratio ceiling (RebarConfig.rho_beam_practical_max) is ``value``:
+    a finite number above zero and at most BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX, a ValueError otherwise. A smaller,
+    stricter value is kept as given; ``cfg`` itself is not changed."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"the practical beam steel ratio ceiling must be a positive number, not {value!r}")
+    if value > BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX:
+        raise ValueError(f"the practical beam steel ratio ceiling {value:g} is above the authorized "
+                         f"{BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX:g}")
+    return replace(cfg, rebar=replace(cfg.rebar, rho_beam_practical_max=float(value)))

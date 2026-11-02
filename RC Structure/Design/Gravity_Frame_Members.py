@@ -244,7 +244,8 @@ def evaluate_gravity_column(location, induced, strengths, section, detailing):
 
     ``induced``: {"mu_kip_in", "vu_kip", "calculated"} or the ratio form {"moment_ratio", "shear_ratio"};
     ``strengths``: {"phi_mn_kip_in", "phi_vn_kip", optional
-    "ve_kip", "phi_vn_capacity_kip"}; ``section``: {"ag_in2", "ast_in2", "fc_ksi", "fy_ksi", "pu_kip"};
+    "ve_kip", "phi_vn_capacity_kip" (one direction's Ve and that direction's phi Vn, 22.5.1.1),
+    "capacity_shear_axis", "capacity_shear_by_direction"}; ``section``: {"ag_in2", "ast_in2", "fc_ksi", "fy_ksi", "pu_kip"};
     ``detailing``: {"hoop_spacing_in", "smallest_bar_db_in", "ash_ratio_provided" (Ash / (s bc) over l0),
     "ash_ratio_table_18_7_5_4", "configuration_18_7_5_2_ok": bool}.
     """
@@ -280,5 +281,10 @@ def evaluate_gravity_column(location, induced, strengths, section, detailing):
         checks.append(not_evaluated("gravity.column_capacity_shear", "ACI 318-19 18.7.6 (18.14.3.2(b))",
                                     "the probable-moment shear of the gravity column was not supplied", location))
     else:
-        checks.append(make_check("gravity.column_capacity_shear", "ACI 318-19 18.7.6 (18.14.3.2(b))", ve, phi_vn, "<=", "kip", location))
+        axis = strengths.get("capacity_shear_axis")
+        details = ({"axis": axis, "by_direction": strengths.get("capacity_shear_by_direction"),
+                    "basis": "each direction's Ve against that direction's phi Vn (22.5.1.1 with 18.7.6.1.1); the direction "
+                             "with the larger ratio"} if axis is not None else None)
+        checks.append(make_check("gravity.column_capacity_shear", "ACI 318-19 18.7.6 (18.14.3.2(b))", ve, phi_vn, "<=", "kip", location,
+                                 details=details))
     return checks

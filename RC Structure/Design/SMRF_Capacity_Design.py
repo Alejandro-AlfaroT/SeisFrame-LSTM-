@@ -69,7 +69,7 @@ from Design.SMRF_Beam_Slab_Strength import composite_beam_strengths
 from Design.SMRF_Common import SectionAxialDomainError, make_check, not_evaluated
 from Design.SMRF_Joints import (MPR_BASIS, beam_capacity_shear_envelope, rectangular_joint_area)
 
-METHOD_VERSION = "aci318_19_capacity_design_v2_table_18_8_4_3_inputs"
+METHOD_VERSION = "aci318_19_capacity_design_v3_splice_location"
 _BAR = {3: (0.375, 0.11), 4: (0.5, 0.20), 5: (0.625, 0.31), 6: (0.75, 0.44), 7: (0.875, 0.60),
         8: (1.0, 0.79), 9: (1.128, 1.00), 10: (1.27, 1.27), 11: (1.41, 1.56), 14: (1.693, 2.25), 18: (2.257, 4.00)}
 PHI_SHEAR = 0.75
@@ -148,6 +148,163 @@ LOCAL_FORCE_CONVENTION = {
              "compression positive (self-weight below the face removed)",
     "validated_by": "tests/test_smrf_column_shear_alternative.py: a cantilever column under a global X or Y tip force",
 }
+
+# ---- frame-beam axial applicability (ACI 318-19 18.6.4.7; code-check audit 2026-10-30) ---------------------------
+# The frame model ties every floor's nodes to a rigid diaphragm (Model.Build_Model.create_rigid_diaphragms, used by
+# Design.SMRF_Elastic): a beam's axial deformation in the floor plane is constrained, so the axial forces the model
+# returns for the beams exclude diaphragm chord, collector and drag forces (ACI 318-19 18.12; ASCE 7-22 12.10).
+BEAM_AXIAL_MODEL_BASIS = ("rigid-diaphragm frame model: in-plane beam axial deformation is constrained, so these forces "
+                          "exclude diaphragm chord, collector and drag forces (ACI 318-19 18.12, ASCE 7-22 12.10), which "
+                          "are outside the candidate code-check scope and stay a separate requirement")
+BEAM_AXIAL_CLAUSE = ("ACI 318-19 18.6.4.7: a beam with factored axial compression above Ag f'c / 10 needs hoops per "
+                     "18.7.5.2-18.7.5.4 over the 18.6.4.1 lengths (and a combined axial-flexural strength)")
+
+
+def beam_axial_envelope(cases, member_tags, b_in, h_in, fc_ksi, label, expected_ids=None):
+    """The signed factored axial force of the given beams, at both ends, over every solved case.
+
+    ``cases`` are (source, solved action) pairs; each action's ``members`` carries ``axial_i_kip`` = localForce[0]
+    and ``axial_j_kip`` = -localForce[6], compression positive (LOCAL_FORCE_CONVENTION; Design_Driver
+    ._capture_element_actions, Group_Checks.capture_member_actions). The largest compression and the largest
+    tension are kept with the member, end, case and source that give them, so an axial-governing case that differs
+    from the flexure-governing one is visible. A failed, missing or nonfinite case leaves the envelope unknown
+    (status "unknown" with the problems); it is never read as zero. Ag is b h of the web. ``expected_ids`` are the
+    strength combinations that must all be present, once each: a missing or duplicated one leaves the envelope
+    unknown rather than enveloping the subset.
+    """
+    rows, problems = [], []
+    if expected_ids is not None:
+        strength_ids = [case.get("id") for source, case in cases if source == "strength" and isinstance(case, dict)]
+        missing = [cid for cid in expected_ids if cid not in strength_ids]
+        repeated = sorted({cid for cid in strength_ids if strength_ids.count(cid) > 1})
+        extra = sorted({str(cid) for cid in strength_ids if cid not in expected_ids})
+        if missing or repeated or extra:
+            problems.append(f"the strength combinations are not the expected set: missing {missing[:4]}, repeated "
+                            f"{repeated[:4]}, unexpected {extra[:4]}")
+    for source, case in cases:
+        cid = case.get("id") if isinstance(case, dict) else None
+        if not isinstance(case, dict) or case.get("analysis_succeeded") is not True:
+            problems.append(f"{source} case {cid!r} did not confirm a successful analysis")
+            continue
+        members = case.get("members") if isinstance(case.get("members"), dict) else {}
+        for tag in member_tags:
+            member = members.get(str(tag))
+            for end in ("i", "j"):
+                value = member.get(f"axial_{end}_kip") if isinstance(member, dict) else None
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    problems.append(f"{source} case {cid}: member {tag} has no finite axial_{end}_kip")
+                else:
+                    rows.append((float(value), tag, end, cid, source))
+    ag = b_in * h_in
+    limit = ag * fc_ksi / 10.0
+    result = {"group_id": label, "ag_in2": ag, "fc_ksi": fc_ksi, "limit_kip": limit,
+              "limit_basis": "Ag f'c / 10 with Ag = b h of the beam web (the member's own section; the flange is not counted)",
+              "sign_convention": "compression positive (axial_i_kip = localForce[0], axial_j_kip = -localForce[6])",
+              "model_basis": BEAM_AXIAL_MODEL_BASIS, "cases": len(cases), "observations": len(rows)}
+    if problems or not rows:
+        return {**result, "status": "unknown", "problems": (problems or ["no axial actions were supplied"])[:12]}
+    compression, tension = max(rows, key=lambda r: r[0]), min(rows, key=lambda r: r[0])
+
+    def where(row):
+        return {"axial_kip": row[0], "member_tag": row[1], "end": row[2], "case": row[3], "source": row[4]}
+    return {**result, "status": "evaluated", "pu_max_kip": compression[0], "governing_compression": where(compression),
+            "governing_tension": where(tension), "exceeds_limit": compression[0] > limit}
+
+
+def beam_axial_check(envelope):
+    """ACI 318-19 18.6.4.7 applicability of a frame beam (group) from its axial envelope.
+
+    At or below Ag f'c / 10 the ordinary beam detailing applies (the clause reads "exceeding"). Above it the beam
+    needs the column-type confinement of 18.7.5.2-18.7.5.4 and a combined axial-flexural strength, which this beam
+    formulation does not provide: the check fails with that reason instead of continuing on zero-axial beam
+    strengths. An unknown envelope stays not evaluated. The Vc = 0 rule of 18.6.5.2 is a separate matter.
+    """
+    label = envelope["group_id"]
+    if envelope["status"] != "evaluated":
+        check = not_evaluated("beam.axial_force_applicability", BEAM_AXIAL_CLAUSE,
+                              "the beam axial envelope is unknown: " + "; ".join(envelope.get("problems") or []), label)
+        check["details"].update(reason_code="beam_axial_actions_missing", envelope=envelope)
+        return check
+    branch = ("ordinary frame-beam detailing: Pu does not exceed Ag f'c / 10" if not envelope["exceeds_limit"] else
+              "unsupported: Pu exceeds Ag f'c / 10; column-type confinement (18.7.5.2-18.7.5.4) and combined axial-flexural "
+              "strength are not implemented for beams, so the design is not accepted on this formulation")
+    return make_check("beam.axial_force_applicability", BEAM_AXIAL_CLAUSE, envelope["pu_max_kip"], envelope["limit_kip"],
+                      "<=", "kip", label, details={"branch": branch, "envelope": envelope,
+                                                   "vc_zero_note": "Vc = 0 in the hinge zone is applied whenever 18.6.5.2(a) "
+                                                                   "holds, without crediting 18.6.5.2(b): conservative for "
+                                                                   "shear, and no evidence about confinement applicability"})
+
+
+# ---- splice placement (ACI 318-19 18.2.7.2, 18.6.3.3, 18.7.4.4; code-check audit 2026-10-30) ----------------------
+# Placement screening of a Type 2 mechanical splice: the length the coupler occupies along the bar, declared here for
+# checking that a legal interval can hold it. The actual coupler length, its Type 2 qualification for the bar grade
+# and size (ACI 318-19 25.5.7, 18.2.7.1) and joint congestion are product and detailing reviews.
+MECHANICAL_SPLICE_ENVELOPE_DB = 8.0
+SPLICE_LOCATION_CLAUSE = ("ACI 318-19 18.2.7.2: mechanical splices outside 2 x member depth from the column or beam face "
+                          "and from sections of likely yielding, unless Type 2 splices of Grade 60 reinforcement; "
+                          "18.6.3.3 / 18.7.4.4 for lap splices")
+
+
+def splice_placement(member_kind, clear_length_in, member_depth_in, grade_ksi, splice_type, splice_length_in, bar_db_in,
+                     sfrs=True):
+    """Where one member's longitudinal splice may go and where it is proposed, measured along its clear length.
+
+    ``clear_length_in`` is the face-to-face clear height of a column (from the top of the beam or base below) or the
+    clear span of a beam (from the left face). Lap splices: a column's in the centre half of the clear height
+    (18.7.4.4), a beam's outside 2h of either face (18.6.3.3(b); the ends are where the capacity-design mechanism
+    yields, 18.6.3.3(c)). Type 2 mechanical splices (18.2.7.2): Grade 60 at any location; any other grade outside
+    2 x member depth of either face and of the likely-yield sections. Under the capacity-design mechanism the
+    likely-yield sections of a frame member are its two end faces (the beam hinges; a column's ends, its base
+    included), so the 2 x depth zones at both ends are the exclusions; flexural yielding inside a span is not
+    evaluated here and is recorded as that assumption. A member outside the SFRS (18.14) is not a special moment
+    frame member and 18.2.7.2 does not apply to it; its placement is recorded with that basis. The proposed station
+    is the middle of the clear length with the splice centred on it; the placement is legal when the proposal lies
+    inside the permitted interval (which therefore is not empty).
+    """
+    lap = splice_type.startswith("class_B_lap")
+    coupler = MECHANICAL_SPLICE_ENVELOPE_DB * bar_db_in
+    if lap:
+        excluded = (clear_length_in / 4.0 if member_kind == "column" else 2.0 * member_depth_in)
+        rule = ("18.7.4.4: lap splices only in the centre half of the clear height" if member_kind == "column" else
+                "18.6.3.3(b), (c): no lap splices within 2h of the faces or of likely-yield sections")
+        length = splice_length_in
+    elif not sfrs:
+        excluded, length = 0.0, coupler
+        rule = "member outside the SFRS (18.14): 18.2.7.2 does not apply; Type 2 coupler at mid-length"
+    elif abs(float(grade_ksi) - 60.0) < 1e-9:
+        excluded, length = 0.0, coupler
+        rule = "18.2.7.2: Type 2 mechanical splices of Grade 60 reinforcement at any location"
+    else:
+        excluded, length = 2.0 * member_depth_in, coupler
+        rule = (f"18.2.7.2: a Type 2 mechanical splice of Grade {float(grade_ksi):g} reinforcement is not permitted within "
+                "2 x member depth of the column or beam face or of likely-yield sections")
+    interval = [excluded, clear_length_in - excluded]
+    proposed = [0.5 * (clear_length_in - length), 0.5 * (clear_length_in + length)]
+    legal = proposed[0] >= interval[0] - 1e-9 and proposed[1] <= interval[1] + 1e-9
+    return {"member_kind": member_kind, "splice_type": splice_type, "grade_ksi": float(grade_ksi), "sfrs": bool(sfrs),
+            "clear_length_in": clear_length_in, "member_depth_in": member_depth_in,
+            "excluded_from_each_end_in": excluded, "permitted_interval_in": interval,
+            "splice_length_in": length, "proposed_interval_in": proposed, "legal_placement": bool(legal), "rule": rule,
+            "length_basis": ("Class B lap length 1.3 ld (25.5.2)" if lap else
+                             f"declared coupler envelope {MECHANICAL_SPLICE_ENVELOPE_DB:g} db for placement screening"),
+            "yield_sections_basis": ("the member's two end faces under the capacity-design mechanism (beam hinges at the "
+                                     "faces; column ends, base included); flexural yielding inside the clear length is "
+                                     "not evaluated"),
+            "product_qualification": (None if lap else
+                                      "review dependency: the coupler's Type 2 qualification for this bar grade and size "
+                                      "(ACI 318-19 25.5.7, 18.2.7.1) and its actual length are product evidence, not "
+                                      "established here")}
+
+
+def splice_location_check(location, splice):
+    """The location check of one splice: its proposed interval inside the permitted one."""
+    placement = splice["placement"]
+    return make_check("detailing.splice_location", SPLICE_LOCATION_CLAUSE, int(placement["legal_placement"]), 1, "==",
+                      location=location, details={"placement": placement, "splice_type": splice["splice_type"],
+                                                  "reason": (None if placement["legal_placement"] else
+                                                             "no legal placement: the permitted interval "
+                                                             f"{placement['permitted_interval_in']} in cannot hold the "
+                                                             f"{placement['splice_length_in']:.1f} in splice")})
 
 
 def column_confinement_ratio(b, h, fc, fy, clear_cover):
@@ -1786,14 +1943,22 @@ def design_column_bar_bond(state):
                              "admitted under the 318-19 basis; mechanical splices do not remove the requirement")}
 
 
-def design_splices(state):
+def design_splices(state, beam_hoop_spacing_in=None):
     """Where and how longitudinal bars can be spliced (18.6.3.3, 18.7.4.4, 25.5, 18.2.7).
 
     Beams: Class B lap (1.3 ld) only outside the 2h hinge zones and enclosed
     by hoops at <= min(d/4, 4 in); when the middle of the clear span cannot
-    hold 1.3 ld, Type 2 mechanical splices (18.2.7.1, permitted anywhere)
-    are the design. Columns: Class B lap within the center half of the
-    clear height, enclosed by the end-zone hoops; otherwise mechanical.
+    hold 1.3 ld, Type 2 mechanical splices (18.2.7) are the design. Columns:
+    Class B lap within the center half of the clear height, enclosed by the
+    end-zone hoops; otherwise mechanical. A Type 2 splice may go anywhere only
+    for Grade 60 bars (18.2.7.2); for Grade 80 it must stay 2 x member depth
+    clear of the faces and likely-yield sections, so each member carries its
+    ``placement`` (splice_placement): permitted interval, proposed station and
+    whether the proposal is legal. ``all_designed`` is True only when it is.
+    A beam lap is usable only with hoops over it at <= min(d/4, 4 in)
+    (18.6.3.3): ``beam_hoop_spacing_in`` is the spacing the capacity design
+    selected; a lap that would need closer hoops, or whose hoops are unknown,
+    gives way to a Type 2 splice.
     """
     sections, beam, col, mats, geometry = state["sections"], state["beam"], state["column"], state["materials"], state["geometry"]
     fy = mats["fy_ksi"]
@@ -1804,12 +1969,20 @@ def design_splices(state):
     lap_top = 1.3 * straight_development_length(beam["bar_size"], sections["fc_beam_ksi"], fy, top_bar=h - beam["centroid_offset_in"] > 12.0)
     lap_bot = 1.3 * straight_development_length(beam["bar_size"], sections["fc_beam_ksi"], fy, top_bar=False)
     available = clear - 2.0 * (2.0 * h)
-    beam_lap_fits = max(lap_top, lap_bot) <= available
+    enclosure_limit = min((h - beam["centroid_offset_in"]) / 4.0, 4.0)
+    enclosed = beam_hoop_spacing_in is not None and beam_hoop_spacing_in <= enclosure_limit + 1e-9
+    beam_lap_fits = max(lap_top, lap_bot) <= available and enclosed
+    beam_kind = "class_B_lap_outside_hinge_zones" if beam_lap_fits else "type_2_mechanical_18.2.7"
     result["beam"] = {"class_b_lap_top_in": lap_top, "class_b_lap_bottom_in": lap_bot,
                       "available_between_hinge_zones_in": available, "lap_splice_feasible": beam_lap_fits,
-                      "splice_type": "class_B_lap_outside_hinge_zones" if beam_lap_fits else "type_2_mechanical_18.2.7",
-                      "hoops_over_lap_max_spacing_in": min((h - beam["centroid_offset_in"]) / 4.0, 4.0),
-                      "basis": "18.6.3.3 (no laps within 2h of the face or where yielding is expected); 25.5.2.1 Class B"}
+                      "splice_type": beam_kind,
+                      "hoops_over_lap_max_spacing_in": enclosure_limit,
+                      "lap_enclosure": {"rule": "18.6.3.3: hoops over the lap at <= min(d/4, 4 in)",
+                                        "required_spacing_in": enclosure_limit, "hoop_spacing_in": beam_hoop_spacing_in,
+                                        "satisfied": bool(enclosed)},
+                      "basis": "18.6.3.3 (no laps within 2h of the face or where yielding is expected); 25.5.2.1 Class B",
+                      "placement": splice_placement("beam", clear, h, fy, beam_kind, max(lap_top, lap_bot),
+                                                    _BAR[beam["bar_size"]][0])}
     ln = geometry["story_h_in"] - h
     lap_col = 1.3 * straight_development_length(col["bar_size"], sections["fc_col_ksi"], fy, top_bar=False)
     center_half = ln / 2.0
@@ -1817,13 +1990,16 @@ def design_splices(state):
     # offered since 2026-09-27 by the column cage rule), so those bars take Type 2 mechanical splices.
     lap_permitted = int(col["bar_size"]) <= 11
     col_lap_fits = lap_permitted and lap_col <= center_half
+    col_kind = "class_B_lap_center_half" if col_lap_fits else "type_2_mechanical_18.2.7"
     result["column"] = {"class_b_lap_in": lap_col, "center_half_clear_height_in": center_half,
                         "lap_splice_permitted_25.5.1.1": lap_permitted,
                         "lap_splice_feasible": col_lap_fits,
-                        "splice_type": "class_B_lap_center_half" if col_lap_fits else "type_2_mechanical_18.2.7",
+                        "splice_type": col_kind,
                         "basis": ("18.7.4.4 (laps only in the center half, tension laps, hoops per 18.7.5.2/.3); 25.5.2.1 Class B; "
-                                  "25.5.1.1 (no lap splices above No. 11: Type 2 mechanical, 18.2.7.1)")}
-    result["all_designed"] = True
+                                  "25.5.1.1 (no lap splices above No. 11: Type 2 mechanical, 18.2.7.1)"),
+                        "placement": splice_placement("column", ln, max(sections["b_col_in"], sections["h_col_in"]), fy,
+                                                      col_kind, lap_col, _BAR[col["bar_size"]][0])}
+    result["all_designed"] = all(result[member]["placement"]["legal_placement"] for member in ("beam", "column"))
     return result
 
 
@@ -1888,13 +2064,17 @@ def build_capacity_design(state):
     columns = design_column_shear(state, strengths)
     joints = design_joint_shear(state, strengths, columns, beams)
     anchorage = design_anchorage(state)
-    splices = design_splices(state)
+    splices = design_splices(state, beam_hoop_spacing_in=(beams.get("hoops") or {}).get("spacing_in"))
     threading = design_bar_threading(state)
     bond = design_column_bar_bond(state)
     beams["bars_thread_column"] = threading
     checks = []
     checks.append(make_check("detailing.splices_designed", "ACI 318-19 18.6.3.3 / 18.7.4.4 / 18.2.7 / 25.5",
-                             1, 1, "==", details={"beam": splices["beam"], "column": splices["column"]}))
+                             int(splices["all_designed"]), 1, "==",
+                             details={"beam": splices["beam"], "column": splices["column"],
+                                      "basis": "a splice type and a legal proposed location for each member "
+                                               "(detailing.splice_location); coupler product qualification is a review"}))
+    checks.extend(splice_location_check(member, splices[member]) for member in ("beam", "column"))
     checks.append(make_check("column.bar_bond_development", bond["clause"], bond["factored_ld_in"], bond["half_clear_height_in"],
                              "<=", "in", details={key: bond[key] for key in (
                                  "bar_size", "cb", "ktr_in", "confinement_ratio", "confinement_ratio_capped", "psi_s", "psi_g",

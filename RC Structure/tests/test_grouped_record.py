@@ -124,7 +124,7 @@ class GroupedRecord(unittest.TestCase):
         self.assertEqual(search["stop_reason"], "reduction_budget_exhausted")
         self.assertIn("smaller sections may remain untried", search["stop_detail"])
         decisions = [(c["phase"], c["decision"]) for c in search["candidates"]]
-        self.assertEqual(decisions[0], ("feasibility", "feasible"))
+        self.assertEqual(decisions[0], ("feasibility", "screen_passed"))
         self.assertEqual(search["counts"]["reduction_candidates"], 1)
         evaluated = [c for c in search["candidates"] if c["evaluation"] is not None]
         for candidate in evaluated:

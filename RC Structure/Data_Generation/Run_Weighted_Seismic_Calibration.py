@@ -42,8 +42,24 @@ _STOP = threading.Event()
 # tolerances compare its float64 exports, not the compact float32 training copy.
 RECORDER_TOLERANCES = {"relative": 1e-9, "moment_absolute_kip_in": 1e-7,
                        "rotation_absolute_rad": 1e-11, "time_absolute_sec": 1e-7}
+# The anchored research profile installs the legacy member spring replay (Model/Analysis_Profile; the frozen IMK V2
+# calibration of 2026-10-29 refuses the anchored energy mapping), so its native dp/dpc are the member intervals. Its
+# trials are still assessed on the hinge_backbone v2 measures, each axis and native sign against its own spring,
+# which differ from the pre-freeze axis-mixed plastic / theta_p, yielded and past-capping values even here (only the
+# denominator agrees). A pre-freeze trial is assessed only with the commit 66f964c1 code.
 RESEARCH_PROFILE = "v2_nonlinear_flexure_anchored_energy_research_v1"
 M1_CHECK = "demands.torsional_irregularity"
+# Hinge-table columns every assessed row must carry as finite numbers (hinge_backbone v2).
+HINGE_METRIC_COLUMNS = ("damage_ratio", "capping_ratio", "yielded", "native_dp_rad", "native_theta_y_rad",
+                        "theta_y_spring", "peak_rotation_rad", "plastic_rotation", "rot_abs_max")
+
+
+def _finite_or_none(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def now():
@@ -347,7 +363,9 @@ def recorder_agreement_reasons(export, steps, tolerances=RECORDER_TOLERANCES):
 
 def assess_trial(manifest_path, policy):
     """Only finite, complete, consistently installed full records can be selected."""
-    from Data_Generation.Hybrid_Exporter import _damage_metrics, COLLAPSE_DRIFT_RATIO
+    from Data_Generation.Hybrid_Exporter import (_damage_metrics, _hinge_table_calibration, COLLAPSE_DRIFT_RATIO,
+                                                 HINGE_BACKBONE_VERSION)
+    from Model.Analysis_Profile import PROFILES
     m = read_json(manifest_path)
     solver = m.get("solver", {})
     reasons = []
@@ -409,19 +427,43 @@ def assess_trial(manifest_path, policy):
         return {"usable": False, "rejection_reasons": reasons, "checks": checks}
     with (ntha / "hinge_backbone.csv").open(newline="", encoding="utf-8-sig") as stream:
         hinge_rows = list(csv.DictReader(stream))
-    if not hinge_rows or any(not math.isfinite(float(r[k])) for r in hinge_rows for k in ("damage_ratio", "yielded", "theta_p", "theta_y_spring", "plastic_rotation", "rot_abs_max")):
+    if hinge_rows and any(r.get("hinge_backbone_version") != HINGE_BACKBONE_VERSION for r in hinge_rows):
+        # A pre-freeze (unversioned v1) or other-layout table. Its metrics, and the score policy they were scored
+        # with, are of another definition, so it is never read through the v2 measures; a v1 trial is assessed only
+        # with the commit 66f964c1 code.
+        return {"usable": False, "rejection_reasons": ["hinge_backbone_version_mismatch"], "checks": checks}
+    if any(_finite_or_none(r.get("end_released")) != 0 for r in hinge_rows):
+        # A released (elastic) end has no IMK spring to measure; the research model releases none.
+        return {"usable": False, "rejection_reasons": ["released_or_unclassified_hinge_end"], "checks": checks}
+    if not hinge_rows or any(_finite_or_none(r.get(k)) is None for r in hinge_rows for k in HINGE_METRIC_COLUMNS):
         return {"usable": False, "rejection_reasons": ["invalid_hinge_metrics"], "checks": checks}
+    # Every hinge must name the one member spring calibration the global parameters declare, and it must be the one
+    # this controller's profile installs; a trial of another calibration is never scored under this metric basis.
+    research = PROFILES[RESEARCH_PROFILE]
+    expected_calibration = {**research["settings"], **research["required_state"]}.get("IMK_MEMBER_SPRING_CALIBRATION")
+    try:
+        calibration = _hinge_table_calibration(ntha, hinge_rows, params)
+    except ValueError:
+        calibration = None
+    if calibration is None or calibration != expected_calibration:
+        return {"usable": False, "rejection_reasons": ["hinge_member_spring_calibration_mismatch"], "checks": checks}
     tags = arrays.get("hinge_tag_order", np.array([]))
     if (len(hinge_rows) * 2 != arrays["hinge_rotation"].shape[1] or tags.ndim != 1 or len(tags) != len(hinge_rows)
             or len({r["hinge_ele_tag"] for r in hinge_rows}) != len(hinge_rows)
             or {int(r["hinge_ele_tag"]) for r in hinge_rows} != set(tags.tolist())):
         reasons.append("hinge_metric_coverage_mismatch")
+    # Each row is the governing branch of one end (hinge_backbone v2): plastic rotation measured from that branch's
+    # own native yield, damage_ratio = capping_ratio = plastic / native dp of the same branch.
     for row in hinge_rows:
-        theta_p, plastic, rotation, theta_y = (float(row[k]) for k in ("theta_p", "plastic_rotation", "rot_abs_max", "theta_y_spring"))
-        if (row.get("material_type") != "IMKPeakOriented" or theta_p <= 0 or min(plastic, rotation, theta_y) < 0 or float(row["yielded"]) not in (0, 1)
-                or not math.isclose(plastic, max(0.0, rotation - theta_y), abs_tol=1e-10, rel_tol=1e-8)
-                or not math.isclose(float(row["damage_ratio"]), plastic / theta_p, abs_tol=1e-10, rel_tol=1e-8)
-                or int(float(row["yielded"])) != int(rotation > theta_y)):
+        dp, plastic, rotation, peak, theta_y = (float(row[k]) for k in ("native_dp_rad", "plastic_rotation", "rot_abs_max",
+                                                                         "peak_rotation_rad", "theta_y_spring"))
+        if (row.get("material_type") != "IMKPeakOriented" or dp <= 0 or min(plastic, rotation, peak, theta_y) < 0
+                or float(row["yielded"]) not in (0, 1) or peak > rotation
+                or theta_y != float(row["native_theta_y_rad"])
+                or not math.isclose(plastic, max(0.0, peak - theta_y), abs_tol=1e-10, rel_tol=1e-8)
+                or not math.isclose(float(row["damage_ratio"]), plastic / dp, abs_tol=1e-10, rel_tol=1e-8)
+                or float(row["capping_ratio"]) != float(row["damage_ratio"])
+                or int(float(row["yielded"])) != int(peak > theta_y)):
             reasons.append("inconsistent_rotation_damage_proxy")
             break
     damage = _damage_metrics(arrays, hinge_rows, params, status)
@@ -432,7 +474,8 @@ def assess_trial(manifest_path, policy):
     metrics = {key: float(damage[key]) for key in METRIC_NAMES}
     result = {"usable": not reasons, "rejection_reasons": reasons, "checks": checks, "metrics": metrics,
               "hinge_denominator": len(hinge_rows), "legacy_is_inelastic": bool(damage["is_inelastic"]),
-              "metric_basis": "Hybrid_Exporter._damage_metrics; simultaneous resultant drifts; hinge-row yielded fraction; max(max(0,rot_abs_max-theta_y_spring)/theta_p). Rotation-demand proxy, not fatigue damage or calibrated energy deterioration.",
+              "member_spring_calibration": calibration,
+              "metric_basis": f"Hybrid_Exporter._damage_metrics on {HINGE_BACKBONE_VERSION}, member spring calibration {calibration}; simultaneous resultant drifts; fraction_hinges_yielded = fraction of hinge ends with some native branch (axis and sign) past its own My/Kh; peak_hinge_damage_ratio = max over hinge ends of capping_ratio = max(0, peak native spring rotation - native My/Kh) / native dp of the governing branch (axis and sign), 1 at native capping. Not the pre-freeze axis-mixed measure: where native dp = member theta_p (the legacy replay) only the denominator agrees, and pre-freeze values are reproduced only with the commit 66f964c1 code. Native spring rotation-demand proxy, not story drift, fatigue damage or calibrated energy deterioration.",
               "recorder_tolerances": RECORDER_TOLERANCES,
               "source_files_changed_since_design": m["identity"]["source_files_changed_since_design"]}
     if not reasons:

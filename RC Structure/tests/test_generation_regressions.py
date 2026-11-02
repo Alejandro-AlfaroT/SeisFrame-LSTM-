@@ -145,22 +145,126 @@ class HingeYieldRotationTests(unittest.TestCase):
         self.assertGreater(sp.IMK_BEAM_THETA_Y, 0.0)
         self.assertGreater(sp.IMK_COLUMN_THETA_Y, 0.0)
 
+    # hinge_backbone v2 (Ground_Motion_Main.HINGE_BACKBONE_VERSION, frozen IMK V2 calibration, 2026-10-29): the
+    # producer measures each end's peaks with Model/IMK_Spring_Mapping.hinge_end_demand, which subtracts every
+    # spring's OWN native yield My/Kh per axis and native sign and flags yielding against it. The checks below run
+    # the real producer on a small built frame, under the frozen calibration and under the legacy replay.
+    SMALL_FRAME = dict(NUM_BAY_X=1, NUM_BAY_Y=1, NUM_FLOOR=2, ELEMENT_FORMULATION="imk")
+    CALIBRATIONS = ("seisframe_imk_v2_frozen_20261029", "legacy_direct_interval_nominal_energy_66f964c1")
+
+    def _end_rows(self, calibration, peaks):
+        """hinge_backbone rows of end i of the first column and the first beam_x of a small built frame.
+
+        ``peaks(points_by_axis)`` gives {"y": (max, min), "z": (max, min)} native rotations for that end from its
+        installed spring points; no other hinge is in the envelope. Returns {member_type: (row, points_by_axis)}.
+        """
+        import openseespy.opensees as ops
+        from Ground_Motion_Main import _hinge_backbone_rows
+        from Model import Build_Model
+        try:
+            with mock.patch.multiple(sp, IMK_MEMBER_SPRING_CALIBRATION=calibration, **self.SMALL_FRAME):
+                Build_Model.build_model()
+                registry = IMK_Hinges.hinge_registry()
+                chosen = {}
+                for member_type in ("column", "beam_x"):
+                    tag = min(t for t, e in registry.items() if e["member_type"] == member_type)
+                    chosen[member_type] = (tag, registry[tag]["spring_points"]["i"])
+                envelope = {}
+                for tag, points in chosen.values():
+                    by_axis = peaks(points)
+                    envelope[IMK_Hinges.hinge_element_tag(tag, 1)] = {
+                        "max": [by_axis["y"][0], by_axis["z"][0]], "min": [by_axis["y"][1], by_axis["z"][1]],
+                        "abs_max": [max(abs(v) for v in by_axis[axis]) for axis in ("y", "z")]}
+                rows = {r["ele_tag"]: r for r in _hinge_backbone_rows({"hinge_rotation_envelope": envelope})}
+        finally:
+            ops.wipe()
+        self.assertEqual(len(rows), len(chosen))
+        return {member_type: (rows[tag], points) for member_type, (tag, points) in chosen.items()}
+
+    @staticmethod
+    def _native_yield(points, axis, sign="positive"):
+        return points[axis][sign]["native_theta_y_rad"]
+
     def test_backbone_rows_subtract_the_spring_limit(self):
         import inspect
-        from Ground_Motion_Main import _hinge_backbone_rows
-        source = inspect.getsource(_hinge_backbone_rows)
-        self.assertIn("spring_theta_y", source)
-        self.assertIn("rotation - spring_theta_y", source)
-        # The member nominal must still be reported -- it is what the
-        # Haselton backbone was calibrated against.
-        self.assertIn('"theta_y": theta_y', source)
+        from Ground_Motion_Main import HINGE_BACKBONE_VERSION, _governing_hinge_values, _hinge_backbone_rows
+        from Model import IMK_Spring_Mapping
+        self.assertIn("hinge_end_demand(points_by_axis, peaks_by_axis)", inspect.getsource(_hinge_backbone_rows))
+        self.assertIn('demand - branch["native_theta_y_rad"]', inspect.getsource(IMK_Spring_Mapping.rotation_demand))
+        self.assertIn('"theta_y_spring": branch["native_theta_y_rad"]', inspect.getsource(_governing_hinge_values))
+        ty = self._native_yield
+
+        # Per sign: y is 1e-3 past its positive yield and 2e-3 past its negative yield (governs); z stays elastic.
+        def by_sign(points):
+            return {"y": (ty(points, "y") + 1e-3, -(ty(points, "y", "negative") + 2e-3)),
+                    "z": (0.5 * ty(points, "z"), -0.5 * ty(points, "z", "negative"))}
+
+        # Per axis: each axis is driven to the OTHER axis's native yield, so only the lower-yield axis yields, by the
+        # difference (the v1 rule subtracted the larger yield of both axes from the larger rotation: zero).
+        def by_axis(points):
+            return {"y": (ty(points, "z"), 0.0), "z": (ty(points, "y"), 0.0)}
+
+        for calibration in self.CALIBRATIONS:
+            for member_type, (row, points) in self._end_rows(calibration, by_sign).items():
+                with self.subTest(calibration=calibration, member_type=member_type, case="sign"):
+                    branch = points["y"]["negative"]
+                    self.assertEqual(row["hinge_backbone_version"], HINGE_BACKBONE_VERSION)
+                    self.assertEqual(row["member_spring_calibration"], calibration)
+                    self.assertEqual((row["governing_axis"], row["governing_sign"]), ("y", "negative"))
+                    self.assertEqual(row["theta_y_spring"], branch["native_theta_y_rad"])
+                    self.assertEqual(row["native_theta_y_rad"], branch["native_theta_y_rad"])
+                    self.assertAlmostEqual(row["peak_rotation_rad"], branch["native_theta_y_rad"] + 2e-3, delta=1e-15)
+                    self.assertAlmostEqual(row["plastic_rotation"], 2e-3, delta=1e-12)
+                    self.assertAlmostEqual(row["damage_ratio"], row["plastic_rotation"] / branch["native_dp_rad"],
+                                           delta=1e-15)
+                    self.assertEqual(row["yielded"], 1)
+                    # The member nominal is still reported, as historical metadata only, far above the spring yield.
+                    nominal = sp.IMK_COLUMN_THETA_Y if member_type == "column" else sp.IMK_BEAM_THETA_Y
+                    self.assertEqual(row["historical_nominal_theta_y_rad"], nominal)
+                    self.assertLess(row["theta_y_spring"], nominal)
+            for member_type, (row, points) in self._end_rows(calibration, by_axis).items():
+                ty_y, ty_z = ty(points, "y"), ty(points, "z")
+                if member_type == "beam_x":
+                    # The premise of the per-axis case: a beam's two springs yield at different native rotations.
+                    self.assertNotAlmostEqual(ty_y, ty_z, delta=1e-3 * max(ty_y, ty_z))
+                if ty_y == ty_z:
+                    continue
+                with self.subTest(calibration=calibration, member_type=member_type, case="axis"):
+                    low, high = ("y", ty_z) if ty_y < ty_z else ("z", ty_y)
+                    self.assertEqual((row["governing_axis"], row["governing_sign"]), (low, "positive"))
+                    self.assertEqual(row["theta_y_spring"], min(ty_y, ty_z))
+                    self.assertAlmostEqual(row["plastic_rotation"], high - min(ty_y, ty_z), delta=1e-15)
+                    self.assertGreater(row["plastic_rotation"], 0.0)
+                    self.assertEqual(row["yielded"], 1)
 
     def test_yielded_flag_uses_the_spring_limit(self):
         import inspect
         from Ground_Motion_Main import _hinge_backbone_rows
-        source = inspect.getsource(_hinge_backbone_rows)
-        self.assertIn("rotation > spring_theta_y", source)
-        self.assertNotIn("rotation > theta_y else", source)
+        from Model import IMK_Spring_Mapping
+        self.assertNotIn("rotation > theta_y else", inspect.getsource(_hinge_backbone_rows))
+        self.assertIn('demand > branch["native_theta_y_rad"]', inspect.getsource(IMK_Spring_Mapping.rotation_demand))
+        ty = self._native_yield
+
+        def scaled(factor):
+            def peaks(points):
+                return {axis: (factor * ty(points, axis), -factor * ty(points, axis, "negative")) for axis in ("y", "z")}
+            return peaks
+
+        for calibration in self.CALIBRATIONS:
+            # Past the spring's native yield but far below the member nominal: yielded.
+            for member_type, (row, _points) in self._end_rows(calibration, scaled(2.0)).items():
+                with self.subTest(calibration=calibration, member_type=member_type, case="past native yield"):
+                    self.assertEqual(row["yielded"], 1)
+                    self.assertLess(row["rot_abs_max"], row["historical_nominal_theta_y_rad"])
+                    self.assertAlmostEqual(row["plastic_rotation"], row["theta_y_spring"], delta=1e-15)
+            # At (strictly not past) and below the native yield of every branch: not yielded, no plastic part.
+            for factor in (1.0, 1.0 - 1e-6):
+                for member_type, (row, _points) in self._end_rows(calibration, scaled(factor)).items():
+                    with self.subTest(calibration=calibration, member_type=member_type, factor=factor):
+                        self.assertEqual(row["yielded"], 0)
+                        self.assertEqual(row["plastic_rotation"], 0.0)
+                        self.assertEqual(row["damage_ratio"], 0.0)
+                        self.assertEqual(row["past_capping"], 0)
 
 
 class TargetDriftBandTests(unittest.TestCase):
@@ -859,7 +963,10 @@ class GenerationRegressionTests(unittest.TestCase):
         # OpenSees IMKBilin argument order (a nonexistent "A" deterioration
         # mode standing in for the FmaxFy/FresFy strength ratios). Pin the
         # exact positional order the current IMKBilin signature requires.
-        with mock.patch.object(sp, "IMK_MATERIAL_TYPE", "IMKBilin"), mock.patch.object(IMK_Hinges.ops, "uniaxialMaterial") as uniaxial_material:
+        # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29)
+        with mock.patch.object(sp, "IMK_MATERIAL_TYPE", "IMKBilin"), \
+                mock.patch.object(sp, "IMK_MEMBER_SPRING_CALIBRATION", "legacy_direct_interval_nominal_energy_66f964c1"), \
+                mock.patch.object(IMK_Hinges.ops, "uniaxialMaterial") as uniaxial_material:
             IMK_Hinges._define_imk_peak_material(
                 mat_tag=101,
                 elastic_stiffness=5000.0,
@@ -960,7 +1067,7 @@ class CollapseCompletionTests(unittest.TestCase):
     the analysis is deterministic.
     """
 
-    def _make_run(self, root, *, failed, collapse, with_sample=True):
+    def _make_run(self, root, *, failed, collapse, with_sample=True, schema_version=None):
         case = {
             "case_id": "case_0001",
             "runs": [{"run_index": 1, "result_id": 7, "scale_factor": 3.0,
@@ -977,8 +1084,11 @@ class CollapseCompletionTests(unittest.TestCase):
         if with_sample:
             paths["sample"].parent.mkdir(parents=True, exist_ok=True)
             paths["sample"].write_bytes(b"")
+            # complete_run counts only a sample of the current hybrid schema (Hybrid_Exporter.SCHEMA_VERSION; the
+            # frozen IMK V2 calibration, 2026-10-29, moved it to hybrid_gnn_lstm_v4), so the sidecar carries it.
             paths["sample"].with_name("hybrid_metadata.json").write_text(
-                json.dumps({"collapse": collapse, "npts_requested": 6000,
+                json.dumps({"schema_version": schema_version or Hybrid_Exporter.SCHEMA_VERSION,
+                            "collapse": collapse, "npts_requested": 6000,
                             "completed_steps": 4588 if failed else 6000}), encoding="utf-8"
             )
         return case, run
@@ -1007,6 +1117,15 @@ class CollapseCompletionTests(unittest.TestCase):
             root = Path(temp_dir)
             case, run = self._make_run(root, failed=False, collapse=False)
             self.assertTrue(Generate_Parameterized_Dataset.complete_run(root, case, run))
+
+    def test_sample_of_another_hybrid_schema_is_not_complete(self):
+        # A pre-freeze v3 sample is not this dataset's sample (frozen IMK V2 calibration, 2026-10-29): resuming must
+        # not count it, clean or collapsed.
+        for failed, collapse in ((False, False), (True, True)):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                case, run = self._make_run(root, failed=failed, collapse=collapse, schema_version="hybrid_gnn_lstm_v3")
+                self.assertFalse(Generate_Parameterized_Dataset.complete_run(root, case, run))
 
     def test_previous_collapse_does_not_finish_a_new_failed_attempt(self):
         import hashlib

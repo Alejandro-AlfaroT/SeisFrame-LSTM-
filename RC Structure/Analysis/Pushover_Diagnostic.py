@@ -2,8 +2,9 @@
 
 This is not the production pushover. ``Analysis/Pushover.py`` drives DOF 1
 of the roof master under the uniform FX_FLOOR pattern of Loads/Lateral_Loads,
-reads X reactions only and flags hinge yield against the interior family's
-thresholds; it has no Y or reverse-direction path. This module pushes the
+reads X reactions only and classifies hinges with Analysis/Mechanism_Checks
+against each installed spring's native points per sign
+(mechanism_diagnostics_v2); it has no Y or reverse-direction path. This module pushes the
 roof master in +X, -X, +Y or -Y under an explicit, recorded lateral pattern
 on top of a declared gravity state and records, at every converged step:
 
@@ -13,9 +14,11 @@ on top of a declared gravity state and records, at every converged step:
   bending axis transformed to the joint faces, and the story shear it
   carries in the push direction (sign rule below);
 * every beam's end forces and its vertical-bending end moments;
-* every IMK hinge's deformation and moment with yield / cap / ultimate
-  events measured against the backbone actually installed on that end
-  (Model.IMK_Hinges.hinge_registry), per sign;
+* every IMK hinge's deformation and moment with yield / native capping /
+  native du cutoff events measured against the points of the spring
+  actually installed on that end and axis, for the native sign of the
+  rotation (Model.IMK_Spring_Mapping.spring_points); the du is a
+  provisional numerical cutoff, not a collapse rotation;
 * the base reactions, the applied lateral loads and the gravity state;
 * the column-to-line story shear sums per frame line;
 * equilibrium and sign checks: base shear, story shear per story, the
@@ -63,10 +66,35 @@ from Model.Build_Model import apply_analysis_constraints, build_model, floor_mas
 from Analysis.Gravity import run_gravity_analysis
 from Loads.Gravity_Loads import apply_gravity_loads
 from Loads.Seismic_ELF import elf_story_forces
-from Model.IMK_Hinges import hinge_element_tag, hinge_registry, imk_hinge_stiffness
+from Model import IMK_Spring_Mapping as spring_mapping
+from Model.IMK_Hinges import hinge_element_tag, hinge_registry, imk_hinge_stiffness, installed_spring_points
 
 
-DIAGNOSTIC_VERSION = "pushover_diagnostic_v1_direction_explicit"
+# v2 (frozen IMK V2 calibration, 2026-10-29): hinge springs carry their installed native and member-reference points
+# per native sign; "capped" is the native capping rotation My/Kh + dp of the rotation's sign (was theta_y + member
+# theta_p); the du flag "ultimate" is renamed native_cutoff_du_exceeded; released ends are not classified and carry
+# no Kh, native yield or member spring calibration (their Elastic stiffness is reported on its own); the audit
+# reports the member spring calibration and the nominal theta_y only as labelled history.
+DIAGNOSTIC_VERSION = "pushover_diagnostic_v2_native_spring_points"
+NATIVE_SIGNS = ("positive", "negative")
+# What the hinge fields of the inventory, the step rows and the events mean (recorded in the model audit).
+HINGE_FIELD_DEFINITIONS = {
+    "rotation": ("native zeroLength spring rotation (hinge node minus joint), rad; not a story drift and not a member "
+                 "chord rotation (chord = native rotation + M/Kb)"),
+    "theta_p, theta_pc": ("member Haselton intervals of the end (member_theta_p_rad, member_theta_pc_rad); the installed "
+                          "native dp/dpc are springs[axis][sign]['native_dp_rad'/'native_dpc_rad']"),
+    "theta_u": "retained native du of the end: a provisional numerical cutoff, not a collapse rotation",
+    "theta_y_positive, theta_y_negative, theta_y_sign": "native spring yield My/Kh of the sign; None for a released end",
+    "Kh_kip_in_per_rad": "installed IMK spring stiffness Kh; None for a released end (no IMK spring installed)",
+    "ke": ("registry IMK hinge stiffness of the end, kept for the record; for a released end it is not the installed "
+           "spring, whose stiffness is installed_elastic_stiffness_kip_in_per_rad"),
+    "installed_elastic_stiffness_kip_in_per_rad": "stiffness of the Elastic spring of a released end; None otherwise",
+    "springs[axis][sign]": "the installed spring's points (Model/IMK_Spring_Mapping.spring_points); None for a released end",
+    "member_theta_y_reference_rad": "member-reference yield My/K0 with K0 = Kh/20; None under the legacy replay",
+    "capped": "abs(native rotation) >= native capping rotation My/Kh + dp of the rotation's sign",
+    "native_cutoff_du_exceeded": ("abs(native rotation) >= retained native du of the rotation's sign; a provisional "
+                                  "numerical cutoff, not a material failure or a collapse"),
+}
 PATTERN_SERIES_TAG = 31
 PATTERN_TAG = 31
 LOAD_PATTERNS = ("elf", "uniform", "triangular", "explicit")
@@ -242,8 +270,44 @@ def element_inventory():
             "joints": [{"key": f"{k},{i},{j}", **v} for (k, i, j), v in sorted(joints.items())]}
 
 
+def _spring_record(index, points, fy_positive, fy_negative, ke, material=None):
+    """One spring of a hinge: its native yield per sign and the installed points per native sign.
+
+    ``points`` is the installed spring's Model/IMK_Spring_Mapping.spring_points (None for a released end, whose
+    registry strengths and ``ke`` are kept for the record but nothing is classified against them). With points, the
+    strengths and stiffness are the installed command's own, so the native sign mapping is the material's, not
+    re-derived here. A released end's installed spring is the Elastic material of ``material``: it has no Kh and no
+    native yield (both None), and its own stiffness is installed_elastic_stiffness_kip_in_per_rad.
+    """
+    released = points is None
+    if not released:
+        fy_positive, fy_negative = points["positive"]["My_kip_in"], points["negative"]["My_kip_in"]
+        ke = points["Kh_kip_in_per_rad"]
+    reference = (points or {}).get("member_reference") or {}
+    energy = (points or {}).get("energy") or {}
+    return {"index": index, "fy_positive_kip_in": fy_positive, "fy_negative_kip_in": fy_negative, "ke": ke,
+            "theta_y_positive": fy_positive / ke if not released and ke > 0 else None,
+            "theta_y_negative": fy_negative / ke if not released and ke > 0 else None,
+            "released": released,
+            "Kh_kip_in_per_rad": None if released else ke,
+            "installed_elastic_stiffness_kip_in_per_rad": ((material or {}).get("elastic_stiffness_kip_in_per_rad")
+                                                           if released else None),
+            "K0_kip_in_per_rad": reference.get("K0_kip_in_per_rad"),
+            "Kb_kip_in_per_rad": reference.get("Kb_kip_in_per_rad"),
+            "energy_reference_theta_y_rad": energy.get("energy_reference_theta_y_rad"),
+            "lambda_haselton": energy.get("lambda_haselton_dimensionless"),
+            "spring_points_version": (points or {}).get("version"),
+            **{sign: None if points is None else dict(points[sign]) for sign in NATIVE_SIGNS}}
+
+
 def hinge_inventory(inventory):
-    """Every IMK hinge with the installed backbone the events are measured against, per end and sign."""
+    """Every IMK hinge with the installed spring points the events are measured against, per end, axis and sign.
+
+    ``theta_p``/``theta_pc`` are the member intervals of the end and ``theta_u`` its retained native du
+    (HINGE_FIELD_DEFINITIONS); the native dp, capping and du of each spring and sign, and the member-reference
+    values, are in ``springs[axis][sign]``. Released (elastic) ends stay in the inventory (every domain hinge is
+    listed) with ``released`` True and no points.
+    """
     registry = hinge_registry()
     hinges = []
     for member in inventory["columns"] + inventory["beams"]:
@@ -268,17 +332,23 @@ def hinge_inventory(inventory):
                 sag = entry[f"yield_moment_y_sagging_{end}_kip_in"]
                 fy_pos, fy_neg = (hog, sag) if end == "i" else (sag, hog)
                 fz = entry["yield_moment_z_kip_in"]
+            # The end's own member intervals (the flat registry keys are end i's).
+            backbone = (entry.get("backbone_by_end") or {}).get(end) or entry
+            materials = entry.get("installed_materials", {}).get(end, {})
+            springs = {"y": _spring_record(0, installed_spring_points(member["tag"], end, "y"), fy_pos, fy_neg, ke_y,
+                                           materials.get("y")),
+                       "z": _spring_record(1, installed_spring_points(member["tag"], end, "z"), fz, fz, ke_z,
+                                           materials.get("z"))}
+            released = all(s["released"] for s in springs.values())
             hinges.append({"hinge_tag": hinge_element_tag(member["tag"], end_id), "member_tag": member["tag"], "member_type": kind,
                            "material_type": entry.get("material_type", "IMKBilin"),
-                           "installed_materials": entry.get("installed_materials", {}).get(end, {}),
+                           # A released end installs no IMK spring, so no member spring calibration applies to it.
+                           "member_spring_calibration": None if released else entry.get("member_spring_calibration"),
+                           "installed_materials": materials,
                            "end": end, "joint_node": member["node_i"] if end == "i" else member["node_j"],
-                           "springs": {"y": {"index": 0, "fy_positive_kip_in": fy_pos, "fy_negative_kip_in": fy_neg, "ke": ke_y,
-                                             "theta_y_positive": fy_pos / ke_y if ke_y > 0 else None,
-                                             "theta_y_negative": fy_neg / ke_y if ke_y > 0 else None},
-                                       "z": {"index": 1, "fy_positive_kip_in": fz, "fy_negative_kip_in": fz, "ke": ke_z,
-                                             "theta_y_positive": fz / ke_z if ke_z > 0 else None,
-                                             "theta_y_negative": fz / ke_z if ke_z > 0 else None}},
-                           "theta_p": entry["theta_p"], "theta_pc": entry["theta_pc"], "theta_u": entry["theta_u"],
+                           "released": released,
+                           "springs": springs,
+                           "theta_p": backbone["theta_p"], "theta_pc": backbone["theta_pc"], "theta_u": backbone["theta_u"],
                            "axial_ratio": entry.get("axial_ratio"), "backbone_source": entry.get("source"),
                            "strength_basis": entry.get("strength_basis"), "beam_family": entry.get("beam_family")})
     return hinges
@@ -326,6 +396,16 @@ def model_audit(inventory, hinges):
             # Under a grouped design a plan family holds several groups with their own strengths: key by group.
             families.setdefault(entry.get("group_id") if mg.is_grouped() else entry.get("beam_family"), entry)
     sections, cage = _installed_sections_and_cage()
+    calibration = spring_mapping.active_calibration()
+    frozen = spring_mapping.is_frozen(calibration)
+    column_springs = [s for h in hinges if h["member_type"] == "column" for s in h["springs"].values()]
+    # Each column end's own member interval (backbone_by_end), not the flat registry key, which is end i's.
+    column_theta_p = [h["theta_p"] for h in hinges if h["member_type"] == "column"]
+
+    def native_range(springs, key):
+        values = [s[sign][key] for s in springs for sign in NATIVE_SIGNS if s[sign] is not None]
+        return [min(values), max(values)] if values else None
+
     return {
         "diagnostic_version": DIAGNOSTIC_VERSION,
         "element_formulation": sp.ELEMENT_FORMULATION,
@@ -333,7 +413,22 @@ def model_audit(inventory, hinges):
                 "stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", None), "stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
                 "fmax_over_fy": (getattr(sp, "IMK_FMAXFY_POS", None), getattr(sp, "IMK_FMAXFY_NEG", None)),
                 "calibrated_backbone": getattr(sp, "IMK_USE_CALIBRATED_BACKBONE", None),
-                "beam_theta_y_target": sp.IMK_BEAM_THETA_Y, "column_theta_y_target": sp.IMK_COLUMN_THETA_Y},
+                # The member-to-native spring calibration configured and the one each installed member records.
+                "member_spring_calibration": calibration,
+                "installed_member_spring_calibrations": sorted({str(e.get("member_spring_calibration")) for e in registry.values()}),
+                "spring_points_version": spring_mapping.SPRING_POINTS_VERSION,
+                # The nominal 0.005 / 0.004 rad member yield rotations (frozen IMK V2 calibration, 2026-10-29): labelled
+                # history under the frozen calibration, where the member-reference yield is My/K0 per spring; the legacy
+                # replay still uses them for its energy and its du padding.
+                "historical_nominal_theta_y_rad": {
+                    "beam": sp.IMK_BEAM_THETA_Y, "column": sp.IMK_COLUMN_THETA_Y,
+                    "status": ("historical metadata, no active quantity; member-reference yield is My/K0 per spring "
+                               "(springs[axis][sign]['member_theta_y_reference_rad'])" if frozen else
+                               "active under the legacy replay: nominal energy yield rotation and du padding")},
+                "legacy_cutoff_padding_rad": {"beam": spring_mapping.legacy_cutoff_padding("beam", calibration),
+                                              "column": spring_mapping.legacy_cutoff_padding("column", calibration),
+                                              "meaning": "additive padding of the retained native du (provisional numerical cutoff)"}},
+        "hinge_field_definitions": HINGE_FIELD_DEFINITIONS,
         "stiffness_modifiers": {"beam": sp.section_stiffness_modifier("beam"), "column": sp.section_stiffness_modifier("column")},
         "transformations": {"column": "PDelta, vecxz (1, 0, 0)", "beam_x": "Linear, vecxz (0, 0, 1)", "beam_y": "Linear, vecxz (0, 0, 1)"},
         # Stated from the configured joint model and the joint registry of this build, not assumed.
@@ -359,8 +454,16 @@ def model_audit(inventory, hinges):
                           "axial_ratio_range": ([min(e["axial_ratio"] for e in columns), max(e["axial_ratio"] for e in columns)] if columns else None),
                           "strength_basis": "nominal P-M surface (fy, phi = 1) at the tributary gravity axial estimate fixed at build "
                                             "time; the same value serves both bending axes (my = mz); not updated with the solved axial force",
-                          "theta_p_range": ([min(e["theta_p"] for e in columns), max(e["theta_p"] for e in columns)] if columns else None)},
+                          "member_theta_p_range_rad": ([min(column_theta_p), max(column_theta_p)] if column_theta_p else None),
+                          "native_dp_range_rad": native_range(column_springs, "native_dp_rad"),
+                          "native_theta_cap_range_rad": native_range(column_springs, "native_theta_cap_rad"),
+                          "native_du_range_rad": native_range(column_springs, "native_du_rad")},
         "represented": ["installed final cage (sections, bars) and hoops through rho_sh",
+                        ("member-end IMK springs on the frozen V2 calibration (2026-10-29): member Haselton intervals converted "
+                         "to native dp/dpc on a half-member reference (K0 = Kh/20, Kb = 1.05 K0), S/C energy "
+                         "lambda_H My^2/K0" if frozen else
+                         "member-end IMK springs on the legacy replay (pre-freeze rule): member intervals installed "
+                         "directly as native dp/dpc"),
                         "developed slab mats in the ACI 6.3.2 flange in beam hinge strengths and T/L stiffness, per family, "
                         "with undeveloped exterior ends where the perimeter anchorage fails",
                         "beam hinge asymmetry (hogging / sagging) per end", "P-Delta on the columns", "rigid diaphragms",
@@ -371,7 +474,9 @@ def model_audit(inventory, hinges):
                             "joint shear strength, deformation or panel zones; rigid end offsets",
                             "member shear strength or shear failure (elastic spines, flexural hinges only)",
                             "bar slip beyond the a_sl term of the Haselton rotation capacities", "foundation flexibility",
-                            "transverse-beam torsional strength (elastic torsion only)"],
+                            "transverse-beam torsional strength (elastic torsion only)",
+                            "experimental validation of the member-to-native spring calibration; the retained native du is a "
+                            "provisional numerical cutoff, not a collapse rotation"],
         "hinge_count": len(hinges),
         "element_count": {"columns": len(inventory["columns"]), "beams": len(inventory["beams"])},
     }
@@ -617,20 +722,32 @@ def _hinge_rows(hinges, hinge_state, forces, direction, events, step, control_di
         for name, spring in h["springs"].items():
             theta = deformation[spring["index"]]
             moment = m_y_spring if name == "y" else m_z_spring
-            fy = spring["fy_positive_kip_in"] if theta >= 0 else spring["fy_negative_kip_in"]
-            theta_y = spring["theta_y_positive"] if theta >= 0 else spring["theta_y_negative"]
+            sign = "positive" if theta >= 0 else "negative"
+            points = spring[sign]
+            if points is None:
+                # A released (elastic) gravity-beam end: no IMK spring, nothing to classify.
+                row["state"][name] = {"released": True, "native_sign": sign, "yielded": None, "capped": None,
+                                      "native_cutoff_du_exceeded": None, "fy_sign_kip_in": None, "theta_y_sign": None,
+                                      "native_theta_cap_rad": None, "native_du_rad": None, "moment_over_fy": None}
+                continue
+            fy = spring[f"fy_{sign}_kip_in"]
+            theta_y = spring[f"theta_y_{sign}"]
             yielded = abs(moment) >= (1.0 - tolerance) * fy if fy else False
-            capped = theta_y is not None and abs(theta) >= theta_y + h["theta_p"]
-            ultimate = abs(theta) >= h["theta_u"]
-            row["state"][name] = {"yielded": yielded, "capped": capped, "ultimate": ultimate, "fy_sign_kip_in": fy,
-                                  "theta_y_sign": theta_y, "moment_over_fy": abs(moment) / fy if fy else None}
+            # Native capping My/Kh + dp and the retained du of this sign's installed branch (HINGE_FIELD_DEFINITIONS).
+            capped = abs(theta) >= points["native_theta_cap_rad"]
+            cutoff = abs(theta) >= points["native_du_rad"]
+            row["state"][name] = {"released": False, "native_sign": sign, "yielded": yielded, "capped": capped,
+                                  "native_cutoff_du_exceeded": cutoff, "fy_sign_kip_in": fy, "theta_y_sign": theta_y,
+                                  "native_theta_cap_rad": points["native_theta_cap_rad"], "native_du_rad": points["native_du_rad"],
+                                  "moment_over_fy": abs(moment) / fy if fy else None}
             key = (h["hinge_tag"], name)
-            seen = events.setdefault(key, {"yielded": None, "capped": None, "ultimate": None})
-            for flag, value in (("yielded", yielded), ("capped", capped), ("ultimate", ultimate)):
+            seen = events.setdefault(key, {"yielded": None, "capped": None, "native_cutoff_du_exceeded": None})
+            for flag, value in (("yielded", yielded), ("capped", capped), ("native_cutoff_du_exceeded", cutoff)):
                 if value and seen[flag] is None:
-                    seen[flag] = {"step": step, "control_displacement_in": control_disp, "base_shear_kip": base_shear,
+                    seen[flag] = {"event": flag, "step": step, "control_displacement_in": control_disp, "base_shear_kip": base_shear,
                                   "member_tag": h["member_tag"], "member_type": kind, "end": h["end"], "spring": name,
-                                  "rotation": theta, "moment_kip_in": moment, "fy_kip_in": fy, "beam_family": h.get("beam_family")}
+                                  "native_sign": sign, "rotation": theta, "moment_kip_in": moment, "fy_kip_in": fy,
+                                  "beam_family": h.get("beam_family")}
         rows.append(row)
     return rows
 

@@ -46,10 +46,21 @@ Measurement path
   plastic-rotation measure for peak-oriented or pinched reloading. For those
   laws we report virgin-envelope exceedance and leave accumulated plastic
   rotation unavailable. Reversal yielding below that envelope can be missed.
-  Dissipated energy is the work integral less the change in stored
-  elastic energy on Ke (an exact discrete identity: zero for an elastic
-  spring on any open path). Capping / ultimate flags use the installed
-  theta_p / theta_u.
+  The energy figure is the signed work integral less the change in stored
+  elastic energy on the initial Ke (net_work_minus_initial_ke_storage_kip_in;
+  an exact discrete identity: zero for an elastic spring on any open path).
+  It is NOT dissipated energy: once the stiffness deteriorates the
+  recoverable part is no longer on Ke, and a partial cycle can leave it
+  negative.
+* Capping and cutoff are read from each spring's OWN installed native
+  points, per sign (Model/IMK_Spring_Mapping.spring_points and
+  rotation_demand; frozen IMK V2 calibration, 2026-10-29): native yield
+  My/Kh, native capping My/Kh + dp, and the retained native du, which is a
+  provisional numerical cutoff, not a collapse rotation. The flat theta_p /
+  theta_pc of the registry are MEMBER intervals (native dp/dpc differ from
+  them under the frozen calibration) and are never compared with a spring
+  rotation. A spring rotation is a local native rotation, not a story drift
+  and not a member chord rotation.
 """
 from __future__ import annotations
 
@@ -62,9 +73,16 @@ import openseespy.opensees as ops
 
 import Structure_Parameters as sp
 from Analysis.Pushover_Diagnostic import element_inventory, hinge_inventory, model_audit
+from Model import IMK_Spring_Mapping as spring_mapping
 from Model.IMK_Hinges import hinge_registry
 
-DIAGNOSTIC_VERSION = "hinge_hysteresis_diagnostic_v3_material_aware"
+# v4 (frozen IMK V2 calibration, 2026-10-29): damage_ratio := capping_ratio (native plastic rotation over the native dp of
+# the governing sign, from the installed spring) and past_capping at the native capping My/Kh + dp of the sign, both
+# per installed spring instead of the flat member theta_p; past_ultimate -> past_native_cutoff (the retained du is a
+# provisional numerical cutoff); dissipated_energy_kip_in -> net_work_minus_initial_ke_storage_kip_in (not
+# dissipation); the installed-design summary reports member intervals and native ranges apart. Every evaluation row
+# carries diagnostic_version (hinge_evaluation.json is a bare list of rows); v3 rows are not comparable field by field.
+DIAGNOSTIC_VERSION = "hinge_hysteresis_diagnostic_v4_native_spring_points"
 SPRING_MATERIAL_INDEX = {"y": 1, "z": 2}
 RECORDER_PRECISION = 12
 YIELD_MOMENT_TOLERANCE = 1e-3      # virgin backbone: peak |M| >= (1 - tol) Fy of that sign
@@ -82,6 +100,53 @@ def _close(a, b, rel=1e-9):
         return math.isclose(float(a), float(b), rel_tol=rel, abs_tol=1e-9)
     except (TypeError, ValueError):
         return a == b
+
+
+def _spring_calibration(material):
+    """The member spring calibration an installed material records: the frozen mapping's id, else the legacy replay
+    (a member material installed without one followed the pre-freeze rule); None for a released end or no record.
+    Model/Analysis_Profile.installed_topology reads the installed materials the same way."""
+    if not material or material.get("released") or material.get("material_type") == "Elastic":
+        return None
+    mapping = (material.get("provenance") or {}).get("member_spring_calibration")
+    return mapping["calibration_id"] if mapping else spring_mapping.LEGACY_REPLAY
+
+
+# Per-sign points of an installed spring reported as ranges by the installed-design summaries.
+RANGE_POINTS = ("member_theta_p_rad", "member_theta_pc_rad", "member_theta_y_reference_rad",
+                "member_theta_cap_reference_rad", "native_theta_y_rad", "native_dp_rad", "native_dpc_rad",
+                "native_theta_cap_rad", "native_du_rad")
+
+
+def _rotation_ranges(registry):
+    """Member intervals and native points of every installed hinge spring, kept apart (frozen IMK V2 calibration,
+    2026-10-29): read per end, axis and sign from each installed material (Model/IMK_Spring_Mapping.spring_points);
+    released (elastic) ends have no IMK backbone and are skipped. Under the legacy replay the member intervals are the
+    native dp/dpc and no member reference exists (its ranges are None)."""
+    calibrations, branches = {}, []
+    for entry in registry.values():
+        for materials in (entry.get("installed_materials") or {}).values():
+            for material in (materials or {}).values():
+                points = spring_mapping.spring_points(material) if material else None
+                if points is None:
+                    continue
+                key = str(_spring_calibration(material))
+                calibrations[key] = calibrations.get(key, 0) + 1
+                branches.extend(points[sign] for sign in ("positive", "negative"))
+
+    def span(name):
+        values = [b[name] for b in branches if b.get(name) is not None]
+        return [min(values), max(values)] if values else None
+    return {"installed_member_spring_calibrations": calibrations, "springs_read": sum(calibrations.values()),
+            "ranges_rad": {name: span(name) for name in RANGE_POINTS},
+            "definitions": {"member_theta_p_rad / member_theta_pc_rad": "Haselton 2008 MEMBER intervals of the end",
+                            "member_theta_y_reference_rad": "My/K0 on the half-member reference (frozen calibration only)",
+                            "member_theta_cap_reference_rad": "My/K0 + member theta_p (frozen calibration only)",
+                            "native_theta_y_rad": "My/Kh of the installed spring",
+                            "native_dp_rad / native_dpc_rad": "the installed command's dp / dpc",
+                            "native_theta_cap_rad": "native capping rotation My/Kh + dp",
+                            "native_du_rad": ("the retained native du (theta_p + theta_pc + legacy padding), a provisional "
+                                              "numerical cutoff, not a collapse rotation")}}
 
 
 def verify_installed_design(record):
@@ -192,9 +257,10 @@ def verify_installed_design(record):
                           "axial_estimate_range_kip": [min(e["axial_kip"] for e in columns), max(e["axial_kip"] for e in columns)] if columns else None,
                           "basis": "nominal P-M at the tributary gravity axial estimate fixed at build time; the same value for both axes; "
                                    "the saved record holds no per-member column hinge strength, so this is recorded, not verified"},
-        "rotation_capacities_and_ke": {"theta_p_range": [min(e["theta_p"] for e in registry.values()), max(e["theta_p"] for e in registry.values())] if registry else None,
-                                       "theta_u_range": [min(e["theta_u"] for e in registry.values()), max(e["theta_u"] for e in registry.values())] if registry else None,
-                                       "basis": "Haselton 2008 per member from the installed cage and hoops, and Ke = IMK_HINGE_STIFFNESS_FACTOR x 6EI/L; the "
+        "rotation_capacities_and_ke": {**_rotation_ranges(registry),
+                                       "basis": "Haselton 2008 member intervals per member from the installed cage and hoops, converted once "
+                                                "to native dp/dpc on the half-member reference under the frozen calibration (installed "
+                                                "directly under the legacy replay), and Ke = IMK_HINGE_STIFFNESS_FACTOR x 6EI/L; the "
                                                 "record stores no independent copy (production hinge_backbone.csv is written from this same registry), so "
                                                 "these are recorded, not verified"},
         "stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", None), "stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
@@ -209,7 +275,8 @@ def verify_installed_design(record):
                          "slab layout presence", "gravity load model", "steel materials", "hinged member count",
                          "beam family hogging/sagging strengths", "beam end strengths per member, end and sign against the record's "
                          "beam_slab_strengths entries" if per_end_checked else "beam end strengths (no record entries to compare)"],
-            "recorded_not_verified": ["column hinge strengths and axial estimates", "theta_p / theta_pc / theta_u", "spring Ke"]}
+            "recorded_not_verified": ["column hinge strengths and axial estimates", "member theta_p / theta_pc",
+                                      "native dp / dpc / du per end, axis and sign", "spring Ke"]}
 
 
 def verify_installed_grouped_design(record):
@@ -300,9 +367,10 @@ def verify_installed_grouped_design(record):
         "beam_end_strengths_verified_against_record_entries": ends_checked,
         "column_hinges": {"basis": "nominal P-M of each column's own section and cage at its tributary gravity axial estimate; the "
                                    "saved record holds no per-member column hinge strength, so this is recorded, not verified"},
-        "rotation_capacities_and_ke": {"theta_p_range": [min(e["theta_p"] for e in registry.values()), max(e["theta_p"] for e in registry.values())] if registry else None,
-                                       "theta_u_range": [min(e["theta_u"] for e in registry.values()), max(e["theta_u"] for e in registry.values())] if registry else None,
-                                       "basis": "Haselton 2008 per member from its own group's cage and hoops, and Ke from the member's own "
+        "rotation_capacities_and_ke": {**_rotation_ranges(registry),
+                                       "basis": "Haselton 2008 member intervals per member from its own group's cage and hoops, converted "
+                                                "once to native dp/dpc on the half-member reference under the frozen calibration "
+                                                "(installed directly under the legacy replay), and Ke from the member's own "
                                                 "properties; the record stores no independent copy, so these are recorded, not verified"},
         "stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", None), "stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
     }
@@ -311,7 +379,8 @@ def verify_installed_grouped_design(record):
             "verified": ["member groups digest", "every hinged member's group, section, longitudinal bars and hoops against its saved row",
                          "covers", "slab thickness", "slab layout presence", "gravity load model", "steel materials",
                          "hinged member count", "beam end strengths per member, end and sign", "beam bar rows per member"],
-            "recorded_not_verified": ["column hinge strengths and axial estimates", "theta_p / theta_pc / theta_u", "spring Ke"]}
+            "recorded_not_verified": ["column hinge strengths and axial estimates", "member theta_p / theta_pc",
+                                      "native dp / dpc / du per end, axis and sign", "spring Ke"]}
 
 
 # ---------------------------------------------------------------------------
@@ -390,14 +459,16 @@ def read_hinge_recorders(coverage, time_limit=None):
 # ---------------------------------------------------------------------------
 
 def _loop_energy(moment, rotation, ke):
-    """Dissipated energy of a spring history (kip-in): the work integral less the change in stored elastic energy.
+    """(net work less initial-Ke storage, raw work) of a spring history, kip-in. NOT dissipated energy.
 
     W = trapezoid integral of M dtheta from the first recorded row to the
-    last; the recoverable part is (M_last^2 - M_first^2) / (2 Ke) on the
-    installed elastic stiffness, so an elastic spring on any open path
-    returns exactly zero and a yielded spring returns the area its loops
-    enclose. After cyclic stiffness deterioration the recoverable term is
-    an estimate on Ke; the raw work integral is returned beside it.
+    last (signed); the subtracted storage is (M_last^2 - M_first^2) / (2 Ke)
+    on the installed INITIAL stiffness, so an elastic spring on any open
+    path returns exactly zero and closed loops on Ke return the area they
+    enclose. After cyclic stiffness deterioration the recoverable energy is
+    no longer on Ke and a partial cycle can leave the figure negative, so
+    it is an estimate (net_work_minus_initial_ke_storage_kip_in), never
+    reported as dissipation; the raw work integral is returned beside it.
     """
     if len(rotation) < 2:
         return 0.0, 0.0
@@ -436,12 +507,26 @@ def evaluate_hinge_histories(recorded, hinges, moment_tolerance=YIELD_MOMENT_TOL
     are None. These are diagnostics, not internal material state variables.
     ``virgin_yield_*`` are the
     origin-referenced criteria on the extrema; ``plastic_rotation_peak*``
-    is the production one-sided measure (peak rotation less that sign's
-    elastic limit, Ground_Motion_Main._hinge_backbone_rows);
-    ``spring_rotation_over_elastic_limit_*`` is the spring's own ratio
+    is the production one-sided measure (peak NATIVE spring rotation less
+    that sign's native yield My/Kh; ``plastic_rotation_peak`` the larger
+    sign); ``spring_rotation_over_elastic_limit_*`` is the spring's own ratio
     (the spring is IMK_HINGE_STIFFNESS_FACTOR times stiffer than the
     member, so this is not a member ductility). A spring with no rows
     (missing response) yields a row with ``response_missing`` True.
+
+    Capping and cutoff come from the spring's own installed points
+    (Model/IMK_Spring_Mapping.rotation_demand on spring_points, sign by
+    sign): ``capping_ratio`` = plastic rotation / native dp of the governing
+    sign (1 at the native capping point My/Kh + dp), ``damage_ratio`` :=
+    ``capping_ratio`` (under the legacy replay identical to the pre-freeze
+    plastic / theta_p), ``plastic_rotation`` the governing sign's plastic
+    rotation, ``past_capping`` a sign reached its native capping rotation and
+    ``past_native_cutoff`` a sign reached its retained native du (a
+    provisional numerical cutoff, not a collapse or material failure).
+    ``theta_p`` / ``theta_pc`` are the registry's MEMBER intervals and
+    ``theta_u`` the retained native du, reported, never compared with a
+    rotation. A released (elastic) end or a hinge without an installed
+    material record has no native points: those fields are None there.
     """
     index_of = {int(tag): k for k, tag in enumerate(recorded["hinge_tag_order"])}
     rows = []
@@ -458,14 +543,24 @@ def evaluate_hinge_histories(recorded, hinges, moment_tolerance=YIELD_MOMENT_TOL
             spring = h["springs"][axis]
             fy_pos, fy_neg, ke = spring["fy_positive_kip_in"], spring["fy_negative_kip_in"], spring["ke"]
             ty_pos, ty_neg = spring["theta_y_positive"], spring["theta_y_negative"]
+            material = (h.get("installed_materials") or {}).get(axis)
+            # The installed spring's own native and member-reference points per sign; None for a released end.
+            points = spring_mapping.spring_points(material) if material else None
             base = {"hinge_tag": int(h["hinge_tag"]), "member_tag": h["member_tag"], "member_type": h["member_type"], "end": h["end"],
                     "material_type": material_type,
-                    "installed_material": h.get("installed_materials", {}).get(axis),
+                    "installed_material": material,
+                    "member_spring_calibration": _spring_calibration(material),
+                    "released": bool((material or {}).get("released")),
+                    "spring_points": points,
+                    # On every row (missing, released and no-record rows too): the v3 and v4 rows share key names.
+                    "diagnostic_version": DIAGNOSTIC_VERSION,
+                    "demand_version": spring_mapping.DEMAND_VERSION if points is not None else None,
                     "yield_detection_basis": "legacy_bilin_tangent_proxy" if use_bilin_path else "virgin_envelope_exceedance",
                     "accumulated_plastic_rotation_available": use_bilin_path,
-                    "energy_measure": "work_minus_initial_Ke_storage_estimate",
+                    "energy_measure": "net_work_minus_initial_ke_storage_estimate_not_dissipation",
                     "spring_axis": axis, "beam_family": h.get("beam_family"), "joint_node": h["joint_node"],
                     "fy_positive_kip_in": fy_pos, "fy_negative_kip_in": fy_neg, "ke_kip_in_per_rad": ke,
+                    # Native spring yield My/Kh of each sign; the member intervals and the retained native du follow.
                     "theta_y_positive": ty_pos, "theta_y_negative": ty_neg,
                     "theta_p": h["theta_p"], "theta_pc": h["theta_pc"], "theta_u": h["theta_u"]}
             if block["rows"] == 0:
@@ -496,11 +591,20 @@ def evaluate_hinge_histories(recorded, hinges, moment_tolerance=YIELD_MOMENT_TOL
             else:
                 yielded_pos, yielded_neg = bool(v_pos_rot and v_pos_mom), bool(v_neg_rot and v_neg_mom)
             yielded = yielded_pos or yielded_neg
-            # Production one-sided peak measure.
-            peak_pos = max(0.0, max_rot - (ty_pos or 0.0))
-            peak_neg = max(0.0, -min_rot - (ty_neg or 0.0))
-            peak = max(peak_pos, peak_neg)
-            dissipated, work = _loop_energy(moment, rotation, ke)
+            # Production one-sided peak measure on the native spring rotation; capping and cutoff against the
+            # installed spring's own native points, sign by sign (None without installed points).
+            demand = spring_mapping.rotation_demand(points, max_rot, min_rot)
+            if demand is not None:
+                peak_pos = demand["by_sign"]["positive"]["plastic_rotation_rad"]
+                peak_neg = demand["by_sign"]["negative"]["plastic_rotation_rad"]
+            elif base["released"]:
+                # A released end is an elastic numerical pin: its rotation has no yield point, so no plastic part.
+                peak_pos = peak_neg = None
+            else:
+                peak_pos = max(0.0, max_rot - (ty_pos or 0.0))
+                peak_neg = max(0.0, -min_rot - (ty_neg or 0.0))
+            peak = None if peak_pos is None else max(peak_pos, peak_neg)
+            net_work, work = _loop_energy(moment, rotation, ke)
             rows.append({
                 **base, "response_missing": False,
                 "rotation_max": max_rot, "rotation_min": min_rot, "moment_max_kip_in": max_m, "moment_min_kip_in": min_m,
@@ -515,13 +619,17 @@ def evaluate_hinge_histories(recorded, hinges, moment_tolerance=YIELD_MOMENT_TOL
                 "virgin_yielded": virgin_yielded,
                 "criteria_disagree": bool(virgin_yielded != yielded) if use_bilin_path else None,
                 "plastic_rotation_peak_positive": peak_pos, "plastic_rotation_peak_negative": peak_neg, "plastic_rotation_peak": peak,
-                "plastic_rotation": peak,
+                # The governing sign is the larger capping ratio when native points are installed, else the larger plastic rotation.
+                "plastic_rotation": demand["plastic_rotation_rad"] if demand is not None else peak,
+                "governing_sign": demand["governing_sign"] if demand is not None else None,
                 "spring_rotation_over_elastic_limit_positive": (max_rot / ty_pos) if ty_pos else None,
                 "spring_rotation_over_elastic_limit_negative": (-min_rot / ty_neg) if ty_neg else None,
-                "damage_ratio": (peak / h["theta_p"]) if h["theta_p"] > 0 else None,
-                "past_capping": bool(h["theta_p"] > 0 and peak >= h["theta_p"]),
-                "past_ultimate": bool(max(max_rot, -min_rot) >= h["theta_u"]),
-                "dissipated_energy_kip_in": dissipated, "work_integral_kip_in": work,
+                "capping_ratio": demand["capping_ratio"] if demand is not None else None,
+                "damage_ratio": demand["capping_ratio"] if demand is not None else None,      # := capping_ratio
+                "past_capping": demand["past_capping"] if demand is not None else None,
+                "past_native_cutoff": demand["past_native_cutoff"] if demand is not None else None,
+                "demand_by_sign": demand["by_sign"] if demand is not None else None,
+                "net_work_minus_initial_ke_storage_kip_in": net_work, "work_integral_kip_in": work,
                 "samples": int(len(rotation)),
             })
     return rows
@@ -534,27 +642,41 @@ def yield_summary(rows):
     by_type = {}
     for r in present:
         key = (r["member_type"], r["spring_axis"])
-        entry = by_type.setdefault(f"{key[0]}/{key[1]}", {"springs": 0, "yielded": 0, "yielded_both_signs": 0, "criteria_disagree": 0, "past_capping": 0})
+        entry = by_type.setdefault(f"{key[0]}/{key[1]}", {"springs": 0, "yielded": 0, "yielded_both_signs": 0, "criteria_disagree": 0,
+                                                          "past_capping": 0, "past_native_cutoff": 0, "without_native_points": 0})
         entry["springs"] += 1
         entry["yielded"] += int(r["yielded"])
         entry["yielded_both_signs"] += int(r["yielded_positive"] and r["yielded_negative"])
         entry["criteria_disagree"] += int(bool(r["criteria_disagree"]))
-        entry["past_capping"] += int(r["past_capping"])
+        entry["past_capping"] += int(bool(r["past_capping"]))
+        entry["past_native_cutoff"] += int(bool(r.get("past_native_cutoff")))
+        entry["without_native_points"] += int(r.get("spring_points") is None)
+    calibrations = {}
+    for r in present:
+        calibrations[str(r.get("member_spring_calibration"))] = calibrations.get(str(r.get("member_spring_calibration")), 0) + 1
+    max_capping = max((r["capping_ratio"] or 0.0 for r in present), default=0.0)
     return {"springs": len(rows), "springs_with_response": len(present), "springs_missing_response": len(missing),
+            "member_spring_calibrations": calibrations, "demand_version": spring_mapping.DEMAND_VERSION,
+            "spring_points_version": spring_mapping.SPRING_POINTS_VERSION,
             "yielded_springs": len(yielded),
             "yielded_hinges": len({(r["hinge_tag"]) for r in yielded}),
             "yielded_members": len({r["member_tag"] for r in yielded}),
             "yielded_both_signs": sum(1 for r in yielded if r["yielded_positive"] and r["yielded_negative"]),
             "by_type": by_type,
-            "max_plastic_rotation_peak": max((r["plastic_rotation_peak"] for r in present), default=0.0),
+            "max_plastic_rotation_peak": max((r["plastic_rotation_peak"] for r in present
+                                              if r["plastic_rotation_peak"] is not None), default=0.0),
             "max_plastic_rotation_accumulated": max((r["plastic_rotation_accumulated"] for r in present
                                                      if r["plastic_rotation_accumulated"] is not None), default=None),
             "springs_with_accumulated_plastic_rotation": sum(r["plastic_rotation_accumulated"] is not None for r in present),
             "yield_detection_bases": sorted({r.get("yield_detection_basis", "legacy_bilin_tangent_proxy") for r in present}),
-            "max_damage_ratio": max((r["damage_ratio"] or 0.0 for r in present), default=0.0),
+            "max_capping_ratio": max_capping,
+            "max_damage_ratio": max_capping,                    # := max_capping_ratio
+            "springs_past_capping": sum(1 for r in present if r["past_capping"]),
+            "springs_past_native_cutoff": sum(1 for r in present if r.get("past_native_cutoff")),
+            "springs_without_native_points": sum(1 for r in present if r.get("spring_points") is None),
             "max_spring_rotation_over_elastic_limit": max((max(r["spring_rotation_over_elastic_limit_positive"] or 0.0,
                                                                r["spring_rotation_over_elastic_limit_negative"] or 0.0) for r in present), default=0.0),
-            "total_dissipated_energy_kip_in": float(sum(r["dissipated_energy_kip_in"] for r in present)),
+            "total_net_work_minus_initial_ke_storage_kip_in": float(sum(r["net_work_minus_initial_ke_storage_kip_in"] for r in present)),
             "criteria_disagreements": sum(1 for r in present if r["criteria_disagree"]),
             "yield_criteria": {"path_aware": f"accumulated plastic rotation in a direction > {PLASTIC_ROTATION_TOLERANCE:g} rad, plastic steps "
                                              f"being those with tangent < {PLASTIC_TANGENT_FRACTION:g} Ke (dtheta - dM/Ke)",
@@ -562,8 +684,23 @@ def yield_summary(rows):
                                "virgin_moment": f"peak |M| >= (1 - {YIELD_MOMENT_TOLERANCE:g}) Fy of that sign",
                                "yielded": "Bilin: legacy tangent proxy. PeakOriented/Pinching: virgin-envelope exceedance; "
                                           "may miss reversal yielding below the original envelope; not an internal material-state query",
-                               "energy": "work minus initial-Ke elastic-storage estimate; raw work integral also reported",
-                               "plastic_rotation": "peak-based one-sided measure (production definition); accumulated values beside it",
+                               "energy": ("net_work_minus_initial_ke_storage_kip_in: signed work integral less the change in elastic "
+                                          "storage on the initial Ke; an estimate, NOT dissipated energy (after stiffness deterioration "
+                                          "the recoverable part is not on Ke and a partial cycle can leave it negative); raw work integral "
+                                          "also reported"),
+                               "rotation": spring_mapping.DEMAND_DEFINITIONS["rotation"],
+                               "plastic_rotation": ("peak-based one-sided measure on the native spring rotation (production definition): "
+                                                    "plastic_rotation_peak the larger sign, plastic_rotation the governing sign's; "
+                                                    "accumulated values beside it"),
+                               "capping_ratio": spring_mapping.DEMAND_DEFINITIONS["capping_ratio"] + " of the governing sign",
+                               "damage_ratio": ("damage_ratio := capping_ratio (1 at the native capping point). Under the legacy "
+                                                "replay the member interval is the native dp, so it is plastic / theta_p of the "
+                                                "governing sign and of the spring's own end; the v3 rows took the larger sign over "
+                                                "the end-i interval, so v3 and v4 values are not interchangeable"),
+                               "past_capping": spring_mapping.DEMAND_DEFINITIONS["past_capping"],
+                               "past_native_cutoff": spring_mapping.DEMAND_DEFINITIONS["past_native_cutoff"],
+                               "without_native_points": ("a released (elastic) end or a hinge without an installed material record: "
+                                                         "no capping, cutoff or damage ratio is reported"),
                                "spring_rotation_over_elastic_limit": "spring-level ratio; the spring is IMK_HINGE_STIFFNESS_FACTOR x the member "
                                                                      "stiffness, so this is not a member ductility"}}
 
@@ -573,9 +710,9 @@ def stride_justification(recorded, hinges, rows, strides=(2, 4, 8)):
 
     Justifies or refutes a production stride: for each stride the share of
     full-rate yielded springs the decimated history still calls yielded,
-    the largest relative shortfall in peak rotation, peak moment and
-    dissipated energy over the yielded springs, and the largest absolute
-    shortfall in plastic rotation.
+    the largest relative shortfall in peak rotation, peak moment and net
+    work less initial-Ke storage (not dissipation) over the yielded
+    springs, and the largest absolute shortfall in plastic rotation.
     """
     full = {(r["hinge_tag"], r["spring_axis"]): r for r in rows if not r.get("response_missing")}
     yielded_keys = [k for k, r in full.items() if r["yielded"]]
@@ -597,14 +734,16 @@ def stride_justification(recorded, hinges, rows, strides=(2, 4, 8)):
             f_mom = max(abs(f["moment_max_kip_in"]), abs(f["moment_min_kip_in"])); d_mom = max(abs(d["moment_max_kip_in"]), abs(d["moment_min_kip_in"]))
             rot_short = max(rot_short, (f_rot - d_rot) / f_rot if f_rot > 0 else 0.0)
             mom_short = max(mom_short, (f_mom - d_mom) / f_mom if f_mom > 0 else 0.0)
-            if f["dissipated_energy_kip_in"] > 0:
-                energy_short = max(energy_short, (f["dissipated_energy_kip_in"] - d["dissipated_energy_kip_in"]) / f["dissipated_energy_kip_in"])
+            if f["net_work_minus_initial_ke_storage_kip_in"] > 0:
+                energy_short = max(energy_short, (f["net_work_minus_initial_ke_storage_kip_in"] - d["net_work_minus_initial_ke_storage_kip_in"])
+                                   / f["net_work_minus_initial_ke_storage_kip_in"])
             plastic_short = max(plastic_short, f["plastic_rotation_peak"] - d["plastic_rotation_peak"])
         out[str(stride)] = {"rows_full_rate": recorded["y"]["rows"] if "y" in recorded else None, "rows_decimated": decimated["y"]["rows"] if "y" in decimated else None,
                             "yielded_full_rate": len(yielded_keys), "yielded_recovered": recovered, "yielded_missed": len(yielded_keys) - recovered,
                             "yielded_only_in_decimated": false_new,
                             "max_relative_shortfall_peak_rotation": rot_short, "max_relative_shortfall_peak_moment": mom_short,
-                            "max_relative_shortfall_dissipated_energy": energy_short, "max_absolute_shortfall_plastic_rotation_rad": plastic_short}
+                            "max_relative_shortfall_net_work_minus_initial_ke_storage": energy_short,
+                            "max_absolute_shortfall_plastic_rotation_rad": plastic_short}
     return {"strides": out, "production_strides": {"hinge_rotation": getattr(sp, "NTHA_HINGE_HISTORY_STRIDE", None),
                                                    "element_force": getattr(sp, "NTHA_ELEMENT_HISTORY_STRIDE", None)},
             "basis": "decimation of the full-rate recorder rows (every k-th committed row), re-evaluated with the same criteria; peaks and "
@@ -622,8 +761,11 @@ ZERO_LINE = {"color": "black", "lw": 1.1, "alpha": 0.9, "zorder": 1}
 def _loop_axis(ax, r, rotation, moment, title, fontsize=10, legend=True):
     """One readable moment-rotation loop: symmetric frame on the loop, bold zero lines, reference lines and labels."""
     x_lim = 1.2 * max(abs(r["rotation_max"]), abs(r["rotation_min"]), 1e-6) * 100.0
-    y_lim = 1.15 * max(abs(r["moment_max_kip_in"]), abs(r["moment_min_kip_in"]),
-                       sp.IMK_FMAXFY_POS * r["fy_positive_kip_in"], sp.IMK_FMAXFY_NEG * r["fy_negative_kip_in"])
+    points = r.get("spring_points")
+    # The installed capping moment Mc of each sign frames the plot; the configured Fmax/Fy only without installed points.
+    mc_pos = points["positive"]["Mc_kip_in"] if points else sp.IMK_FMAXFY_POS * r["fy_positive_kip_in"]
+    mc_neg = points["negative"]["Mc_kip_in"] if points else sp.IMK_FMAXFY_NEG * r["fy_negative_kip_in"]
+    y_lim = 1.15 * max(abs(r["moment_max_kip_in"]), abs(r["moment_min_kip_in"]), mc_pos, mc_neg)
     ax.axhline(0.0, **ZERO_LINE)
     ax.axvline(0.0, **ZERO_LINE)
     ax.plot(rotation * 100.0, moment, lw=0.8, color=LOOP_COLOR, alpha=0.95, zorder=3, label="spring response")
@@ -633,7 +775,7 @@ def _loop_axis(ax, r, rotation, moment, title, fontsize=10, legend=True):
     ax.axhline(-r["fy_negative_kip_in"], color="#c0392b", ls=":", lw=1.4, zorder=2)
     ax.set_xlim(-x_lim, x_lim)
     ax.set_ylim(-y_lim, y_lim)
-    ax.set_xlabel("spring rotation (%)", fontsize=fontsize)
+    ax.set_xlabel("native spring rotation (rad x 100; not story drift)", fontsize=fontsize)
     ax.set_ylabel("spring moment (kip-in)", fontsize=fontsize)
     ax.tick_params(labelsize=fontsize - 1)
     ax.grid(True, alpha=0.25, zorder=0)
@@ -647,16 +789,32 @@ def _loop_title(r, detail=True):
             f"{' (' + r['beam_family'] + ')' if r['beam_family'] else ''}")
     if not detail:
         return head
-    line2 = (f"rotation {100 * r['rotation_min']:+.2f}% to {100 * r['rotation_max']:+.2f}%   "
-             f"peak beyond elastic limit {r['plastic_rotation_peak']:.4f} rad; {_accumulated_label(r)}")
-    line3 = (f"energy estimate {r['dissipated_energy_kip_in']:.0f} kip-in   "
-             f"capping at {100 * ((r['theta_y_positive'] or 0.0) + r['theta_p']):.1f}% (damage {r['damage_ratio'] if r['damage_ratio'] is not None else 0:.2f})")
+    # In rad like the rest of the title: a percent would read as a story drift.
+    line2 = (f"native spring rotation {r['rotation_min']:+.4f} to {r['rotation_max']:+.4f} rad   "
+             f"{_peak_label(r)}; {_accumulated_label(r)}")
+    line3 = (f"net work - initial-Ke storage {r['net_work_minus_initial_ke_storage_kip_in']:.0f} kip-in (not dissipation)   "
+             f"{_capping_label(r)}")
     return "\n".join([head, line2, line3])
+
+
+def _peak_label(row):
+    value = row["plastic_rotation_peak"]
+    return ("peak beyond elastic limit n/a (released end)" if value is None
+            else f"peak beyond elastic limit {value:.4f} rad")
 
 
 def _accumulated_label(row):
     value = row["plastic_rotation_accumulated"]
     return "accumulated plastic rotation unavailable" if value is None else f"accumulated {value:.4f} rad"
+
+
+def _capping_label(row):
+    """The installed spring's native capping rotation My/Kh + dp of each sign and the capping ratio it reached."""
+    points = row.get("spring_points")
+    if points is None:
+        return "released end: no IMK backbone" if row.get("released") else "native capping unknown (no installed material record)"
+    return (f"native capping My/Kh+dp +{points['positive']['native_theta_cap_rad']:.4f} / "
+            f"-{points['negative']['native_theta_cap_rad']:.4f} rad (capping ratio {row['capping_ratio']:.2f})")
 
 
 def plot_hinge_loops(recorded, hinges, rows, output_dir, limit=24, only_yielded=True):
@@ -669,7 +827,8 @@ def plot_hinge_loops(recorded, hinges, rows, output_dir, limit=24, only_yielded=
     output_dir.mkdir(parents=True, exist_ok=True)
     index_of = {int(tag): k for k, tag in enumerate(recorded["hinge_tag_order"])}
     selected = [r for r in rows if not r.get("response_missing") and (r["yielded"] or not only_yielded)]
-    selected.sort(key=lambda r: -r["dissipated_energy_kip_in"])
+    # Ranked by the loop-area estimate (net work less initial-Ke storage), which is not a dissipated energy.
+    selected.sort(key=lambda r: -r["net_work_minus_initial_ke_storage_kip_in"])
     selected = selected[:limit]
     written = []
     for r in selected:
@@ -691,12 +850,14 @@ def plot_hinge_loops(recorded, hinges, rows, output_dir, limit=24, only_yielded=
             block = recorded[r["spring_axis"]]
             _loop_axis(ax, r, block["rotation"][:, k], block["moment"][:, k],
                        _loop_title(r, detail=False) + "\n" +
-                       f"Fy +{r['fy_positive_kip_in']:.0f} / -{r['fy_negative_kip_in']:.0f} kip-in, E {max(r['dissipated_energy_kip_in'], 0.0):.0f} kip-in",
+                       f"Fy +{r['fy_positive_kip_in']:.0f} / -{r['fy_negative_kip_in']:.0f} kip-in, "
+                       f"net work - Ke storage {r['net_work_minus_initial_ke_storage_kip_in']:.0f} kip-in",
                        fontsize=9, legend=False)
         for ax in axes.flat[len(selected):]:
             ax.axis("off")
-        figure.suptitle("spring moment (kip-in) vs rotation (%): yielded springs ranked by dissipated energy; "
-                        "black = zero lines, red dotted = installed Fy per sign, grey dashed = installed Ke", fontsize=11)
+        figure.suptitle("spring moment (kip-in) vs native spring rotation (rad x 100): yielded springs ranked by net work less "
+                        "initial-Ke storage (not dissipation); black = zero lines, red dotted = installed Fy per sign, "
+                        "grey dashed = installed Ke", fontsize=11)
         figure.tight_layout(rect=(0, 0, 1, 0.975))
         gallery = output_dir / "loops_gallery.png"
         figure.savefig(gallery, dpi=120)
@@ -730,8 +891,8 @@ def plot_selected_loops(recorded, rows, selection, output_dir, name):
         block = recorded[r["spring_axis"]]
         _loop_axis(ax, r, block["rotation"][:, k], block["moment"][:, k],
                    _loop_title(r, detail=False) + "\n" +
-                   f"Fy +{r['fy_positive_kip_in']:.0f} / -{r['fy_negative_kip_in']:.0f} kip-in; peak beyond elastic limit "
-                   f"{r['plastic_rotation_peak']:.4f} rad; {_accumulated_label(r)}", fontsize=9, legend=(ax is axes.flat[0]))
+                   f"Fy +{r['fy_positive_kip_in']:.0f} / -{r['fy_negative_kip_in']:.0f} kip-in; "
+                   f"{_peak_label(r)}; {_accumulated_label(r)}", fontsize=9, legend=(ax is axes.flat[0]))
     figure.tight_layout()
     path = Path(output_dir) / name
     figure.savefig(path, dpi=140)

@@ -16,6 +16,7 @@ import Structure_Parameters as sp
 from Model import IMK_Hinges as hinges
 from Model.IMK_Materials import (MAPPING_VERSION, MATERIAL_TYPES, RotationalBackbone,
     CyclicParameters, active_energy_modes, define_mapped_rotational_imk, validate_energy_calibration)
+from Model.IMK_Spring_Mapping import FROZEN_V2, LEGACY_REPLAY
 
 POS = RotationalBackbone(.01, .05, .10, 100., 1.10, .10)
 NEG = RotationalBackbone(.014, .055, .11, 160., 1.12, .15)
@@ -108,9 +109,12 @@ def member(kind, axis, reversed_nodes=False, fixed_high=False):
     # synthetic energies keep the orientation check away from loss of all
     # lateral resistance; this is not an experimental calibration rule.
     fixture = {e: {a: profile(kind, 200. if column else 20.) for a in ("y", "z")} for e in ("i", "j")}
+    # Explicit energies, IMKBilin and asymmetric D/FMAXFY/FRESFY: the pre-freeze rule, kept as the explicit legacy
+    # replay (frozen IMK V2 calibration, 2026-10-29).
     values = {"IMK_MATERIAL_TYPE": kind, "IMK_ENERGY_MAPPING_MODE": MAPPING_VERSION,
               "IMK_D_POS": .65, "IMK_D_NEG": .90, "IMK_FMAXFY_POS": 1.10,
-              "IMK_FMAXFY_NEG": 1.12, "IMK_FRESFY_POS": .10, "IMK_FRESFY_NEG": .15}
+              "IMK_FMAXFY_NEG": 1.12, "IMK_FRESFY_POS": .10, "IMK_FRESFY_NEG": .15,
+              "IMK_MEMBER_SPRING_CALIBRATION": LEGACY_REPLAY}
     bb = {"theta_p": .01, "theta_pc": .05, "theta_u": .1,
           "theta_p_neg": .014, "theta_pc_neg": .055, "theta_u_neg": .11,
           "source": "synthetic directionally asymmetric regression"}
@@ -192,17 +196,32 @@ class EnergyMappingTests(unittest.TestCase):
                 "max_moment_rotation_difference": max(errors), "failed_steps": 0}
 
     def test_missing_or_unreviewed_profiles_fail_before_domain_mutation(self):
+        # The explicit-energy mapping with supplied member profiles: the pre-freeze rule, kept as the explicit legacy
+        # replay (frozen IMK V2 calibration, 2026-10-29).
         for bad in (None, {}, {"i": {}, "j": {}}):
             with self.subTest(profile=bad), mock.patch.multiple(sp, IMK_ENERGY_MAPPING_MODE=MAPPING_VERSION,
-                    IMK_MEMBER_ENERGY_CALIBRATIONS={"1": bad}), mock.patch.object(hinges, "_create_hinge_node") as mutate:
+                    IMK_MEMBER_ENERGY_CALIBRATIONS={"1": bad}, IMK_MEMBER_SPRING_CALIBRATION=LEGACY_REPLAY), \
+                    mock.patch.object(hinges, "_create_hinge_node") as mutate:
                 with self.assertRaises(ValueError):
                     hinges.create_imk_member(1, 1, 2, "beam_x", 9)
                 mutate.assert_not_called()
         synthetic = {e: {a: profile("IMKPeakOriented") for a in ("y", "z")} for e in ("i", "j")}
         with mock.patch.multiple(sp, IMK_MATERIAL_TYPE="IMKPeakOriented", IMK_ENERGY_MAPPING_MODE=MAPPING_VERSION,
-                                 IMK_MEMBER_ENERGY_CALIBRATIONS={"1": synthetic}):
+                                 IMK_MEMBER_ENERGY_CALIBRATIONS={"1": synthetic},
+                                 IMK_MEMBER_SPRING_CALIBRATION=LEGACY_REPLAY):
             with self.assertRaisesRegex(ValueError, "experimentally_supported"):
                 hinges.create_imk_member(1, 1, 2, "beam_x", 9)
+
+    def test_frozen_calibration_refuses_supplied_member_energies_before_domain_mutation(self):
+        # Frozen IMK V2 calibration (2026-10-29): it derives its own energies and refuses the explicit-energy mapping.
+        synthetic = {e: {a: profile("IMKPeakOriented") for a in ("y", "z")} for e in ("i", "j")}
+        with mock.patch.multiple(sp, IMK_MATERIAL_TYPE="IMKPeakOriented", IMK_ENERGY_MAPPING_MODE=MAPPING_VERSION,
+                                 IMK_MEMBER_ENERGY_CALIBRATIONS={"1": synthetic},
+                                 IMK_MEMBER_SPRING_CALIBRATION=FROZEN_V2), \
+                mock.patch.object(hinges, "_create_hinge_node") as mutate:
+            with self.assertRaisesRegex(ValueError, FROZEN_V2):
+                hinges.create_imk_member(1, 1, 2, "beam_x", 9)
+            mutate.assert_not_called()
 
     def test_assembled_columns_both_bending_axes_and_connectivities(self):
         for kind in ("IMKBilin", "IMKPeakOriented"):

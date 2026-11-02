@@ -329,22 +329,36 @@ class AxialDomain(unittest.TestCase):
 
 
 class FakeState:
-    """A stand-in for a grouped design that records the hoop updates it was given."""
+    """A stand-in for a grouped design that records the hoop updates it was given; ``tick`` counts the selections that
+    produced it, so each scripted selection returns a design of its own identity. It has no member groups."""
+    designs, groups = {}, {}
 
-    def __init__(self, hoops=()):
-        self.hoops = tuple(hoops)
+    def __init__(self, hoops=(), tick=0):
+        self.hoops, self.tick = tuple(hoops), tick
 
     def with_designs(self, updates):
-        return FakeState(self.hoops + tuple(sorted(updates)))
+        return FakeState(self.hoops + tuple(sorted(updates)), self.tick)
+
+    def identity(self):
+        return f"{self.hoops}|{self.tick}"
 
 
 class SettlementContract(unittest.TestCase):
     def run_pass(self, selection_results, hoop_results, margins=(1.0,), max_passes=6):
-        """reinforcement_pass with scripted selection reports and hoop updates; returns (result, capacities built)."""
+        """reinforcement_pass with scripted selection reports and hoop updates; returns (result, capacities built). The
+        terminal-arrangement closure after the last hoop change is passed through (the stand-in has no arrangement) and
+        the states it was given are recorded in self.closed."""
         selections, hoops, built = iter(selection_results), iter(hoop_results), []
+        self.closed = []
+
+        def close(state, *args, **kwargs):
+            self.closed.append(state)
+            return state
 
         def select(state, actions, cfg, scwb_margin=1.0):
-            return state, {"settled": next(selections), "exhausted_groups": []}
+            settled = next(selections)
+            # An unsettled scripted selection changes the design (a new identity); a settled one returns it as it is.
+            return (state if settled else FakeState(state.hoops, state.tick + 1)), {"settled": settled, "exhausted_groups": []}
 
         def build(actions, expected_ids, cfg, transfers, state, compatibility=None):
             built.append(state)
@@ -354,7 +368,8 @@ class SettlementContract(unittest.TestCase):
         with mock.patch.object(gd.selection, "select_reinforcement", select), mock.patch.object(gd.mg, "install"), \
                 mock.patch.object(gd.capacity_design, "build_group_capacity_design", build), \
                 mock.patch.object(gd.capacity_design, "hoop_updates", lambda capacity, state: next(hoops)), \
-                mock.patch.object(gd, "joint_check_inputs", return_value={}), mock.patch.object(joints, "evaluate_joints", return_value=[]):
+                mock.patch.object(gd, "joint_check_inputs", return_value={}), mock.patch.object(joints, "evaluate_joints", return_value=[]), \
+                mock.patch.object(gd.selection, "close_terminal_arrangement", close):
             return gd.reinforcement_pass(FakeState(), [], [], None, None, max_passes=max_passes, scwb_margins=margins), built
 
     def test_the_reviewed_probe_unsettled_selection_with_still_hoops_is_not_settled(self):
@@ -363,6 +378,7 @@ class SettlementContract(unittest.TestCase):
         self.assertFalse(result["selection_settled"])
         self.assertTrue(result["hoops_settled"])
         self.assertEqual(len(result["log"]), 6)                                # every pass was spent; nothing was relaxed
+        self.assertEqual(result["stop"], "pass_budget")
         self.assertEqual({entry["selection_settled"] for entry in result["log"]}, {False})
         self.assertEqual(len(built), 6)
 
@@ -386,6 +402,37 @@ class SettlementContract(unittest.TestCase):
         self.assertEqual(len(built), 7)                                        # six passes and one rebuild
         self.assertIs(result["capacity"]["built_for"], result["state"])        # and the capacity design describes them
         self.assertIsNot(built[5], result["state"])                            # the last in-loop capacity design did not
+        self.assertEqual(self.closed, [result["state"]])                       # the final hoops' arrangement was closed first
+
+    def test_a_pass_whose_input_repeats_an_earlier_one_stops_as_a_cycle(self):
+        # The selection returns its input unchanged and unsettled, and the hoops stand still: the next pass would start
+        # from the same input, so the passes stop as a proven cycle instead of spending the budget. The repeated state
+        # does not meet the selection's rules here, so nothing is adopted (Grouped_Design.resolve_cycle).
+        built, closed = [], []
+        unmet = {"rules": "stand-in", "verified": False, "failing": ["beam:stand_in:strength_short"], "beams": {},
+                 "columns": {}}
+
+        def select(state, actions, cfg, scwb_margin=1.0):
+            return state, {"settled": False, "exhausted_groups": []}
+
+        def build(actions, expected_ids, cfg, transfers, state, compatibility=None):
+            built.append(state)
+            return {"built_for": state}
+
+        import Design.SMRF_Joints as joints
+        with mock.patch.object(gd.selection, "select_reinforcement", select), mock.patch.object(gd.mg, "install"), \
+                mock.patch.object(gd.capacity_design, "build_group_capacity_design", build), \
+                mock.patch.object(gd.capacity_design, "hoop_updates", lambda capacity, state: {}), \
+                mock.patch.object(gd, "joint_check_inputs", return_value={}), mock.patch.object(joints, "evaluate_joints", return_value=[]), \
+                mock.patch.object(gd.selection, "close_terminal_arrangement", lambda state, *a, **k: closed.append(state) or state), \
+                mock.patch.object(gd.selection, "verify_installed_selection",
+                                  lambda state, *a, **k: {**unmet, "state_identity": state.identity()}):
+            result = gd.reinforcement_pass(FakeState(), [], [], None, None, max_passes=6, scwb_margins=(1.0,))
+        self.assertEqual((result["stop"], result["cycle"]["pass"], result["cycle"]["repeats_pass"]), ("cycle", 2, 1))
+        self.assertEqual(len(result["log"]), 1)
+        self.assertFalse(result["settled"])
+        self.assertEqual(result["resolution"], "cycle_unresolved")
+        self.assertIsNone(result["cycle"]["resolution"]["adopted_state_identity"])
 
     def test_the_candidate_constraints_carry_both_conditions(self):
         import inspect

@@ -71,6 +71,7 @@ from Analysis.Response_Spectrum import (  # noqa: E402
     SPECTRUM_PERIODS_SEC,
     pseudo_spectral_acceleration,
 )
+from Model import IMK_Spring_Mapping as spring_mapping  # noqa: E402  (plain data; no OpenSees)
 
 GROUND_MOTION_DIR = RC_DIR / "Ground_Motions"
 RECORD_MANIFEST = GROUND_MOTION_DIR / "metadata" / "record_manifest.csv"
@@ -205,16 +206,21 @@ def collect_pilot_observations(dataset_roots):
             if drift > COLLAPSE_DRIFT_CEILING:
                 continue
 
+            globals_path = path.parent / "global_parameters.json"
             global_parameters = json.loads(
-                (path.parent / "global_parameters.json").read_text(encoding="utf-8")
-            ) if (path.parent / "global_parameters.json").exists() else {}
+                globals_path.read_text(encoding="utf-8")
+            ) if globals_path.exists() else {}
 
             # The design route and hinge model this run was produced with, so the
             # artifact can say what it is valid for (see MODEL_IDENTITY_KEYS).
             case_dir = path.parents[2]
             if case_dir not in design_schemas:
                 design_schemas[case_dir] = _design_schema_version(case_dir / "design.json")
-            model = {key: global_parameters.get(key) for key in MODEL_IDENTITY_KEYS}
+            # A key the run's global_parameters.json predates takes the value a run of that age used, per run:
+            # left None, pilot_model_identity would drop it and a pilot mixing pre-freeze and frozen runs would
+            # pass as frozen (frozen IMK V2 calibration, 2026-10-29). A run without the file says nothing.
+            predating = PREDATING_PILOT_VALUES if globals_path.exists() else {}
+            model = {key: global_parameters.get(key, predating.get(key)) for key in MODEL_IDENTITY_KEYS}
             model["design_schema_version"] = design_schemas[case_dir]
 
             observations.append(
@@ -263,7 +269,15 @@ MODEL_IDENTITY_KEYS = (
     "imk_use_calibrated_backbone",
     "imk_hinge_stiffness_mode",
     "imk_hinge_stiffness_factor",
+    # The frozen IMK V2 calibration (2026-10-29) changes every member spring's native capping rotation and
+    # deterioration energy while leaving the keys above unchanged, so a calibration fitted before it is stale.
+    "imk_member_spring_calibration",
 )
+
+# The value a pilot run used for a key its global_parameters.json predates, where that is known. Every run
+# written before the frozen IMK V2 calibration (2026-10-29) installed the pre-freeze rule (member intervals as
+# native values, nominal-yield-rotation energy), which the running code reproduces only as the legacy replay.
+PREDATING_PILOT_VALUES = {"imk_member_spring_calibration": spring_mapping.LEGACY_REPLAY}
 
 
 def current_model_identity():
@@ -287,6 +301,7 @@ def current_model_identity():
         "imk_use_calibrated_backbone": bool(sp.IMK_USE_CALIBRATED_BACKBONE),
         "imk_hinge_stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", "member_stiffness_factor"),
         "imk_hinge_stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
+        "imk_member_spring_calibration": spring_mapping.active_calibration(),
     }
 
 
@@ -316,9 +331,15 @@ def pilot_model_identity(observations):
 def calibration_model_mismatch(payload, current=None):
     """Keys on which the artifact's model differs from the running code; {} when it matches.
 
-    The pilot's own recorded value wins; a key the pilot predates falls back to
-    the code state at fit time. An artifact with no model identity (fitted
-    before 2026-09-26) mismatches on every key.
+    The pilot's own recorded value wins (collect_pilot_observations already
+    fills, per run, a key the run predates from PREDATING_PILOT_VALUES); in an
+    artifact fitted before that per-run fill, a key the whole pilot predates
+    takes the value PREDATING_PILOT_VALUES knows a run of that age used (the
+    member spring calibration: the pre-freeze rule, i.e. the legacy replay),
+    and otherwise falls back to the code state at fit time. An artifact with no
+    model identity (fitted before 2026-09-26) mismatches on every key whose
+    value its age does not imply: under the legacy replay its member spring
+    calibration matches, and it is refused on the others.
     """
     current = current or current_model_identity()
     recorded = payload.get("model_identity") or {}
@@ -331,7 +352,13 @@ def calibration_model_mismatch(payload, current=None):
             differences[key] = {"calibration": pilot.get(key), "current": current.get(key),
                                 "note": "the pilot mixed several values"}
             continue
-        expected = pilot.get(key) if pilot.get(key) is not None else at_fit.get(key)
+        expected = pilot.get(key)
+        if expected is None and key in PREDATING_PILOT_VALUES and payload.get("pilot_observation_count"):
+            # The pilot ran but did not record the key: it predates it, so the fit-time code state says
+            # nothing about what the pilot installed.
+            expected = PREDATING_PILOT_VALUES[key]
+        if expected is None:
+            expected = at_fit.get(key)
         if expected != current.get(key):
             differences[key] = {"calibration": expected, "current": current.get(key)}
     return differences

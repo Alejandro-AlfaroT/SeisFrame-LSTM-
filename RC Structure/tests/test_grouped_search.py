@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import contract_fixture as cf                                                    # noqa: E402
 import grouped_fixture as gf                                                     # noqa: E402
 
 from Design import Grouped_Design as gd                                          # noqa: E402
@@ -38,24 +39,36 @@ def quantities(state, steel):
 
 
 class Stub:
-    """A candidate evaluation with declared rules: feasible(state), steel(state), constraints(state)."""
+    """A candidate evaluation with declared rules: feasible(state), steel(state), constraints(state).
 
-    def __init__(self, feasible, steel=lambda state: 100.0, constraints=lambda state: {}, infeasible=lambda state: None):
-        self.feasible, self.steel, self.constraints, self.infeasible = feasible, steel, constraints, infeasible
+    The record meets the code-check contract (contract_fixture): a state the rule calls feasible passes the
+    preliminary screen and has every required row passing; any other state fails the screen and one member-strength
+    row. ``rows(state)`` may supply the rows instead (unknown, missing or forged evidence); ``constraints`` are merged
+    over explicit True completion flags."""
+
+    def __init__(self, feasible, steel=lambda state: 100.0, constraints=lambda state: {}, infeasible=lambda state: None,
+                 rows=None):
+        self.feasible, self.steel, self.constraints, self.infeasible, self.rows = feasible, steel, constraints, infeasible, rows
         self.evaluated, self.installed = [], []
 
     def evaluate(self, state, cfg, context=None, label="candidate", keep_actions=True):
         self.evaluated.append(state)
         mg.install(state)
-        record = {"version": "stub", "label": label, "sections": gd._section_table(state), "stages": {}, "solves": {},
-                  "elapsed_seconds": 0.0, "state": state}
         reason = self.infeasible(state)
         if reason is not None:
-            return {**record, "status": "infeasible", "feasible": False, "failed_stage": reason[0], "reason": reason[1],
-                    "failure_evidence": reason[2]}
-        return {**record, "status": "evaluated", "feasible": bool(self.feasible(state)), "constraints": self.constraints(state),
-                "quantities": quantities(state, self.steel(state)), "margins": {}, "dcr": {"column": 0.5, "beam": 0.5},
-                "result_identity": state.identity(), "evidence": {"capacity": {"joint_types": {}}}}
+            return {"version": gd.EVALUATION_VERSION, "label": label, "sections": gd._section_table(state), "stages": {},
+                    "solves": {}, "elapsed_seconds": 0.0, "state": state, "seed_identity": state.identity(),
+                    "status": "infeasible", "feasible": False, "candidate_screen_passed": False,
+                    "failed_stage": reason[0], "reason": reason[1], "failure_evidence": reason[2]}
+        passed = bool(self.feasible(state))
+        if self.rows is not None:
+            rows = self.rows(state)
+        elif passed:
+            rows = cf.rows_for(state, cfg)
+        else:
+            rows = cf.rows_for(state, cfg, {("strength", "member.strength", sorted(state.groups)[0]): "fail"})
+        return cf.evaluation_record(state, cfg, rows=rows, quantities=quantities(state, self.steel(state)),
+                                    constraints=self.constraints(state), screen=passed, label=label)
 
     def install(self, evaluation):
         self.installed.append(evaluation["state"])
@@ -390,7 +403,7 @@ class SearchRuns(Fixture):
                 with self.assertRaises(KeyError):
                     gs.search(self.seed, cfg=None, log_path=path, verbose=False)
             lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual([line["decision"] for line in lines], ["feasible", "error"])
+        self.assertEqual([line["decision"] for line in lines], ["screen_passed", "error"])
         self.assertIn("KeyError", lines[1]["decision_reason"])
         self.assertIn("Traceback", lines[1]["traceback"])
         self.assertEqual(lines[1]["evaluation"]["status"], "error")

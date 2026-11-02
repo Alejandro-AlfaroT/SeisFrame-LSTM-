@@ -258,6 +258,7 @@ def _beam_shear_share_criterion(edge):
 
 
 def _slab_completion_context(slab, cfg):
+    from Design.SMRF_Beam_Slab_Strength import uniform_perimeter_hook_corners
     return {"clear_span_x_in": sp.BAY_X - sp.H_COL, "clear_span_y_in": sp.BAY_Y - sp.B_COL,
             "beam_width_in": sp.B_BEAM, "alpha_f_min": min(edge["alpha_f"] for panel in slab["panels"]
                                                            for edge in panel["edges"]),
@@ -267,12 +268,17 @@ def _slab_completion_context(slab, cfg):
             "column_core_width_in": min(sp.B_COL, sp.H_COL) - 2.0 * sp.longitudinal_cover_in("column"),
             "two_way_shear_path_assessed": (cfg.slab_actions.all_asserted()
                                              and cfg.slab_actions.two_way_shear_path_assessed is True),
+            "slab_column_local_steel_assessed": (cfg.slab_actions.all_asserted()
+                                                 and cfg.slab_actions.slab_column_local_steel_assessed is True),
             # This builder places beams in both directions at each column.
             # Acceptance of the local shear path remains a separate assertion.
             "columns_at_beam_intersections": True,
             "beam_clear_cover_in": sp.BEAM_CLEAR_COVER_IN,
             "beam_hoop_diameter_in": sp.rebar_diameter(sp.BEAM_STIRRUP_BAR_SIZE),
-            "fc_beam_ksi": sp.FC_BEAM_KSI}
+            "fc_beam_ksi": sp.FC_BEAM_KSI,
+            "perimeter_hook_corners": uniform_perimeter_hook_corners(
+                sp.H_COL, sp.B_COL, sp.COL_CLEAR_COVER_IN, sp.rebar_diameter(sp.COL_STIRRUP_BAR_SIZE), sp.B_BEAM,
+                sp.rebar_diameter(sp.BEAM_STIRRUP_BAR_SIZE), sp.BEAM_CLEAR_COVER_IN)}
 
 
 def _update_slab_reinforcement(cfg, slab):
@@ -286,6 +292,9 @@ def _update_slab_reinforcement(cfg, slab):
     qualification keeps the slab contribution and SCWB not_evaluated. A slab
     whose ladder is exhausted under asserted evidence is a design failure.
     """
+    if getattr(cfg.floor_analysis, "slab_procedure", None) is not None:
+        raise ValueError("A slab procedure (FloorAnalysisConfig.slab_procedure) is defined for the grouped route only: "
+                         "the uniform route does not check its domain or its per-floor instances.")
     if not cfg.floor_analysis.transfer_to_frame:
         sp.SLAB_REINFORCEMENT = None
         sp.SLAB_ACTIONS = None
@@ -1217,12 +1226,14 @@ def _joint_scwb_state(actions, expected_ids):
     state["slab_reinforcement"] = sp.SLAB_REINFORCEMENT if sp.SLAB_THICKNESS_IN is not None else None
     state["beam_slab_strengths"] = beam_slab_strengths(state)[0]
     evidence = build_joint_evidence(state, actions, expected_combination_ids=list(expected_ids))
-    failing, counts, ratios, excepted = [], {"pass": 0, "fail": 0, "not_evaluated": 0}, [], 0
+    from Design.Code_Check_Contract import scwb_summary
+    failing, counts, ratios, excepted, rows = [], {"pass": 0, "fail": 0, "not_evaluated": 0}, [], 0, []
     for joint in evidence["joints"]:
         for axis in ("x", "y"):
             for sign in ("positive", "negative"):
                 sway = joint["directions"][axis][sign]
                 check = scwb_check(sway, location=f"{joint['id']}/{axis}/{sign}")
+                rows.append(check)
                 counts[check["status"]] += 1
                 if check["status"] == "not_evaluated":
                     continue
@@ -1233,9 +1244,16 @@ def _joint_scwb_state(actions, expected_ids):
                 ratios.append(check["details"]["ratio_provided"])
                 if check["status"] == "fail":
                     failing.append((check, sway, axis))
+    # all_pass: every joint, direction and sway sign evaluated and passing (2026-10-30); no_known_failure is the weaker
+    # statement the steel pass reacts to (an unevaluated joint is not a reason to grow a column).
+    summary = scwb_summary(rows, [f"{joint['id']}/{axis}/{sign}" for joint in evidence["joints"]
+                                  for axis in ("x", "y") for sign in ("positive", "negative")])
     return {
         "evaluated": counts["pass"] + counts["fail"] > 0,
-        "all_pass": counts["fail"] == 0,
+        "all_pass": summary["all_pass"],
+        "no_known_failure": counts["fail"] == 0,
+        "complete": summary["complete"],
+        "unknown_reason_codes": summary["unknown_reason_codes"],
         "counts": counts,
         "min_ratio_provided": min(ratios) if ratios else None,
         "ratio_required": sp.SCWB_RATIO_MIN,
@@ -1381,7 +1399,7 @@ def _scwb_steel_floor(cfg, actions, expected_ids):
     """
     joint_scwb = _joint_scwb_state(actions, expected_ids)
     update, exhausted = (None, False)
-    if not joint_scwb["all_pass"]:
+    if not joint_scwb["no_known_failure"]:
         update, exhausted = _scwb_column_steel(cfg, joint_scwb)
         if update is not None:
             apply_updates(update, None, cfg)
@@ -1726,9 +1744,9 @@ def _drift_screen(model_period_sec, torsion=None, cfg=None):
 def _scwb_required_column_moment():
     """Column nominal moment needed to satisfy ACI 318-19 18.7.3.2 at every joint.
 
-    sum(Mnc) >= 1.2 sum(Mnb) at each joint, with no roof exemption (the
-    joint qualification applies none). Members are uniform over height, so
-    the governing joint is an interior roof joint: one column below against
+    sum(Mnc) >= 1.2 sum(Mnb) at each joint. Without the 18.7.3.1 roof
+    exception (_scwb_roof_exception_applies, below) the members are uniform
+    over height, so the governing joint is an interior roof joint: one column below against
     a hogging beam on one side and a sagging beam on the other,
     Mnc >= 1.2 (Mnb- + Mnb+), evaluated at the low roof axial load. Floor
     joints, with two columns, need only 0.6 (Mnb- + Mnb+) and never govern.
@@ -2249,7 +2267,8 @@ def _column_size_exception(history, columns):
                           "failed_capacity_checks": sorted({c["id"] for c in constraints.get("capacity_design_failed_checks", [])}),
                           "drift_accepted": constraints.get("drift_accepted"),
                           "strength_within_ceiling": constraints.get("strength_within_ceiling"),
-                          "joint_scwb_all_pass": (constraints.get("joint_scwb") or {}).get("all_pass")})
+                          "joint_scwb_all_pass": (constraints.get("joint_scwb") or {}).get("all_pass"),
+                          "joint_scwb_no_known_failure": (constraints.get("joint_scwb") or {}).get("no_known_failure")})
     return {"selected_column": [sp.B_COL, sp.H_COL, sp.FC_COL_KSI], "last_resort_size_in": COLUMN_SIZE_LAST_RESORT_IN,
             "top_grade_ksi": top, "top_grade_trials_at_or_below_the_size": tried,
             "top_grade_tried_at_or_below_the_size": bool(tried),
@@ -2313,7 +2332,7 @@ def _constraint_summary(worst, hard_max, scwb_screen_ok, joint_scwb, capacity, d
     return {"candidate_screen_passed": accepted,
             "strength_within_ceiling": max(worst["beam"], worst["column"]) <= hard_max,
             "scwb_screen_satisfied": scwb_screen_ok,
-            "joint_scwb": {key: joint_scwb.get(key) for key in ("evaluated", "all_pass", "counts", "min_ratio_provided",
+            "joint_scwb": {key: joint_scwb.get(key) for key in ("evaluated", "all_pass", "no_known_failure", "complete", "counts", "min_ratio_provided",
                                                                   "steel_exhausted", "failed_checks")},
             "capacity_design_accepted": capacity["accepted"], "capacity_design_failed_checks": failing,
             "slab_screen": copy.deepcopy(slab_screen),
@@ -2590,7 +2609,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
         # The sizing screen (uniform-member proxy) and the per-joint rule the
         # steel pass closed on; a joint that still fails is a section matter.
         scwb_screen_ok = _column_nominal_moment() >= _scwb_required_column_moment()
-        joint_scwb_failed = joint_scwb["evaluated"] and not joint_scwb["all_pass"]
+        joint_scwb_failed = (joint_scwb.get("counts") or {}).get("fail", 0) > 0
         # The sizing screen is a uniform-member proxy at a tributary axial load. Where every joint was
         # evaluated on its factored axial envelope, that exact check is the requirement and the proxy only
         # sizes the first jump (r2 screen, 2026-10-02: the proxy pushed case_0004's column from 26 in upward
@@ -2866,7 +2885,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
                        "ACI 318-19 18.7.3.1)" if roof_excepted else "an interior roof joint with a single column")
     scwb_screen_satisfied = column_mn >= _scwb_required_column_moment()
     joint_scwb = final["scwb_joint"]
-    joint_scwb_failed = joint_scwb["evaluated"] and not joint_scwb["all_pass"]
+    joint_scwb_failed = (joint_scwb.get("counts") or {}).get("fail", 0) > 0
     joint_scwb_complete = bool(joint_scwb["evaluated"]) and not (joint_scwb.get("counts") or {}).get("not_evaluated")
     scwb_satisfied = (not joint_scwb_failed) if joint_scwb_complete else (scwb_screen_satisfied and not joint_scwb_failed)
     drift_screen = final["drift_screen"]

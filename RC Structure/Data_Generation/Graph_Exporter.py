@@ -580,18 +580,29 @@ def installed_deterioration_policy():
     """What the member springs are actually handed as deterioration capacities.
 
     The IMK_LAMBDA_* constants describe the direct convention only. Under
-    IMK_DETERIORATION_MODE == "haselton_2008" each member receives
-    Lamda_S = Lamda_C = lambda(nu, s/d) * theta_y,member with A and K
-    suppressed, so the policy that fixes those values is recorded here (the
-    per-member nu makes the column values member specific; the beam and the
-    nu = 0 column values are quoted as anchors). Part of the output identity.
+    IMK_DETERIORATION_MODE == "haselton_2008" the fitted lambda(nu, s/d) sets
+    S and C with A and K suppressed, so the policy that fixes those values is
+    recorded here (the per-member nu makes the column values member specific;
+    the beam and the nu = 0 column values are quoted as anchors). Part of the
+    output identity.
+
+    Under the frozen IMK V2 calibration (Model/IMK_Spring_Mapping, the default
+    since 2026-10-29) the energy is set per spring, on the spring's own
+    half-member reference: theta_y_ref,E = My_canonical / K0, Eref_S = Eref_C =
+    lambda * My_canonical * theta_y_ref,E and Eref_A = Eref_K = 1e12 *
+    My_canonical. The anchors therefore carry lambda only (per spring axis);
+    the installed energies are in the hinge registry (spring_points). Under the
+    legacy replay the pre-freeze record is returned unchanged: Lamda_S =
+    Lamda_C = lambda * the nominal theta_y,member.
     """
     from Model.IMK_Calibration import deterioration_for_member   # lazy: avoids a cycle at import time
+    from Model import IMK_Spring_Mapping as spring_mapping
     mode = getattr(sp, "IMK_DETERIORATION_MODE", "direct")
     modes = ["S", "C", "K"] + (["A"] if sp.IMK_MATERIAL_TYPE == "IMKPeakOriented" else [])
     if mode == "direct":
         return {"mode": "direct", "basis": "IMK_LAMBDA_* constants passed unchanged (E_ref = Lamda * My)",
                 "lamda": {m: getattr(sp, f"IMK_LAMBDA_{m}") for m in modes}}
+    frozen = spring_mapping.is_frozen()
     from Model import Member_Groups as mg
     state = mg.active()
     anchors = {}
@@ -600,6 +611,16 @@ def installed_deterioration_policy():
                [(gid, design.member_type, design) for gid, design in sorted(state.designs.items())])
     for name, member_type, design in entries:
         d = deterioration_for_member(member_type, 0.0, design=design)
+        if frozen:
+            # lambda is the member's; K0 and My_canonical (hence the energy) belong to each installed spring.
+            anchors[name] = {
+                "spacing_effective_depth_ratio": d["deterioration_spacing_effective_depth_ratio"],
+                "equation_version": d["deterioration_equation_version"],
+                "lambda_haselton": d["lambda_haselton_dimensionless"],
+                "lambda_haselton_by_axis": {axis: entry["lambda_haselton_dimensionless"]
+                                            for axis, entry in d["deterioration_by_axis"].items()},
+            }
+            continue
         anchors[name] = {
             # s/d, the hoop spacing over the strong-axis effective depth (Eq. 3.20; s/h before 2026-10-23)
             "spacing_effective_depth_ratio": d["deterioration_spacing_effective_depth_ratio"],
@@ -610,12 +631,34 @@ def installed_deterioration_policy():
         }
     reference = deterioration_for_member("column", 0.0, design=next(
         (design for design in (state.designs.values() if state is not None else ()) if design.is_column), None))
-    return {"mode": mode, "basis": reference["deterioration_source"],
-            "calibrated_modes": [m for m in modes if m not in reference["deterioration_suppressed_modes"]],
-            "suppressed_modes": {m: reference["deterioration_suppression_lambda_rad"]
-                                 for m in reference["deterioration_suppressed_modes"] if m in modes},
-            "axial_ratio_clamp": [0.0, 0.70],
-            "anchors": anchors}
+    policy = {"mode": mode, "basis": reference["deterioration_source"],
+              "calibrated_modes": [m for m in modes if m not in reference["deterioration_suppressed_modes"]],
+              "suppressed_modes": {m: reference["deterioration_suppression_lambda_rad"]
+                                   for m in reference["deterioration_suppressed_modes"] if m in modes},
+              "axial_ratio_clamp": [0.0, 0.70],
+              "anchors": anchors}
+    if frozen:
+        # The suppression value is Eref_A,K / My_canonical, not the installed native Lamda (Eref / My of the
+        # native positive branch, which differs at a reversed asymmetric beam end): name the modes only and
+        # leave the value to energy_rule.
+        policy["suppressed_mode_names"] = list(policy.pop("suppressed_modes"))
+        policy["member_spring_calibration"] = spring_mapping.FROZEN_V2
+        policy["energy_rule"] = {
+            "scope": ("per installed spring (member end and bending axis): lambda of the spring's axis, K0 and "
+                      "My_canonical of the spring"),
+            "reference": ("nominal half-member: Ls = L/2, K0 = 3 EI0/Ls = Kh/n, Kb = 1.05 K0 "
+                          "(Model/IMK_Spring_Mapping)"),
+            "n": spring_mapping.SPLIT_N,
+            "My_canonical": "hogging for a beam's vertical bending, the section's positive branch otherwise",
+            "equations": ["theta_y_ref,E = My_canonical / K0",
+                          "Eref_S = Eref_C = lambda_H * My_canonical * theta_y_ref,E",
+                          "Eref_A = Eref_K = 1e12 * My_canonical",
+                          "Lambda_native,m = Eref_m / My_native_positive"],
+            "suppressed_mode_energy_over_My_canonical": spring_mapping.SUPPRESSED_MODE_LAMDA,
+            "installed_values": ("per spring in the hinge registry: spring_points energy "
+                                 "(energy_reference_theta_y_rad, reference_energies_kip_in_rad)"),
+        }
+    return policy
 
 
 def _backbone_definitions():
@@ -626,6 +669,16 @@ def _backbone_definitions():
 def _grouped_floor_loads():
     from Model import Member_Properties as mp
     return mp.floor_load_metadata()
+
+
+def _member_spring_calibration():
+    from Model.IMK_Spring_Mapping import active_calibration
+    return active_calibration()
+
+
+def _legacy_cutoff_padding():
+    from Model.IMK_Spring_Mapping import legacy_cutoff_padding
+    return {member: legacy_cutoff_padding(member) for member in ("beam", "column")}
 
 
 def _slip_ownership_policy():
@@ -754,13 +807,22 @@ def _collect_global_parameters(u):
             "d_pos": sp.IMK_D_POS, "d_neg": sp.IMK_D_NEG,
         },
         # What the springs are actually given. Under haselton_2008 the IMK_LAMBDA_* constants above are
-        # NOT installed: S and C receive lambda(nu, s/d) * theta_y,member per member and A/K are
-        # suppressed, so the mode and its policy are part of the output identity (2026-09-26).
+        # NOT installed: S and C are set from lambda(nu, s/d) and A/K are suppressed, so the mode and its
+        # policy are part of the output identity (2026-09-26). Under the frozen IMK V2 calibration
+        # (2026-10-29) each spring's S/C energy is lambda * My_canonical^2 / K0 on its own half-member
+        # reference; the legacy replay gives Lamda = lambda * the nominal theta_y,member instead.
         "imk_deterioration_mode": getattr(sp, "IMK_DETERIORATION_MODE", "direct"),
         "imk_use_calibrated_backbone": sp.IMK_USE_CALIBRATED_BACKBONE,
         # Eq. 3.10's steel ratio and the effective depth Eq. 3.10 and 3.20 take (2026-10-23)
         "imk_backbone_definitions": _backbone_definitions(),
         "imk_installed_deterioration": installed_deterioration_policy(),
+        # The member-to-native calibration of the member-end springs (frozen IMK V2 calibration, 2026-10-29):
+        # the frozen calibration converts the member intervals to native dp/dpc on a half-member reference,
+        # the legacy replay installs them directly. Outputs of the two are different models.
+        "imk_member_spring_calibration": _member_spring_calibration(),
+        # The additive padding of the retained native du = member theta_p + member theta_pc + padding: a provisional
+        # numerical cutoff, neither a yield rotation nor a collapse rotation.
+        "imk_legacy_cutoff_padding_rad": _legacy_cutoff_padding(),
         "imk_hinge_stiffness_mode": getattr(sp, "IMK_HINGE_STIFFNESS_MODE", "member_stiffness_factor"),
         "imk_hinge_stiffness_factor": sp.IMK_HINGE_STIFFNESS_FACTOR,
         # Joint springs and the member slip term they take over (2026-09-27).
@@ -776,8 +838,14 @@ def _collect_global_parameters(u):
         "imk_bond_slip_indicator": bond_slip_indicator(),
         "slip_ownership_policy": _slip_ownership_policy(),
         "slip_interfaces_registered": _slip_interfaces_registered(),
+        # Historical nominal member yield rotations (0.005 beam / 0.004 column), kept as output identity keys.
+        # Under the frozen calibration they are no active quantity (the member-reference yield is My/K0 per
+        # spring and the du padding is imk_legacy_cutoff_padding_rad); they are inputs of the legacy replay only.
         "imk_beam_theta_y": sp.IMK_BEAM_THETA_Y,
         "imk_column_theta_y": sp.IMK_COLUMN_THETA_Y,
+        # Fixed-backbone native inputs (IMK_USE_CALIBRATED_BACKBONE False); the calibrated backbone derives
+        # per-member Haselton intervals instead, installed directly as native dp/dpc under the legacy replay and
+        # converted to native dp/dpc on the half-member reference under the frozen calibration.
         "imk_theta_p_pos": sp.IMK_THETA_P_POS,
         "imk_theta_pc_pos": sp.IMK_THETA_PC_POS,
         "imk_theta_u_pos": sp.IMK_THETA_U_POS,
@@ -910,6 +978,9 @@ def save_analysis_sample(
         "num_hinge_events": len(
             pushover_results["mechanism_diagnostics"]["hinge_events"]
         ),
+        # The event definitions behind the count (v2: installed native spring points per sign, frozen IMK V2
+        # calibration, 2026-10-29), so counts of different generations are not compared silently.
+        "mechanism_diagnostics_version": pushover_results["mechanism_diagnostics"].get("version"),
         "num_column_yield_events": len(
             pushover_results["mechanism_diagnostics"]["column_yield_events"]
         ),

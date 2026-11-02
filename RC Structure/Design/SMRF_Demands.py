@@ -1153,6 +1153,215 @@ def story_drift_basis(risk_category, importance_factor, drift_limit_ratio=None):
     return {"risk_category": risk_category, "importance_factor": table_ie, "table_limit": base, "limit": limit}
 
 
+DRIFT_RECONSTRUCTION_VERSION = "saved_drift_reconstruction_v1"
+
+
+def _close(a, b, tolerance=1e-9):
+    return isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool) \
+        and not isinstance(b, bool) and math.isclose(a, b, rel_tol=tolerance, abs_tol=tolerance)
+
+
+DRIFT_LIMIT_RHO = 1.3                       # Design_Driver._drift_screen: rho of 12.12.1.1, the limit SDC screened as D-F
+DRIFT_BASIS_KEYS = ("cd", "rho_for_limit", "limit_seismic_design_category", "risk_category", "importance_factor",
+                    "base_drift_limit_ratio", "effective_drift_limit_ratio")
+
+
+def reconstruct_drift_checks(drift_screen, num_floor, story_height_in, num_bay_x=None, num_bay_y=None, *,
+                             declared=None, risk_category=None, cd=5.5, beta=1.0, second_order_included=True):
+    """Rebuild the drift, stability and node-coverage checks of a saved drift screen from its numbers.
+
+    A matching analysis-input digest binds a saved screen to the model inputs, not to its check rows: a deleted
+    or edited check would otherwise be consumed as it stands. Here the expected inventory is every story and
+    direction of the frame; each saved row's node drifts (or, for a row saved before 2026-10-30, its elastic
+    drift alone), story height, story shear and gravity above are validated and the checks are made again with
+    the declared basis (Cd, beta, second-order inclusion as Design_Driver._drift_screen applies them; the limit
+    from the risk category, importance factor and limit with rho in SDC D-F, story_drift_basis). The limit basis is
+    read from ``declared`` (the record's demand_basis.drift, which the input digest covers) and ``risk_category``
+    (the record's seismic block), never from the screen alone, and the screen's copy must agree with it; rho must
+    be the screen's 1.3 and the limit SDC D, E or F. A row whose numbers cannot support a check leaves that check
+    not evaluated; nothing is borrowed from a cached label. The saved checks are then compared with the rebuilt
+    ones: a saved pass or fail that has lost its saved row is a difference, not merely unverifiable.
+
+    Returns {"version", "checks" (the rebuilt checks, the ones to consume), "integrity" (the
+    demands.drift_evidence_reconstructed row: fail on a difference or contradiction, not_evaluated when the saved
+    screen predates the risk-basis keys), "problems", "differences", "not_rebuildable"}.
+    """
+    problems, checks = [], []
+    clause_drift = "ASCE 7-22 12.8.6; 12.12.1.1; Table 12.12-1"
+    clause_stability = "ASCE 7-22 12.8.7 Eqs. 12.8-18, 12.8-19"
+    drift_screen = drift_screen if isinstance(drift_screen, Mapping) else {}
+    assumptions = drift_screen.get("assumptions") if isinstance(drift_screen.get("assumptions"), Mapping) else {}
+    limit = theta_max = ie = None
+    # A screen saved before the risk basis (2026-10-04) carries none of these keys: unknown, not tampered.
+    legacy_schema = not any(key in assumptions for key in DRIFT_BASIS_KEYS[3:])
+    try:
+        if legacy_schema:
+            raise ValueError("the saved drift screen predates the risk-basis keys (2026-10-04); its limit cannot be rebuilt")
+        source = assumptions
+        if declared is not None:
+            declared = declared if isinstance(declared, Mapping) else {}
+            disagree = [key for key in DRIFT_BASIS_KEYS if not (
+                _close(assumptions.get(key), declared.get(key)) if isinstance(declared.get(key), (int, float))
+                else assumptions.get(key) == declared.get(key))]
+            if disagree:
+                raise ValueError(f"the drift screen's limit basis disagrees with the record's declared basis on {disagree}")
+            source = declared
+        if risk_category is not None and source.get("risk_category") != risk_category:
+            raise ValueError(f"the drift basis names Risk Category {source.get('risk_category')!r}, the record "
+                             f"{risk_category!r}")
+        if not _close(source.get("cd"), cd):
+            raise ValueError(f"the saved Cd {source.get('cd')!r} is not the declared {cd:g}")
+        basis = story_drift_basis(source.get("risk_category"), source.get("importance_factor"),
+                                  source.get("base_drift_limit_ratio"))
+        ie = basis["importance_factor"]
+        sdc = str(source.get("limit_seismic_design_category") or "").upper()
+        if sdc not in ("D", "E", "F"):
+            raise ValueError(f"the limit SDC {sdc!r} is not D, E or F (the screen limits every case as SDC D or above)")
+        if not _close(source.get("rho_for_limit"), DRIFT_LIMIT_RHO):
+            raise ValueError(f"rho_for_limit {source.get('rho_for_limit')!r} is not the screen's {DRIFT_LIMIT_RHO:g}")
+        limit = basis["limit"] / DRIFT_LIMIT_RHO
+        if not _close(source.get("effective_drift_limit_ratio"), limit):
+            raise ValueError(f"the saved effective drift limit {source.get('effective_drift_limit_ratio')!r} is "
+                             f"not the rebuilt {limit!r}")
+        theta_max = max(0.10, min(0.5 / (beta * cd), 0.25))
+        height = _number(story_height_in, "story_height_in", positive=True)
+    except (ValueError, TypeError, KeyError) as exc:
+        problems.append(f"drift basis: {exc}")
+        limit = None
+    expected_nodes = (None if num_bay_x is None or num_bay_y is None else
+                      sorted(f"{i},{j}" for j in range(num_bay_y + 1) for i in range(num_bay_x + 1)))
+    rows = {}
+    for row in drift_screen.get("stories") or []:
+        location = row.get("location") if isinstance(row, Mapping) else None
+        if not isinstance(location, str):
+            problems.append("a saved drift row has no location")
+            continue
+        if location in rows:
+            problems.append(f"{location}: more than one saved drift row")
+            continue
+        rows[location] = row
+    differences, rowless = [], set()
+    saved = [c for c in (drift_screen.get("checks") or []) if isinstance(c, Mapping)]
+    failed_runs = {str(c.get("id", ""))[-1] for c in saved if str(c.get("id", "")).startswith("demands.drift_analysis_")}
+    for story in range(1, num_floor + 1):
+        for axis in ("x", "y"):
+            run, loc = f"story:{story}/Q{axis}", f"story:{story}/Q{axis}/{axis}"
+            row = rows.pop(loc, None)
+            if row is None or limit is None:
+                reason = ("the saved drift basis is not usable: " + "; ".join(problems[:2]) if limit is None
+                          else "no saved drift row for this story and direction")
+                if row is None and axis not in failed_runs:
+                    rowless.update((run, loc))              # a saved label here has lost the row it was made from
+                checks += [not_evaluated("demands.node_coverage", "ASCE 7-22 12.8.6.5", reason, run),
+                           not_evaluated("demands.story_drift", clause_drift, reason, loc),
+                           not_evaluated("demands.stability", clause_stability, reason, loc)]
+                continue
+            # The basis the row says it was checked against must be the rebuilt one.
+            for key, value in (("allowable_drift_ratio", limit), ("cd", cd), ("importance_factor", ie)):
+                if key in row and not _close(row.get(key), value):
+                    differences.append(f"{loc}: the row's {key} {row.get(key)!r} is not the rebuilt {value!r}")
+            drifts = row.get("node_drifts_in")
+            try:
+                if not _close(row.get("height_in", height), height):
+                    raise ValueError(f"the row's story height {row.get('height_in')!r} is not the frame's {height:g}")
+                if isinstance(drifts, Mapping) and drifts:
+                    values = {str(node): abs(_number(value, "node drift")) for node, value in drifts.items()}
+                    elastic = max(values.values())
+                    if not _close(row.get("elastic_drift_in"), elastic):
+                        raise ValueError("the row's elastic drift is not the largest of its node drifts")
+                    supplied = sorted(values)
+                    nodes = expected_nodes if expected_nodes is not None else row.get("expected_node_ids")
+                    coverage = (None if nodes is None else int(sorted(nodes) == supplied))
+                else:
+                    elastic = _number(row.get("elastic_drift_in"), "elastic_drift_in", positive=True)
+                    coverage = None
+            except (ValueError, TypeError) as exc:
+                checks += [not_evaluated("demands.node_coverage", "ASCE 7-22 12.8.6.5", str(exc), run),
+                           not_evaluated("demands.story_drift", clause_drift, str(exc), loc),
+                           not_evaluated("demands.stability", clause_stability, str(exc), loc)]
+                continue
+            checks.append(not_evaluated("demands.node_coverage", "ASCE 7-22 12.8.6.5",
+                                        "the saved row carries no node drifts (saved before 2026-10-30): edge coverage "
+                                        "cannot be confirmed", run) if coverage is None else
+                          make_check("demands.node_coverage", "ASCE 7-22 12.8.6.5", coverage, 1, "==", location=run))
+            ratio = elastic * cd / ie / height
+            checks.append(make_check("demands.story_drift", clause_drift, ratio, limit, location=loc, units="in/in",
+                                     details={"cd": cd, "importance_factor": ie, "elastic_drift_in": elastic,
+                                              "reconstructed": True}))
+            try:
+                if row.get("second_order_included", second_order_included) is not second_order_included \
+                        or not _close(row.get("beta", beta), beta):
+                    raise ValueError("the row's second-order flag or beta is not the declared basis")
+                p = _number(row.get("gravity_above_kip"), "gravity_above_kip", minimum=0)
+                shear = _number(row.get("story_shear_kip"), "story_shear_kip", positive=True)
+                theta_raw = p * elastic / (shear * height)
+                theta = theta_raw / (1 + theta_raw) if second_order_included else theta_raw
+                if row.get("theta") is not None and not _close(row.get("theta"), theta):
+                    raise ValueError("the row's theta is not the theta of its own P, V, drift and height")
+                checks.append(make_check("demands.stability", clause_stability, theta, theta_max, units="dimensionless",
+                                         location=loc, details={"second_order_included": second_order_included,
+                                                                "beta": beta, "reconstructed": True}))
+                if theta > 0.10 and not second_order_included:
+                    checks.append(not_evaluated("demands.second_order_effects", "ASCE 7-22 12.8.7",
+                                                "First-order theta exceeds 0.10; displacement AND member-demand "
+                                                "amplification/reanalysis has not been performed.", loc))
+            except (ValueError, TypeError) as exc:
+                checks.append(not_evaluated("demands.stability", clause_stability,
+                                            f"the saved row cannot rebuild the stability check: {exc}", loc))
+    if rows:
+        problems.append(f"saved drift rows outside the frame's stories and directions: {sorted(rows)[:6]}")
+    # The saved checks against the rebuilt ones, by (id, location). Analysis-failure rows (never a pass) are kept.
+    checks += [dict(c) for c in saved if str(c.get("id", "")).startswith("demands.drift_analysis")
+               and c.get("status") == "not_evaluated"]
+    rebuilt = {(c["id"], c.get("location", "")): c for c in checks}
+    saved_keys = {}
+    for c in saved:
+        try:
+            key = (str(c.get("id")), str(c.get("location", "")))
+        except Exception:                                       # noqa: BLE001 -- an unreadable identity is a difference
+            differences.append("a saved drift check has an unreadable identity")
+            continue
+        if key in saved_keys:
+            differences.append(f"{key[0]}@{key[1]}: saved more than once")
+        saved_keys[key] = c
+    unverifiable = []
+    for key, check in rebuilt.items():
+        old = saved_keys.get(key)
+        run_axis = key[1].split("/Q", 1)[1][:1] if "/Q" in key[1] else None
+        if old is None and check["status"] == "not_evaluated" and run_axis in failed_runs:
+            continue                                    # that direction's drift run failed: no rows were saved for it
+        if old is None:
+            differences.append(f"{key[0]}@{key[1]}: no saved check")
+        elif check["status"] == "not_evaluated":
+            if key[1] in rowless and old.get("status") in ("pass", "fail"):
+                # A saved evaluated label whose drift row is gone: the screen never writes that (a failed run leaves no
+                # rows and no labels), so it is a difference, and the known label is not carried over either.
+                differences.append(f"{key[0]}@{key[1]}: saved {old.get('status')} without its saved drift row")
+            elif old.get("status") != "not_evaluated":
+                # The saved numbers cannot rebuild this check (a row saved before its inputs were kept): the saved
+                # label is not consumed, and it is not called tampered either.
+                unverifiable.append(f"{key[0]}@{key[1]}")
+        elif old.get("status") != check["status"] or not (_close(old.get("demand"), check["demand"])
+                                                           and _close(old.get("capacity"), check["capacity"])):
+            differences.append(f"{key[0]}@{key[1]}: saved {old.get('status')} {old.get('demand')!r}/{old.get('capacity')!r}, "
+                               f"rebuilt {check['status']} {check.get('demand')!r}/{check.get('capacity')!r}")
+    differences += [f"{k[0]}@{k[1]}: saved but not part of the frame's drift inventory" for k in saved_keys if k not in rebuilt]
+    details = {"version": DRIFT_RECONSTRUCTION_VERSION, "problems": problems[:12], "differences": differences[:24],
+               "difference_count": len(differences), "saved_labels_not_rebuildable": unverifiable[:24],
+               "basis": "every story and direction rebuilt from the saved numbers and the record's declared limit basis and "
+                        "compared with the saved checks; the rebuilt checks are the ones consumed"}
+    if legacy_schema and not differences:
+        integrity = not_evaluated("demands.drift_evidence_reconstructed", "Evidence integrity (ASCE 7-22 12.8.6-12.8.7)",
+                                  "the saved drift screen predates the risk-basis keys (2026-10-04): its checks cannot be "
+                                  "rebuilt, so they are unknown (redesign the record)")
+        integrity["details"].update(details, reason_code="legacy_drift_schema")
+    else:
+        integrity = make_check("demands.drift_evidence_reconstructed", "Evidence integrity (ASCE 7-22 12.8.6-12.8.7)",
+                               len(problems) + len(differences), 0, "==", details=details)
+    return {"version": DRIFT_RECONSTRUCTION_VERSION, "checks": checks, "integrity": integrity, "problems": problems,
+            "differences": differences, "not_rebuildable": unverifiable}
+
+
 def evaluate_drift_and_stability(stories, cd=5.5, importance_factor=1.0,
                                  drift_limit_ratio=None, redundancy_factor=1.3,
                                  seismic_design_category="D", beta=1.0,
@@ -1241,11 +1450,17 @@ def evaluate_drift_and_stability(stories, cd=5.5, importance_factor=1.0,
                 continue
             amplified = elastic_delta * cd / ie
             ratio = amplified / height
+            # The numbers the checks are made from are kept with the row (2026-10-30), so a saved drift screen can be
+            # rebuilt and compared (reconstruct_drift_checks) instead of its check labels being trusted.
             row = {"location": loc, "governing_node": governing_node,
                    "elastic_drift_in": elastic_delta, "design_drift_in": amplified,
                    "drift_ratio": ratio, "allowable_drift_ratio": limit,
                    "theta": None, "theta_limit": theta_max,
-                   "required_second_order_amplification": None}
+                   "required_second_order_amplification": None,
+                   "height_in": height, "node_drifts_in": dict(values),
+                   "expected_node_ids": None if expected is None else list(expected),
+                   "cd": cd, "importance_factor": ie, "beta": beta, "second_order_included": bool(second_order_included),
+                   "story_shear_kip": None, "gravity_above_kip": None}
             checks.append(make_check("demands.story_drift", "ASCE 7-22 12.8.6; 12.12.1.1; Table 12.12-1",
                                      ratio, limit, location=loc, units="in/in",
                                      details={"governing_node": governing_node, "cd": cd, "importance_factor": ie}))
@@ -1256,7 +1471,7 @@ def evaluate_drift_and_stability(stories, cd=5.5, importance_factor=1.0,
                     raise ValueError("Nonzero corresponding story shear is required to evaluate stability.")
                 theta_raw = p * elastic_delta / (shear * height)
                 theta = theta_raw / (1 + theta_raw) if second_order_included else theta_raw
-                row.update(theta=theta, theta_raw=theta_raw)
+                row.update(theta=theta, theta_raw=theta_raw, story_shear_kip=shear, gravity_above_kip=p)
                 checks.append(make_check("demands.stability", "ASCE 7-22 12.8.7 Eqs. 12.8-18, 12.8-19",
                                          theta, theta_max, units="dimensionless", location=loc,
                                          details={"second_order_included": second_order_included, "beta": beta}))

@@ -13,6 +13,8 @@ spec = importlib.util.spec_from_file_location('peak_plots', RC/'tools/multi_devi
 plots = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plots)
 import test_weighted_seismic_collection as fixtures
+from Analysis.Hinge_Moment_Rotation import SCHEMA_VERSION as HINGE_MOMENT_ROTATION_SCHEMA
+from Data_Generation.Hybrid_Exporter import HINGE_BACKBONE_VERSION
 
 
 def write_rows(path, records):
@@ -73,6 +75,20 @@ class PeakHingePlots(unittest.TestCase):
         springs[0]['physical_member_tag'] = 9
         with self.assertRaisesRegex(ValueError, 'identities'): plots.select_histories(arrays, springs, backbone)
 
+    def test_damage_generation_is_one_known_hinge_table_generation(self):
+        # The plotter reads the unversioned v1 table and hinge_backbone v2 (frozen IMK V2 calibration, 2026-10-29),
+        # each with the moment/rotation export of its own generation; a run mixing generations, or of an unknown or
+        # missing one, is refused rather than read through the other's damage basis.
+        version, export, *_ = plots.damage_generation([{'hinge_backbone_version': HINGE_BACKBONE_VERSION}] * 2)
+        self.assertEqual((version, export), (HINGE_BACKBONE_VERSION, HINGE_MOMENT_ROTATION_SCHEMA))
+        version, export, *_ = plots.damage_generation([{'hinge_ele_tag': '1'}, {'hinge_backbone_version': ''}])
+        self.assertEqual((version, export), (None, 'hinge_moment_rotation_v1'))
+        for records in ([{'hinge_backbone_version': HINGE_BACKBONE_VERSION}, {'hinge_ele_tag': '1'}],
+                        [{'hinge_backbone_version': 'hinge_backbone_v3_unknown'}], []):
+            with self.subTest(records=records):
+                with self.assertRaisesRegex(ValueError, 'Unsupported or mixed hinge_backbone generations'):
+                    plots.damage_generation(records)
+
     def test_output_cannot_modify_analysis_tree(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)/'device'
@@ -93,7 +109,10 @@ class PeakHingePlots(unittest.TestCase):
         for row in backbone:
             row.update(ele_tag='8', end_id='1', member_type='column' if row['hinge_ele_tag'] == '100' else 'beam_x')
             if row['hinge_ele_tag'] == '101':
-                row.update(rot_abs_max='.005', plastic_rotation='.004', damage_ratio='.1', yielded='1')
+                # hinge_backbone v2 (frozen IMK V2 calibration, 2026-10-29): the governing branch's peak and
+                # capping ratio move with the envelope; damage_ratio is the native capping ratio.
+                row.update(rot_abs_max='.005', peak_rotation_rad='.005', plastic_rotation='.004', damage_ratio='.1',
+                           capping_ratio='.1', yielded='1')
         write_rows(ntha/'hinge_backbone.csv', backbone)
         with np.load(ntha/'response_arrays.npz') as compact:
             saved = {key: compact[key] for key in compact.files}
@@ -111,8 +130,10 @@ class PeakHingePlots(unittest.TestCase):
                     'end': 'i', 'member_type': 'column' if tag == 100 else 'beam_x', 'joint_node': 22}
                    for i, tag in enumerate(np.repeat(tags, 2))]
         write_rows(ntha/'hinge_springs.csv', springs)
+        # The moment/rotation export written beside a hinge_backbone v2 table is its producer's current schema
+        # (hinge_moment_rotation_v2 since the frozen IMK V2 calibration, 2026-10-29).
         plots.runner.write_json(ntha/'hinge_moment_rotation_schema.json', {
-            'schema_version': 'hinge_moment_rotation_v1', 'available': True,
+            'schema_version': HINGE_MOMENT_ROTATION_SCHEMA, 'available': True,
             'status': {'failed': False, 'truncated': False, 'completed_steps': 2}})
         search = fixture.search()
         search['trials'][0].update(plots.runner.assess_trial(manifest, fixture.plan['score_policy']))

@@ -9,7 +9,7 @@ from Analysis.Diagnostics import (
     collect_failed_element_diagnostics,
     parse_failed_element_tags,
 )
-from Analysis.Mechanism_Checks import MechanismTracker
+from Analysis.Mechanism_Checks import MECHANISM_DIAGNOSTICS_VERSION, MechanismTracker
 from RC_Design_Check import build_column_PM_diagram, get_element_tags, run_checks
 
 
@@ -454,6 +454,9 @@ def _summarize_design_envelope(envelope):
     envelope["summary"] = {
         "phase": "pushover_envelope",
         "tracked": True,
+        # The hinge events that force samples (reason keys hinge_cap_event, hinge_native_cutoff_du_event) are those of
+        # this mechanism diagnostics version; envelopes of different versions are not comparable sample for sample.
+        "mechanism_diagnostics_version": MECHANISM_DIAGNOSTICS_VERSION,
         "sample_every": envelope["sample_every"],
         "num_samples": envelope["num_samples"],
         "sampled_steps": envelope["sampled_steps"],
@@ -477,7 +480,7 @@ def _summarize_design_envelope(envelope):
         "notes": [
             "Envelope values are sampled during the pushover history, not only at the final converged state.",
             "Each element stores the step and demand snapshot at its governing DCR.",
-            "Samples include periodic checks plus forced checks at final step, hinge cap/ultimate events, significant running peak-base-shear milestones, and large interstory-drift jumps.",
+            "Samples include periodic checks plus forced checks at final step, hinge native-capping and native du cutoff events (Analysis/Mechanism_Checks; du is a provisional numerical cutoff, not a collapse), significant running peak-base-shear milestones, and large interstory-drift jumps.",
         ],
     }
 
@@ -609,10 +612,12 @@ def run_pushover(debug=True, log_path=None):
                 forced_reasons.append("peak_base_shear_milestone")
                 last_envelope_peak_shear_sample = abs_shear
 
+        # Hinge events of Analysis/Mechanism_Checks (mechanism_diagnostics_v2): native capping, and the retained
+        # native du, a provisional numerical cutoff rather than a collapse (frozen IMK V2 calibration, 2026-10-29).
         if mechanism_step["new_hinge_cap_events"]:
             forced_reasons.append("hinge_cap_event")
-        if mechanism_step["new_hinge_ultimate_events"]:
-            forced_reasons.append("hinge_ultimate_event")
+        if mechanism_step["new_hinge_native_cutoff_du_events"]:
+            forced_reasons.append("hinge_native_cutoff_du_event")
         if mechanism_step["new_column_yield_events"]:
             forced_reasons.append("column_yield_event")
 

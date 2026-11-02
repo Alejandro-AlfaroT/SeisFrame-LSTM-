@@ -433,6 +433,85 @@ def perimeter_beam(member):
     return mg.beam_at(kind, member.story_or_floor, 0, 0)
 
 
+# The exterior-end hook rule of beam_strengths (2026-11-01): both datums at each exterior end, psi_o by the corner.
+ANCHORAGE_RULE = "exterior_hook_two_datums_corner_psi_o_v1"
+
+
+def perimeter_hook_corner(level, i, j, axis):
+    """The hook of the outermost slab bar parallel to ``axis`` at the building corner (level, i, j), from the members
+    framing in there (Design.SMRF_Beam_Slab_Strength.corner_hook_geometry); None where (i, j) is not a corner."""
+    from Design.SMRF_Beam_Slab_Strength import corner_hook_geometry
+    if i not in (0, sp.NUM_BAY_X) or j not in (0, sp.NUM_BAY_Y):
+        return None
+    joint = mg.joint_members(level, i, j)
+    other = "y" if axis == "x" else "x"
+    edge = next(b for b in (joint[f"beam_{axis}_minus"], joint[f"beam_{axis}_plus"]) if b is not None)
+    perimeter = next(b for b in (joint[f"beam_{other}_minus"], joint[f"beam_{other}_plus"]) if b is not None)
+    column = joint_core_column(level, i, j).design
+    along_x, along_y = column_plan_dimensions(column)
+    along, transverse = (along_x, along_y) if axis == "x" else (along_y, along_x)
+    return corner_hook_geometry(along, transverse, sp.COL_CLEAR_COVER_IN, sp.rebar_diameter(column.stirrup_bar_size),
+                                edge.design.b_in, sp.rebar_diameter(edge.design.stirrup_bar_size),
+                                perimeter.design.b_in, sp.rebar_diameter(perimeter.design.stirrup_bar_size),
+                                sp.BEAM_CLEAR_COVER_IN)
+
+
+def exterior_end_anchorage_inputs(member):
+    """{end: inputs} of the perimeter hook at each exterior end of a beam: the perimeter beam its flange's slab bars
+    hook into there (the least favourable when two frame in), the joint dimension parallel to the beam, and the corner
+    hook where the end is at a building corner (None elsewhere). Design.Group_Checks.beam_section_context keys its
+    cache on these values."""
+    axis = beam_axis(member)
+    other = "y" if axis == "x" else "x"
+    level = member.story_or_floor
+    nodes = {"i": (member.grid_i, member.grid_j),
+             "j": (member.grid_i + 1, member.grid_j) if axis == "x" else (member.grid_i, member.grid_j + 1)}
+    depths = dict(zip(("i", "j"), beam_end_joint_depths(member)))
+    result = {}
+    for end, exterior in exterior_ends(member).items():
+        if not exterior:
+            continue
+        gi, gj = nodes[end]
+        joint = mg.joint_members(level, gi, gj)
+        beams = [b for b in (joint[f"beam_{other}_minus"], joint[f"beam_{other}_plus"]) if b is not None]
+        edge = min(beams, key=lambda b: (b.design.b_in - sp.rebar_diameter(b.design.stirrup_bar_size), b.design.fc_ksi,
+                                         b.member_tag))
+        result[end] = {"perimeter_beam_b_in": edge.design.b_in, "perimeter_beam_fc_ksi": edge.design.fc_ksi,
+                       "perimeter_beam_hoop_db_in": sp.rebar_diameter(edge.design.stirrup_bar_size),
+                       "perimeter_beam_group": edge.group_id, "joint_depth_in": depths[end],
+                       "corner": perimeter_hook_corner(level, gi, gj, axis)}
+    return result
+
+
+def exterior_end_anchorage(member, layout):
+    """{end: record} of the perimeter hook at each exterior end, at both datums (empty without a slab layout).
+
+    The support face is the perimeter beam's inner face (embedment: its width less the far cover and hoop); the
+    joint face is the column face the beam frames into (embedment: half the joint depth plus half the perimeter
+    beam width, less the same cover and hoop; webs and columns centred on the grid lines). Each record says where
+    the hook develops: ``developed_support_face``, ``developed_joint_face``, ``developed_either`` (the strong-column
+    envelope, D2) and ``developed_both`` (beam sizing, S). The calls go through
+    Design.SMRF_Beam_Slab_Strength.perimeter_slab_bar_anchorage, looked up when called.
+    """
+    from Design import SMRF_Beam_Slab_Strength as bss
+    axis, result = beam_axis(member), {}
+    for end, inputs in exterior_end_anchorage_inputs(member).items():
+        common = (layout, axis, inputs["perimeter_beam_b_in"], sp.BEAM_CLEAR_COVER_IN, inputs["perimeter_beam_hoop_db_in"],
+                  inputs["perimeter_beam_fc_ksi"], sp.SLAB_FY_KSI)
+        support = bss.perimeter_slab_bar_anchorage(*common, corner=inputs["corner"])
+        if support is None:
+            continue
+        joint_embedment = (0.5 * inputs["joint_depth_in"] + 0.5 * inputs["perimeter_beam_b_in"] - sp.BEAM_CLEAR_COVER_IN
+                           - inputs["perimeter_beam_hoop_db_in"])
+        joint = bss.perimeter_slab_bar_anchorage(*common, corner=inputs["corner"], embedment_available_in=joint_embedment)
+        tag = {"perimeter_beam_group": inputs["perimeter_beam_group"]}
+        result[end] = {"support_face": {**support, **tag}, "joint_face": {**joint, **tag}, "rule": ANCHORAGE_RULE,
+                       "developed_support_face": support["developed"], "developed_joint_face": joint["developed"],
+                       "developed_either": support["developed"] or joint["developed"],
+                       "developed_both": support["developed"] and joint["developed"]}
+    return result
+
+
 def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
     """Hogging and sagging yield strengths of one beam at each end, kip-in, with their basis.
 
@@ -443,7 +522,10 @@ def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
     The member-resolved form of Model.IMK_Hinges.beam_yield_moments and of one family of
     Design.SMRF_Beam_Slab_Strength.beam_slab_strengths: this beam's own section and bars, its rows from
     the group bar layering, its flange from its actual end columns and neighbouring webs, the slab mats
-    of the common layout inside that flange, and the perimeter beam its exterior end hooks into.
+    of the common layout inside that flange, and the perimeter beam each exterior end hooks into, at both
+    datums (exterior_end_anchorage). The basis carries three per-end sets: ``hogging_/sagging_{end}`` on the
+    support face (the hinges and the saved end strengths), ``scwb_`` on either datum (the strong-column rule
+    only) and ``sizing_`` on both (beam flexure); the top-level values are the member-wide composite.
     """
     from Design.SMRF_Beam_Slab_Strength import composite_beam_strengths, perimeter_slab_bar_anchorage
     from Model import Member_Bar_Layers as layers
@@ -461,18 +543,31 @@ def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
     flange = effective_flange(member, thickness)
     family = composite_beam_strengths(beam, {"thickness_in": thickness, "fy_ksi": fy_factor * sp.SLAB_FY_KSI},
                                       layout, None, axis, position, flange=flange)
-    edge = perimeter_beam(member)
-    anchorage = perimeter_slab_bar_anchorage(layout, axis, edge.design.b_in, sp.BEAM_CLEAR_COVER_IN,
-                                             sp.rebar_diameter(edge.design.stirrup_bar_size), edge.design.fc_ksi, sp.SLAB_FY_KSI)
-    if anchorage is not None:
-        anchorage = {**anchorage, "perimeter_beam_group": edge.group_id}
-    hogging, sagging = family["mn_negative_kip_in"], family["mn_positive_kip_in"]
-    undeveloped = layout is not None and anchorage is not None and not anchorage["developed"]
     exterior = exterior_ends(member)
-    hogging_ends = {end: (family["mn_undeveloped_negative_kip_in"] if (undeveloped and exterior[end]) else hogging)
-                    for end in ("i", "j")}
-    sagging_ends = {end: (family["mn_undeveloped_positive_kip_in"] if (undeveloped and exterior[end]) else sagging)
-                    for end in ("i", "j")}
+    by_end = exterior_end_anchorage(member, layout)
+    if by_end:
+        # The record the existing readers take: the support face at the governing exterior end.
+        anchorage = next((r["support_face"] for r in by_end.values() if not r["developed_support_face"]),
+                         next(iter(by_end.values()))["support_face"])
+    else:
+        edge = perimeter_beam(member)
+        anchorage = perimeter_slab_bar_anchorage(layout, axis, edge.design.b_in, sp.BEAM_CLEAR_COVER_IN,
+                                                 sp.rebar_diameter(edge.design.stirrup_bar_size), edge.design.fc_ksi,
+                                                 sp.SLAB_FY_KSI)
+        if anchorage is not None:
+            anchorage = {**anchorage, "perimeter_beam_group": edge.group_id}
+    hogging, sagging = family["mn_negative_kip_in"], family["mn_positive_kip_in"]
+
+    def ends(rule):
+        """Per-end hogging and sagging: the mats are dropped at an exterior end whose hook fails ``rule``."""
+        undeveloped = {end: end in by_end and not by_end[end][rule] for end in ("i", "j")}
+        return ({end: family["mn_undeveloped_negative_kip_in"] if undeveloped[end] else hogging for end in ("i", "j")},
+                {end: family["mn_undeveloped_positive_kip_in"] if undeveloped[end] else sagging for end in ("i", "j")})
+    # The hinges and the saved end strengths: the support face. The strong-column rule: either datum (D2, an
+    # envelope it alone reads). Beam sizing: both datums (S). The top-level values stay the member-wide composite.
+    hogging_ends, sagging_ends = ends("developed_support_face")
+    scwb_hogging, scwb_sagging = ends("developed_either")
+    sizing_hogging, sizing_sagging = ends("developed_both")
     return {"hogging": hogging, "sagging": sagging, "family": family, "flange": flange, "bar_rows": rows,
             "basis": {
                 "basis": "beam plus developed slab mats in the ACI 6.3.2 flange" if layout is not None
@@ -483,4 +578,12 @@ def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
                 "slab_steel_in_flange_in2": family["slab_steel_in_flange_in2"],
                 "hogging_i_kip_in": hogging_ends["i"], "hogging_j_kip_in": hogging_ends["j"],
                 "sagging_i_kip_in": sagging_ends["i"], "sagging_j_kip_in": sagging_ends["j"],
-                "exterior_ends": exterior, "exterior_anchorage": anchorage}}
+                "scwb_hogging_i_kip_in": scwb_hogging["i"], "scwb_hogging_j_kip_in": scwb_hogging["j"],
+                "scwb_sagging_i_kip_in": scwb_sagging["i"], "scwb_sagging_j_kip_in": scwb_sagging["j"],
+                "sizing_hogging_i_kip_in": sizing_hogging["i"], "sizing_hogging_j_kip_in": sizing_hogging["j"],
+                "sizing_sagging_i_kip_in": sizing_sagging["i"], "sizing_sagging_j_kip_in": sizing_sagging["j"],
+                "exterior_ends": exterior, "exterior_anchorage": anchorage, "exterior_anchorage_by_end": by_end,
+                "anchorage_rule": ANCHORAGE_RULE,
+                "end_strength_datums": {"hogging_/sagging_": "support face (hinges, saved end strengths)",
+                                        "scwb_": "either datum (strong-column rule only)",
+                                        "sizing_": "both datums (beam flexure sizing)"}}}

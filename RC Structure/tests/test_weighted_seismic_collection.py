@@ -20,6 +20,8 @@ sys.path.insert(0, str(RC))
 from Data_Generation import Collect_Weighted_Seismic_Calibration as collector
 from Data_Generation import Run_Weighted_Seismic_Calibration as runner
 from Data_Generation.Seismic_Response_Score import default_policy, score_response
+from Data_Generation.Hybrid_Exporter import HINGE_BACKBONE_VERSION
+from Model.IMK_Spring_Mapping import LEGACY_REPLAY
 
 
 class PortableCollection(unittest.TestCase):
@@ -55,12 +57,23 @@ class PortableCollection(unittest.TestCase):
                  floor_disp=np.array([[.6, 0], [2.4, 0]]), hinge_rotation=rotations,
                  hinge_moment=np.ones((2, 20)), hinge_history_time=np.array([.01, .02]),
                  hinge_history_commit_count=np.array([1, 2]), hinge_tag_order=tags)
-        runner.write_json(ntha / "global_parameters.json", {"num_floor": 1, "story_h_in": 120})
+        runner.write_json(ntha / "global_parameters.json", {"num_floor": 1, "story_h_in": 120,
+                                                            "imk_member_spring_calibration": LEGACY_REPLAY})
         runner.write_json(ntha / "status.json", {"failed": False, "completed_steps": 2, "npts_requested": 2})
-        rows = [{"hinge_ele_tag": int(tag), "material_type": "IMKPeakOriented", "theta_p": .04,
+        # hinge_backbone v2 rows (frozen IMK V2 calibration, 2026-10-29; Ground_Motion_Main._hinge_backbone_rows):
+        # each row names its layout and member spring calibration and carries the governing branch's native points
+        # and demand, damage_ratio = capping_ratio = plastic_rotation / native_dp_rad. The anchored research profile
+        # assessed here installs the explicit legacy replay, whose native dp is the member theta_p and whose native
+        # My/Kh is theta_y_spring. Hinge 100 governs on its local-y spring, positive sign (rotations[:, 0]).
+        rows = [{"hinge_backbone_version": HINGE_BACKBONE_VERSION, "hinge_ele_tag": int(tag),
+                 "material_type": "IMKPeakOriented", "member_spring_calibration": LEGACY_REPLAY, "end_released": 0,
+                 "governing_axis": "y", "governing_sign": "positive", "native_theta_y_rad": .001,
+                 "native_dp_rad": .04, "native_theta_cap_rad": .041, "member_theta_p_rad": .04, "theta_p": .04,
                  "theta_y_spring": .001, "plastic_rotation": .012 if i == 0 else 0,
-                 "rot_abs_max": .013 if i == 0 else .0005, "damage_ratio": .3 if i == 0 else 0,
-                 "yielded": 1 if i == 0 else 0, "past_capping": 0} for i, tag in enumerate(tags)]
+                 "rot_abs_max": .013 if i == 0 else .0005, "peak_rotation_rad": .013 if i == 0 else .0005,
+                 "capping_ratio": .3 if i == 0 else 0, "damage_ratio": .3 if i == 0 else 0,
+                 "yielded": 1 if i == 0 else 0, "past_capping": 0, "past_native_cutoff": 0}
+                for i, tag in enumerate(tags)]
         with (ntha / "hinge_backbone.csv").open("w", newline="", encoding="utf-8") as stream:
             writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
             writer.writeheader()

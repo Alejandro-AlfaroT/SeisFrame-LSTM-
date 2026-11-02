@@ -6,7 +6,8 @@ record of every one of them.
 
   seed          the uniform design expanded into its groups (the reproducibility reference), or a seed
                 the caller supplies. It is where the search starts, not a lower bound on any section.
-  feasibility   while the candidate is not feasible, the groups named by its failed constraints grow one
+  feasibility   while the candidate does not pass the preliminary screen (Grouped_Design's
+                ``candidate_screen_passed``), the groups named by its failed constraints grow one
                 ladder step (the column of a joint that fails joint shear, the beams of a story that fails
                 drift, ...). Bounded by ``max_feasibility_trials``.
   reduction     from a feasible design, one group at a time is offered the next smaller ladder section.
@@ -22,6 +23,12 @@ reinforcement do not increase and at least one decreases. A feasible move that l
 other is kept in ``tradeoffs`` for review and not adopted. With both quantities tied, fewer distinct
 form sizes wins. When a quantity is not available (no established slab layout) the comparison is
 ``unresolved`` and the move is not adopted: nothing is replaced by zero.
+
+The search steers on the preliminary screen, which names no failure but does not establish that every
+required check passed (an unevaluated check is not a failure there). Its log says ``screen_passed``, never
+feasible; whether a design passes the complete code check is the evaluation's ``code_check`` and ``feasible``
+(Design.Code_Check_Contract), and the saved record's qualification stays the gate before any analysis
+(code-check audit of the genetic search, 2026-10-30).
 
 Column sizes along one column line may not grow upward and may not step in by 3 in or more per face
 between adjacent bands (Design.SMRF_Transitions); moves that would break that are not evaluated and are
@@ -107,7 +114,7 @@ def grade80_retry_reasons(evaluation):
     column transitions alone are not reasons to increase longitudinal fy.
     The resulting Grade 80 search must still satisfy every normal constraint.
     """
-    if evaluation.get("feasible") or evaluation.get("status") not in ("evaluated", "infeasible"):
+    if evaluation.get("candidate_screen_passed") or evaluation.get("status") not in ("evaluated", "infeasible"):
         return []
     reasons = []
     evidence = evaluation.get("failure_evidence") or {}
@@ -550,9 +557,20 @@ def propose_growth(evaluation, state):
                 grow_column(kind["core_group"], f"{check} is not met at the joints this column forms the core of",
                             grade_first=check in ("joint.shear_screen", "joint.terminating_bar_hook"))
         elif check.startswith("gravity.") and location in state.groups:
-            # A gravity group's 18.14 check (its capacity shear is the one that can fail on a selected cage).
+            # A gravity group's 18.14 check (a gravity column's capacity shear is read per direction, ACI 318-19 22.5.1.1).
             grow = grow_column if state.groups[location]["member_type"] == "column" else grow_beam
             grow(location, f"{check} is not met")
+        elif check == "beam.axial_force_applicability" and location in state.groups:
+            # Pu above Ag f'c / 10 (18.6.4.7): a stronger concrete first, then a larger web.
+            grow_beam(location, f"{check} is not met: the factored axial compression exceeds Ag f'c / 10")
+        elif check == "detailing.splice_location" and location in state.groups:
+            # No legal splice place: a larger section only widens the 2h exclusion zones, while a stronger concrete
+            # shortens the development so the Class B lap may fit instead of a coupler.
+            grade_move(location, f"{check} is not met: a stronger concrete shortens the lap so it may fit")
+        elif check == "detailing.transition_splice_location":
+            upper = location.split(">", 1)[-1]
+            if upper in state.groups:
+                grade_move(upper, f"{check} is not met at the transition {location}")
     for item in constraints.get("joint_checks_failed", []):
         if item["id"] != "scwb":
             continue
@@ -696,8 +714,10 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
     while True:
         evaluation = evaluate(state, "feasibility", proposal)
         trials += 1
-        if evaluation["status"] == "evaluated" and evaluation["feasible"]:
-            record("feasibility", proposal, evaluation, "feasible", "every acceptance constraint is met")
+        if evaluation["status"] == "evaluated" and evaluation.get("candidate_screen_passed") is True:
+            record("feasibility", proposal, evaluation, "screen_passed",
+                   "the preliminary candidate screen passes; the authoritative code check is the evaluation's "
+                   f"code_check ({(evaluation.get('code_check') or {}).get('status')})")
             current = evaluation
             break
         moves = propose_growth(evaluation, evaluation.get("state") or state)
@@ -705,8 +725,11 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
                   else "acceptance constraints not met")
         record("feasibility", proposal, evaluation, "not_feasible", reason)
         if not moves:
+            failing = sorted({item.get("id") for item in (evaluation.get("constraints") or {}).get(
+                "capacity_design_failed_checks", []) if item.get("status") == "fail"})
             stop = {"reason": "feasibility_no_growth_move",
-                    "detail": "the failed constraints name no group with a larger ladder section to try"}
+                    "detail": "the failed constraints name no group with a larger ladder section to try"
+                              + (f" (failed checks: {', '.join(failing[:8])})" if failing else "")}
             break
         if trials >= policy.max_feasibility_trials:
             stop = {"reason": "feasibility_budget_exhausted",
@@ -762,7 +785,7 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
                 tried.add(key)
                 evaluation = evaluate(resized(base, gid, size), "reduction", proposal)
                 reduction_trials += 1
-                if evaluation["status"] != "evaluated" or not evaluation["feasible"]:
+                if evaluation["status"] != "evaluated" or evaluation.get("candidate_screen_passed") is not True:
                     reason = (f"{evaluation.get('failed_stage')}: {evaluation.get('reason')}" if evaluation["status"] == "infeasible"
                               else "acceptance constraints not met; the previous design is restored")
                     record("reduction", proposal, evaluation, "rejected", reason)

@@ -56,6 +56,10 @@ def frame(slab=SLAB, column=COLUMN, beam=BEAM, **overrides):
         sp.ELEMENT_FORMULATION, sp.IMK_APPLY_TO_COLUMNS, sp.IMK_APPLY_TO_BEAMS = "imk", True, True
         sp.IMK_MATERIAL_TYPE, sp.JOINT_MODEL = "IMKPeakOriented", "rigid_centerline"
         sp.IMK_ENERGY_MAPPING_MODE = "legacy_unmapped"
+        # The legacy-unmapped energy mapping exists only under the pre-freeze member spring rule; the frozen V2
+        # calibration (2026-10-29) refuses it. The fixture's tests concern the grouped design, not the spring
+        # calibration, so they keep the explicit historical replay. A test of the frozen calibration selects it.
+        sp.IMK_MEMBER_SPRING_CALIBRATION = "legacy_direct_interval_nominal_energy_66f964c1"
         set_uniform(column, beam)
         for key, value in overrides.items():
             setattr(sp, key, value)

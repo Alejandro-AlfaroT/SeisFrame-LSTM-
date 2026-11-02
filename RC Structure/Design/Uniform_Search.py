@@ -89,8 +89,11 @@ def confining_beam_retry(columns, beams, column_index, beam_index, constraints):
     # lanes per layer as well as confining the joint (r5 trials at 34 in failed both together).
     if "joint.shear_screen" not in failed or not failed <= {"joint.shear_screen", "beam.bar_stacking_clear_of_slab_mats"}:
         return None
+    # No known strong-column failure (unevaluated joints are not failures; joint_scwb.all_pass means complete and
+    # passing since 2026-10-30, and a summary written before then has only all_pass in the old sense).
+    scwb = constraints.get("joint_scwb") or {}
     if not (constraints.get("strength_within_ceiling") and constraints.get("drift_accepted")
-            and (constraints.get("joint_scwb") or {}).get("all_pass") is not False):
+            and scwb.get("no_known_failure", scwb.get("all_pass")) is not False):
         return None
     b, h, fc = beams[beam_index]
     target = CONFINING_WIDTH_RATIO * columns[column_index][0]

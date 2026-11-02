@@ -81,8 +81,15 @@ class RunnerFixture(unittest.TestCase):
         self.assertTrue(scwb)
         self.assertEqual({c["status"] for c in scwb}, {"pass"})                                 # evaluated joint by joint, roof included
         decided = {c["decision"] for c in self.record["search"]["candidates"]}
-        self.assertTrue(decided <= {"feasible", "not_feasible", "accepted", "rejected", "tradeoff", "unresolved", "skipped"})
+        self.assertTrue(decided <= {"screen_passed", "not_feasible", "accepted", "rejected", "tradeoff", "unresolved", "skipped"})
         self.assertNotIn("unresolved", decided)                                                 # every quantity was available
+        # The final candidate's authoritative code check (2026-10-30): with the slab developed, no strong-column row of
+        # the final design is unknown or missing; whatever else the code check says, it is reported beside the screen.
+        check = self.record["code_check"]
+        self.assertFalse([u for u in check["unknown"] if u["id"] == "scwb"])
+        self.assertFalse([m for m in check["missing"] if m.get("id") == "scwb"])
+        self.assertEqual(check["counts"]["invalid"] + check["counts"]["duplicates"] + check["counts"]["unexpected"], 0)
+        self.assertTrue(self.record["dcr"]["candidate_screen_passed"])
 
     def test_the_statuses_are_separate_and_probe_accepts_nothing(self):
         completion = self.result["numerical_completion"]

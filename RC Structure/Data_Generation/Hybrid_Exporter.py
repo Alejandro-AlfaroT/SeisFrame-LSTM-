@@ -181,11 +181,10 @@ GLOBAL_FEATURE_KEYS = [
     "imk_apply_to_columns",
     "imk_apply_to_beams",
     "imk_hinge_stiffness_factor",
-    "imk_beam_theta_y",
-    "imk_column_theta_y",
-    "imk_theta_p_pos",
-    "imk_theta_pc_pos",
-    "imk_theta_u_pos",
+    # v4 (frozen IMK V2 calibration, 2026-10-29) drops imk_beam_theta_y / imk_column_theta_y (the nominal
+    # 0.005/0.004 member yield rotation, no active quantity under the frozen calibration) and imk_theta_p_pos /
+    # imk_theta_pc_pos / imk_theta_u_pos (the global fixed-backbone constants, which the calibrated backbone does not
+    # install). The installed rotations are per spring, in the hinge features.
     "imk_fmaxfy_pos",
     "imk_fresfy_pos",
 ]
@@ -199,22 +198,85 @@ RECORD_FEATURE_KEYS = [
     "pga_in_per_sec2",
 ]
 
+# Sample contract version. v4 (frozen IMK V2 calibration, 2026-10-29): the hinge features are the installed native
+# points of every branch of the end's springs (hinge_backbone_v2) plus the governing branch's demand, the damage
+# metrics measure each axis and native sign on its own spring, the nominal theta_y and the global IMK rotation
+# constants are no feature, and the member spring calibration is recorded in the metadata. v3 samples are not
+# interchangeable with v4.
+SCHEMA_VERSION = "hybrid_gnn_lstm_v4"
+
+# The hinge_backbone.csv layout these features are read from: Ground_Motion_Main.HINGE_BACKBONE_VERSION, repeated
+# because the producer imports OpenSees. A table of another layout is refused, never read with zero-filled columns.
+HINGE_BACKBONE_VERSION = "hinge_backbone_v2_native_spring_demand"
+
+# The four branches of one end (bending axis y or z, native sign pos or neg) and the installed points each carries.
+HINGE_BRANCHES = ("y_pos", "y_neg", "z_pos", "z_neg")
+HINGE_BRANCH_POINT_FEATURES = (
+    "My_kip_in",
+    "native_theta_y_rad",
+    "native_dp_rad",
+    "native_dpc_rad",
+    "native_theta_cap_rad",
+    "native_du_rad",
+    "member_theta_y_reference_rad",
+    "member_theta_p_rad",
+    "member_theta_pc_rad",
+)
+
+# Per member end: the installed points, fixed for the end whatever the record (the governing branch is chosen by the
+# response, so its own points are kept out of the tensor), then the demand of the governing branch, which the two
+# codes identify. Definitions in HINGE_FEATURE_DEFINITIONS; a blank value (no installed spring, or no member reference
+# under the legacy replay) is 0.0 here.
 HINGE_FEATURE_COLUMNS = [
     "ele_tag",
     "end_id",
     "axial_kip",
     "axial_ratio",
     "yield_moment_kip_in",
-    "theta_y",
-    "theta_p",
-    "theta_pc",
-    "theta_u",
+    "end_released",
+    "Kh_kip_in_per_rad_y",
+    "Kh_kip_in_per_rad_z",
+    *[f"{point}_{branch}" for branch in HINGE_BRANCHES for point in HINGE_BRANCH_POINT_FEATURES],
+    "governing_axis_code",
+    "governing_sign_code",
     "rot_abs_max",
+    "peak_rotation_rad",
     "plastic_rotation",
-    "damage_ratio",
+    "capping_ratio",
     "yielded",
     "past_capping",
+    "past_native_cutoff",
 ]
+
+HINGE_FEATURE_DEFINITIONS = {
+    "rotation": "native zeroLength spring rotation, rad; not a story drift and not a member chord rotation",
+    "branch": ("<point>_<axis>_<sign>: the installed spring of local bending axis y or z at this end, native input "
+               "sign pos or neg; independent of the record"),
+    "yield_moment_kip_in": ("member strong-axis (local y) yield moment of the registry, the larger of hogging and "
+                            "sagging for a beam; the installed branch strengths are My_kip_in_<axis>_<sign>"),
+    "end_released": "1 for a released (elastic) gravity-beam end, whose point and demand features are all 0.0",
+    "Kh_kip_in_per_rad": "installed elastic stiffness Kh of the axis's spring",
+    "My_kip_in": "installed yield moment My of the branch",
+    "native_theta_y_rad": "My/Kh of the branch (the spring's own yield rotation)",
+    "native_dp_rad": "installed dp of the branch",
+    "native_dpc_rad": "installed dpc of the branch",
+    "native_theta_cap_rad": "My/Kh + dp: the native capping rotation of the branch",
+    "native_du_rad": "installed du (member theta_p + theta_pc + legacy padding): a provisional numerical cutoff, "
+                     "not a collapse rotation",
+    "member_theta_y_reference_rad": "My/K0 on the half-member reference; 0.0 (absent) under the legacy replay",
+    "member_theta_p_rad": "Haselton member plastic interval of the branch (the native dp under the legacy replay)",
+    "member_theta_pc_rad": "Haselton member post-capping interval of the branch (the native dpc under the legacy replay)",
+    "governing_axis_code": "axis of the governing branch: 0 = y, 1 = z (0.0 for a released end)",
+    "governing_sign_code": "native sign of the governing branch: +1 positive, -1 negative (0.0 for a released end)",
+    "rot_abs_max": "largest |native rotation| of the end's two springs, both signs",
+    "peak_rotation_rad": "peak native rotation of the governing branch (magnitude)",
+    "plastic_rotation": "max(0, peak_rotation_rad - native_theta_y_rad of the governing branch)",
+    "capping_ratio": ("plastic_rotation / native_dp_rad of the governing branch: 1 at the native capping point (the "
+                      "hinge table's damage_ratio)"),
+    "yielded": "some branch of either spring passed its My/Kh",
+    "past_capping": "some branch of either spring reached its native capping rotation My/Kh + dp",
+    "past_native_cutoff": "some branch of either spring reached its du: a numerical cutoff, not collapse or failure",
+}
 
 # Case-level damage summary. The inelasticity gate is recorded with the data
 # rather than recomputed downstream so that what counted as inelastic is
@@ -234,6 +296,11 @@ DAMAGE_METRIC_COLUMNS = [
 
 INELASTIC_DRIFT_THRESHOLD = 0.010
 INELASTIC_ROOF_DRIFT_THRESHOLD = 0.00775
+# On peak_hinge_damage_ratio, the native capping ratio (v4); the yielded-fraction gate below is on native My/Kh per
+# branch. Before the freeze both read an axis-mixed measure: max |rotation| of the end's two springs less the larger
+# of their branch-minimum yields, over the member theta_p. Under the legacy replay native dp = theta_p, so only the
+# denominator agrees and the gate values still differ from v3; under the frozen calibration native dp = theta_p -
+# (Mc/Kb + My/Kh - My/K0). The pre-freeze values are reproduced only with the commit 66f964c1 code.
 INELASTIC_DAMAGE_RATIO_THRESHOLD = 0.25
 INELASTIC_YIELDED_FRACTION_THRESHOLD = 0.10
 COLLAPSE_DRIFT_RATIO = 0.10
@@ -249,9 +316,17 @@ COLLAPSE_DRIFT_RATIO = 0.10
 # genuinely reached 9.9% drift before the solver lost it at 173%.
 PHYSICAL_DRIFT_CEILING = 0.20
 
-# plastic_rotation / theta_p. Past roughly this the section has disintegrated;
-# larger values are divergence artifacts, not damage.
+# On the capping ratio (plastic native rotation / native dp). Past roughly this
+# the section has disintegrated; larger values are divergence artifacts, not damage.
 PHYSICAL_DAMAGE_RATIO_CEILING = 20.0
+
+DAMAGE_METRIC_DEFINITIONS = {
+    "peak_hinge_damage_ratio": ("max over hinge ends of the capping ratio: plastic native spring rotation / native dp of "
+                                "the governing branch; 1 = native capping point; values above "
+                                "PHYSICAL_DAMAGE_RATIO_CEILING are discarded as divergence artifacts"),
+    "fraction_hinges_yielded": "fraction of hinge ends with some branch past its native yield My/Kh",
+    "fraction_hinges_past_capping": "fraction of hinge ends with some branch past its native capping rotation My/Kh + dp",
+}
 
 TARGET_PEAK_COLUMNS = [
     "max_abs_roof_disp_x_in",
@@ -530,9 +605,17 @@ def _damage_metrics(arrays, hinge_rows, global_parameters, status):
     # Hinge damage comes from the envelope, computed over the whole analysis,
     # so truncating the arrays above does not clean it. Drop the values that
     # are divergence artifacts rather than letting one 4.9e13 set the peak.
+    # The rows must be hinge_backbone v2 (DAMAGE_METRIC_DEFINITIONS): a row of
+    # another layout is refused, never zero-filled. A released end has a blank
+    # capping ratio and never yields.
+    stale = [row.get("hinge_ele_tag") for row in hinge_rows
+             if row.get("hinge_backbone_version") != HINGE_BACKBONE_VERSION or "capping_ratio" not in row]
+    if stale:
+        raise ValueError(f"{len(stale)} hinge row(s) are not {HINGE_BACKBONE_VERSION} (first: {stale[0]!r}); "
+                         "their damage metrics are of another definition.")
     damage = [
-        float(row.get("damage_ratio") or 0.0) for row in hinge_rows
-        if abs(float(row.get("damage_ratio") or 0.0)) <= PHYSICAL_DAMAGE_RATIO_CEILING
+        float(row.get("capping_ratio") or 0.0) for row in hinge_rows
+        if abs(float(row.get("capping_ratio") or 0.0)) <= PHYSICAL_DAMAGE_RATIO_CEILING
     ]
     yielded = [int(float(row.get("yielded") or 0)) for row in hinge_rows]
     capping = [int(float(row.get("past_capping") or 0)) for row in hinge_rows]
@@ -603,6 +686,24 @@ def _sample_is_stale(ntha_dir, sample_path):
     return status_path.stat().st_mtime_ns > sample_path.stat().st_mtime_ns
 
 
+def _hinge_table_calibration(ntha_dir, hinge_rows, global_parameters):
+    """The member spring calibration of a hinge_backbone v2 table; any other layout or a mixed table is refused.
+
+    The pre-freeze table has no version column, and reading it through the v2 column names would fill every native
+    point with zeros, so it is rejected rather than compiled.
+    """
+    versions = {row.get("hinge_backbone_version") for row in hinge_rows}
+    if versions != {HINGE_BACKBONE_VERSION}:
+        raise ValueError(f"{ntha_dir}/hinge_backbone.csv has layout {sorted(map(str, versions))}, not "
+                         f"{HINGE_BACKBONE_VERSION}; re-export it with the current Ground_Motion_Main.")
+    calibrations = {row.get("member_spring_calibration") for row in hinge_rows} - {"", None}
+    declared = global_parameters.get("imk_member_spring_calibration")
+    if len(calibrations) != 1 or (declared is not None and {declared} != calibrations):
+        raise ValueError(f"{ntha_dir}: hinge member spring calibrations {sorted(calibrations)} do not identify one "
+                         f"calibration (global parameters declare {declared!r}).")
+    return calibrations.pop()
+
+
 def required_files_present(ntha_dir):
     ntha_dir = Path(ntha_dir)
     required = [
@@ -629,6 +730,7 @@ def compile_hybrid_sample(
     output_dir=None,
     require_success=True,
     overwrite=False,
+    member_spring_calibration=None,
 ):
     """
     Compile one NTHA result directory into hybrid_sample.npz.
@@ -643,6 +745,10 @@ def compile_hybrid_sample(
         If True, skip failed or partial analyses.
     overwrite : bool
         If False and hybrid_sample.npz already exists, keep it.
+    member_spring_calibration : str, optional
+        The member spring calibration (Model/IMK_Spring_Mapping) the sample
+        must have been installed under. A run or a kept sample of another
+        calibration is refused before anything is written.
     """
     ntha_dir = Path(ntha_dir)
     output_dir = Path(output_dir) if output_dir is not None else ntha_dir
@@ -652,6 +758,14 @@ def compile_hybrid_sample(
     metadata_path = output_dir / "hybrid_metadata.json"
     if sample_path.exists() and not overwrite and not _sample_is_stale(ntha_dir, sample_path):
         metadata = _read_json(metadata_path, default={}) or {}
+        if metadata.get("schema_version") != SCHEMA_VERSION:
+            # A kept sample of another contract (a v3 sample predates the frozen IMK calibration) is never returned
+            # as a current one; it stays on disk untouched.
+            raise RuntimeError(f"{sample_path} is schema {metadata.get('schema_version')!r}, not {SCHEMA_VERSION!r}. "
+                               "Compile into another dataset directory, or pass overwrite to rebuild it.")
+        if member_spring_calibration is not None and metadata.get("member_spring_calibration") != member_spring_calibration:
+            raise ValueError(f"{sample_path} was installed under member spring calibration "
+                             f"{metadata.get('member_spring_calibration')!r}, not {member_spring_calibration!r}.")
         portable_source = _portable_path(ntha_dir, output_dir)
         portable_sample = _portable_path(sample_path, output_dir)
         needs_refresh = (
@@ -693,6 +807,11 @@ def compile_hybrid_sample(
 
     arrays = dict(np.load(ntha_dir / "response_arrays.npz"))
     hinge_rows = _read_csv(ntha_dir / "hinge_backbone.csv")
+    installed_calibration = _hinge_table_calibration(ntha_dir, hinge_rows, global_parameters)
+    if member_spring_calibration is not None and installed_calibration != member_spring_calibration:
+        raise ValueError(f"{ntha_dir} was installed under member spring calibration {installed_calibration!r}, not "
+                         f"{member_spring_calibration!r}.")
+    member_spring_calibration = installed_calibration
     damage = _damage_metrics(arrays, hinge_rows, global_parameters, status)
 
     # A run that stopped early because the structure collapsed is the most
@@ -841,7 +960,17 @@ def compile_hybrid_sample(
     )
 
     metadata = {
-        "schema_version": "hybrid_gnn_lstm_v3",
+        "schema_version": SCHEMA_VERSION,
+        "schema_note": ("v4 (2026-10-29): hinge features are the installed native points of every branch (axis and "
+                        "native sign) of the end's springs plus the governing branch's demand and native capping ratio "
+                        "(hinge_backbone_v2); peak_hinge_damage_ratio, fraction_hinges_yielded, "
+                        "fraction_hinges_past_capping and the is_inelastic gate measure each axis and native sign on "
+                        "its own spring, so they differ from v3 even under the legacy replay; the nominal theta_y and "
+                        "the global IMK rotation constants were removed from the features; not interchangeable with v3"),
+        # The member-to-native spring calibration every hinge was installed under (Model/IMK_Spring_Mapping):
+        # the frozen V2 calibration or the explicit legacy replay.
+        "member_spring_calibration": member_spring_calibration,
+        "hinge_backbone_version": HINGE_BACKBONE_VERSION,
         "analysis_status_sha256": status_digest,
         "run_name": ntha_dir.name,
         "source_ntha_dir": _portable_path(ntha_dir, output_dir),
@@ -873,13 +1002,15 @@ def compile_hybrid_sample(
         "element_force_index_columns": ["ele_tag", "node_tag", "end_id", "element_type_id"],
         "element_force_envelope_columns": ELEMENT_FORCE_COLUMNS,
         "global_feature_keys": GLOBAL_FEATURE_KEYS,
-        # Preserve the 43-column tensor contract. Explicit slab/load provenance
-        # is a sidecar field; it is not silently appended to trained inputs.
+        # Preserve the len(GLOBAL_FEATURE_KEYS)-column tensor contract (38 since
+        # v4, 43 in v3). Explicit slab/load provenance is a sidecar field; it is
+        # not silently appended to trained inputs.
         "floor_loads": global_parameters.get("floor_loads"),
         "reinforcement_geometry": global_parameters.get("reinforcement_geometry"),
         "record_feature_keys": RECORD_FEATURE_KEYS,
         "target_peak_columns": TARGET_PEAK_COLUMNS,
         "hinge_feature_columns": HINGE_FEATURE_COLUMNS,
+        "hinge_feature_definitions": HINGE_FEATURE_DEFINITIONS,
         "element_force_history_columns": [
             "axial_i", "shear_y_i", "shear_z_i", "torsion_i", "moment_y_i", "moment_z_i",
             "axial_j", "shear_y_j", "shear_z_j", "torsion_j", "moment_y_j", "moment_z_j",
@@ -892,6 +1023,7 @@ def compile_hybrid_sample(
             "ends framing into it, in the global frame."
         ),
         "damage_metric_columns": DAMAGE_METRIC_COLUMNS,
+        "damage_metric_definitions": DAMAGE_METRIC_DEFINITIONS,
         # Divergence bookkeeping. truncated_steps > 0 means the solution left
         # the physical range and the metrics above describe only the prefix
         # before that; damage_values_discarded counts hinge damage ratios
@@ -944,18 +1076,45 @@ def discover_ntha_runs(ntha_root):
     )
 
 
+def _dataset_member_spring_calibrations(dataset_dir):
+    """The member spring calibrations of the current-schema samples already in a dataset directory."""
+    found = set()
+    for path in Path(dataset_dir).glob("*/hybrid_metadata.json"):
+        metadata = _read_json(path, default={}) or {}
+        if metadata.get("schema_version") == SCHEMA_VERSION:
+            found.add(metadata.get("member_spring_calibration"))
+    return found
+
+
 def compile_ntha_root(
     ntha_root,
     dataset_dir=None,
     require_success=True,
     overwrite=False,
     limit=None,
+    member_spring_calibration=None,
 ):
+    """Compile every run under ntha_root into one dataset of ONE member spring calibration.
+
+    The calibration is the one given, else that of the samples already in
+    dataset_dir, else that of the first run compiled; a run of another
+    calibration is refused and its error recorded in the manifest row. The
+    frozen calibration and the legacy replay share the v4 schema and the
+    global features, so nothing else would tell their samples apart.
+    """
     ntha_root = Path(ntha_root)
     if dataset_dir is None:
         dataset_dir = ntha_root.parent / "hybrid_dataset"
     dataset_dir = Path(dataset_dir)
     dataset_dir.mkdir(parents=True, exist_ok=True)
+
+    calibrations = _dataset_member_spring_calibrations(dataset_dir)
+    if member_spring_calibration is not None:
+        calibrations.add(member_spring_calibration)
+    if len(calibrations) > 1:
+        raise ValueError(f"{dataset_dir}: member spring calibrations {sorted(map(str, calibrations))} (requested and "
+                         "already compiled) would share one dataset; compile into another dataset directory.")
+    dataset_calibration = next(iter(calibrations), None)
 
     rows = []
     runs = discover_ntha_runs(ntha_root)
@@ -983,7 +1142,9 @@ def compile_ntha_root(
                 output_dir=out_dir,
                 require_success=require_success,
                 overwrite=overwrite,
+                member_spring_calibration=dataset_calibration,
             )
+            dataset_calibration = metadata.get("member_spring_calibration")
             row.update(
                 {
                     "compiled": True,
@@ -995,6 +1156,7 @@ def compile_ntha_root(
                     "record_id_x": metadata.get("record_id_x"),
                     "record_id_y": metadata.get("record_id_y"),
                     "analysis_failed": metadata.get("analysis_failed"),
+                    "member_spring_calibration": dataset_calibration,
                 }
             )
         except Exception as exc:
@@ -1018,6 +1180,7 @@ def compile_ntha_root(
         "record_id_x",
         "record_id_y",
         "analysis_failed",
+        "member_spring_calibration",
         "error",
     ]
     _write_csv(dataset_dir / "hybrid_manifest.csv", fieldnames, rows)
@@ -1043,6 +1206,11 @@ def parse_args():
     parser.add_argument("--allow-failed", action="store_true", help="Compile failed/partial runs too.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing hybrid_sample.npz files.")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--member-spring-calibration",
+        default=None,
+        help="Refuse runs not installed under this member spring calibration (Model/IMK_Spring_Mapping).",
+    )
     return parser.parse_args()
 
 
@@ -1056,6 +1224,7 @@ def main():
             output_dir=args.dataset_dir,
             require_success=require_success,
             overwrite=args.overwrite,
+            member_spring_calibration=args.member_spring_calibration,
         )
         print(json.dumps(metadata, indent=2))
         return
@@ -1066,6 +1235,7 @@ def main():
         require_success=require_success,
         overwrite=args.overwrite,
         limit=args.limit,
+        member_spring_calibration=args.member_spring_calibration,
     )
     compiled = sum(1 for row in rows if row.get("compiled"))
     failed = [row for row in rows if row.get("error")]

@@ -30,6 +30,7 @@ from Analysis.Gravity import run_gravity_analysis                              #
 from Loads.Gravity_Loads import apply_gravity_loads                            # noqa: E402
 from Loads.Ground_Motion import GroundMotionRecord                             # noqa: E402
 from Model import Analysis_Profile as ap                                        # noqa: E402
+from Model import IMK_Spring_Mapping as spring_mapping                          # noqa: E402
 from Model.Build_Model import build_model                                       # noqa: E402
 from Model.IMK_Hinges import hinge_registry                                     # noqa: E402
 
@@ -140,7 +141,10 @@ class SynchronizedHistories(unittest.TestCase):
             self.assertEqual(row["material_type"], "IMKPeakOriented")
             self.assertEqual(row["bar_slip_owner"], "member_hinge"); self.assertEqual(float(row["bond_slip_indicator"]), 1.0)
             self.assertEqual(row["panel_shear_owner"], "")                                # no joint spring in the V2 profile
-            self.assertEqual(row["energy_mapping_status"], "canonical_physical_orientation_baseline_v1")
+            # The V2 profile requires the frozen IMK V2 calibration (2026-10-29); its installed provenance labels the
+            # energy mapping with the calibration id instead of the canonical-baseline label.
+            self.assertEqual(row["energy_mapping_status"], spring_mapping.FROZEN_V2)
+            self.assertEqual(row["member_spring_calibration"], spring_mapping.FROZEN_V2)
             self.assertTrue(row["calibration_id"]); self.assertTrue(row["calibration_status"])
             self.assertTrue(row["global_rotation_axis"]); self.assertTrue(row["retained_joint_node"] != "")
         np.testing.assert_array_equal(self.arrays["spring_hinge_element_tag"], [r["hinge_element_tag"] for r in self.rows])
@@ -319,7 +323,7 @@ class FailureAndMissingValues(unittest.TestCase):
 
 class ExportRoute(unittest.TestCase):
     def test_histories_survive_the_production_save_the_hybrid_sample_and_the_surrogate_reader(self):
-        """The real route: Ground_Motion_Main.run_one -> save_ntha_outputs -> Hybrid_Exporter -> schema_v3."""
+        """The real route: Ground_Motion_Main.run_one -> save_ntha_outputs -> Hybrid_Exporter; schema_v3 refuses the v4 sample in strict mode and validates its structure with the gate bypassed."""
         import argparse
         rc = Path(__file__).resolve().parents[1]
         for extra in (rc / "Data_Generation", rc.parent / "RC Hybrid Surrogate Model"):
@@ -370,8 +374,15 @@ class ExportRoute(unittest.TestCase):
             self.assertEqual(metadata["hinge_moment_rotation"]["schema_version"], hmr.SCHEMA_VERSION)
             self.assertEqual(metadata["hinge_moment_rotation"]["reference_state"]["kind"], "absolute")
             self.assertEqual(metadata["hinge_history_stride"], 1)
+            # The frozen IMK V2 calibration (2026-10-29) moved the hybrid sample to Hybrid_Exporter.SCHEMA_VERSION
+            # (hybrid_gnn_lstm_v4); the surrogate's schema_v3 reader refuses it by design instead of mixing schemas.
+            self.assertEqual(metadata["schema_version"], Hybrid_Exporter.SCHEMA_VERSION)
             if schema_v3 is not None:
-                sample = schema_v3.load_sample(out / "hybrid_sample.npz")
+                with self.assertRaisesRegex(schema_v3.SchemaError, Hybrid_Exporter.SCHEMA_VERSION):
+                    schema_v3.load_sample(out / "hybrid_sample.npz")
+                # Structural checks only, with the version gate deliberately bypassed (strict=False); this does not
+                # accept the v4 sample for training (frozen IMK V2 calibration, 2026-10-29).
+                sample = schema_v3.load_sample(out / "hybrid_sample.npz", strict=False)
                 schema_v3.validate(sample)
                 moment = sample.as_entity_history("hinge_moment")
                 rotation = sample.as_entity_history("hinge_rotation")
@@ -379,6 +390,14 @@ class ExportRoute(unittest.TestCase):
                 self.assertEqual(moment.shape[-1], 2)                                           # local y, local z per hinge
                 self.assertEqual(sample.num_components("hinge_moment"), 2)
                 np.testing.assert_array_equal(sample.strided_steps("hinge_moment"), sample.strided_steps("hinge_rotation"))
+            # The layout the exporter writes (Hybrid_Exporter: hinge_moment and hinge_rotation share rows, entity order
+            # and columns, local y then local z per hinge), checked on the arrays without a reader.
+            hinges = np.asarray(sample_arrays["hinge_tag_order"]).reshape(-1).size
+            self.assertGreater(hinges, 0)
+            self.assertEqual(sample_arrays["hinge_moment"].shape[1], 2 * hinges)                   # local y, local z per hinge
+            self.assertEqual(sample_arrays["hinge_rotation"].shape[1], 2 * hinges)
+            self.assertEqual(len(np.asarray(sample_arrays["hinge_rotation_steps"]).reshape(-1)),
+                             sample_arrays["hinge_moment"].shape[0])
             # a sample compiled from an analysis without the moment history carries no such array, and still loads
             legacy = folder / "legacy"
             legacy.mkdir()
@@ -393,8 +412,13 @@ class ExportRoute(unittest.TestCase):
                 self.assertEqual(data["hinge_rotation"].shape, response["hinge_rotation"].shape)
             self.assertFalse(legacy_metadata["hinge_moment_present"])
             self.assertFalse(legacy_metadata["hinge_moment_rotation"]["available"])
+            # written in the current hybrid schema too, so the schema_v3 reader refuses it (frozen IMK V2 calibration)
+            self.assertEqual(legacy_metadata["schema_version"], Hybrid_Exporter.SCHEMA_VERSION)
             if schema_v3 is not None:
-                schema_v3.validate(schema_v3.load_sample(legacy / "hybrid_sample.npz"))
+                with self.assertRaisesRegex(schema_v3.SchemaError, Hybrid_Exporter.SCHEMA_VERSION):
+                    schema_v3.load_sample(legacy / "hybrid_sample.npz")
+                # structural checks with the version gate deliberately bypassed (frozen IMK V2 calibration, 2026-10-29)
+                schema_v3.validate(schema_v3.load_sample(legacy / "hybrid_sample.npz", strict=False))
 
 
 if __name__ == "__main__":

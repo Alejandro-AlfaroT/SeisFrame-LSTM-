@@ -20,6 +20,19 @@ experimental set should also identify its paper, specimen, table/fit,
 loading domain and deformation mapping. Recorded status does not establish
 scientific validity or production acceptance.
 
+## Frozen V2 member-hinge calibration (2026-10-29)
+
+Member-end springs are installed on the frozen calibration
+`seisframe_imk_v2_frozen_20261029` (`IMK_Spring_Mapping.py`; specification in
+`IMK_FROZEN_V2_CALIBRATION.md`). The member Haselton intervals are converted
+once to native dp/dpc on a nominal half-member reference (K0 = Kh/20,
+Kb = 1.05 K0). S/C energy is lambda_H My_canonical^2 / K0, and the native du is
+retained. The adapter in this file is unchanged: it still installs
+already-native inputs as given. The canonical orientation below still places
+the physical branches and energies. The sections that follow describe the
+earlier rules; the pre-freeze rule is the explicit legacy replay
+`legacy_direct_interval_nominal_energy_66f964c1`.
+
 ## Current transition
 
 - The member builder supports IMKBilin and IMKPeakOriented with separate

@@ -4,9 +4,14 @@ from unittest import mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import Structure_Parameters as sp
 from Model import IMK_Calibration as c, IMK_Hinges as h
+from Model.IMK_Spring_Mapping import LEGACY_REPLAY
 import openseespy.opensees as ops
 
 class HaseltonModes(unittest.TestCase):
+    def setUp(self):
+        # pre-freeze rule, kept as the explicit legacy replay (frozen IMK V2 calibration, 2026-10-29): nominal
+        # lambda x theta_y,member, direct mode, IMKBilin and direct low-level installs
+        patcher=mock.patch.object(sp,'IMK_MEMBER_SPRING_CALIBRATION',LEGACY_REPLAY);patcher.start();self.addCleanup(patcher.stop)
     def tearDown(self):ops.wipe()
     def test_calibrated_strength_only_for_both_material_signatures(self):
         with mock.patch.object(sp,'IMK_DETERIORATION_MODE','haselton_2008'):

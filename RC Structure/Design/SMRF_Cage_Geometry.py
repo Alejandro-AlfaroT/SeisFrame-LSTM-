@@ -18,6 +18,12 @@ does not; it changes no strength. Bar centres, lane positions and layer pitches 
 the hoop corner at the first grid step at or beyond cover + hoop + half the bar, the hoops are dimensioned to
 the bars, and a beam's hoop follows the first layer of its direction at each face. The conventions it declares (which direction's bars sit on top, the
 clearance used between a beam bar and a column bar it passes) are recorded in the output. Units: inches.
+
+The passage clearance (stated 2026-10-31, not changed): ACI 318-19 25.2.1 gives the minimum clear spacing between
+PARALLEL bars of a layer. No clause gives a clearance between a beam bar and the perpendicular column bars it passes in
+a joint; this basis reuses the 25.2.1 beam value there. That reuse, the bar grid, the gap kept at orthogonal crossings,
+the layer cap (Structure_Parameters.BEAM_BAR_MAX_LAYERS) and straight beam bars are the declared detailing policy of
+this basis (passage_policy), not code minima; nothing here relaxes them.
 """
 from __future__ import annotations
 
@@ -45,6 +51,9 @@ INTERLAYER_CLEAR_MIN_IN = 1.0                # 25.2.2
 # revised elevation was installed by that convention, so an overlap still fails.
 SLAB_BOTTOM_MAT_DISPLACEMENT_MAX_IN = 1.0
 STACKING_CONVENTIONS = ("x_over_y", "y_over_x")
+PASSAGE_CLEARANCE_BASIS = ("the 25.2.1 minimum clear spacing between parallel beam bars, reused for a beam bar passing the "
+                           "perpendicular column bars of a joint (no clause gives that passage gap): a declared detailing "
+                           "policy, not a code minimum")
 
 
 def bar_diameter(size):
@@ -132,16 +141,40 @@ def layer_clearances(positions, bar_db_in):
     return [b - a - bar_db_in for a, b in zip(positions, positions[1:])]
 
 
+def passage_policy(beam_db_in=None, aggregate_in=None, max_layers=None, grid_in=_OMITTED):
+    """The declared detailing policy the beam-bar lanes and rows rest on, by name (2026-10-31).
+
+    Every item is a policy of this design basis, not an ACI minimum: the passage clearance (PASSAGE_CLEARANCE_BASIS;
+    its value for a bar of ``beam_db_in``), the bar position grid, the clear gap kept between orthogonal layers at a
+    crossing, the layer cap and straight beam bars. Reported so a lane or row limit is never read as a code limit.
+    """
+    import Structure_Parameters as sp
+    aggregate = sp.AGGREGATE_MAX_SIZE_IN if aggregate_in is None else aggregate_in
+    return {"kind": "construction_policy", "relaxed": False,
+            "passage_clearance": {"basis": PASSAGE_CLEARANCE_BASIS, "rule": "max(1 in, db, 4/3 aggregate)",
+                                  "value_in": None if beam_db_in is None else clear_spacing_limit("beam", beam_db_in, aggregate)},
+            "bar_position_grid_in": sp.BAR_POSITION_GRID_IN if grid_in is _OMITTED else grid_in,
+            "orthogonal_crossing_clear_in": sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN,
+            "max_layers_per_face": sp.BEAM_BAR_MAX_LAYERS if max_layers is None else max_layers,
+            "straight_bars": "beam bars run straight along the line; one row arrangement serves every joint of the group",
+            "row_depth_limit": "no bar row past mid-depth (Design.SMRF_Beam_Slab_Strength.validate_bar_rows)"}
+
+
 # ---- the assembled joint --------------------------------------------------------------------------
 def thread_bars(n, bar_db, lo, hi, obstacles, obstacle_db, clear_min, grid_in=_OMITTED):
     """Place ``n`` bars of diameter ``bar_db`` between ``lo`` and ``hi`` (centre limits), keeping
     ``clear_min`` clear from each other and from the obstacle bars (column bars the beam bars pass).
     Greedy from the left, every centre on the bar position grid (the first admissible grid point past
     each obstacle and past the previous bar; exact positions without a grid). Returns the positions
-    placed (fewer than n when they do not fit)."""
+    placed (fewer than n when they do not fit). ``obstacle_db`` is one diameter for every obstacle, or a
+    list with one per obstacle (a joint holding bars of two cages, beam_bars_through_inventory). An obstacle
+    is a centre, or a (low, high) pair of centres: a bar whose lateral position sweeps that interval (an
+    offset bend inside the joint), and the whole interval is kept clear."""
     import Structure_Parameters as sp
     grid = _grid(grid_in)
-    blocked = [(o - (obstacle_db + bar_db) / 2.0 - clear_min, o + (obstacle_db + bar_db) / 2.0 + clear_min) for o in obstacles]
+    dbs = list(obstacle_db) if isinstance(obstacle_db, (list, tuple)) else [obstacle_db] * len(obstacles)
+    spans = [(min(o), max(o)) if isinstance(o, (list, tuple)) else (o, o) for o in obstacles]
+    blocked = [(a - (d + bar_db) / 2.0 - clear_min, b + (d + bar_db) / 2.0 + clear_min) for (a, b), d in zip(spans, dbs)]
     placed, x = [], sp.snap_up_to_grid(lo, grid)
     while len(placed) < n and x <= hi + 1e-9:
         moved = True
@@ -206,6 +239,41 @@ def beam_bars_threading(b_col_in, h_col_in, b_beam_in, beam_cover_in, beam_hoop_
             "fits_in_one_layer": per_layer >= bars_per_face,
             "clearance_used_in": clear_in,
         }
+    return directions
+
+
+def beam_bars_through_inventory(b_col_in, h_col_in, b_beam_in, beam_cover_in, beam_hoop_db_in, beam_db_in, bars_per_face,
+                                inventory, clear_in, grid_in=_OMITTED):
+    """Per direction, as beam_bars_threading, through a joint whose vertical bars are ``inventory`` in the plan
+    coordinates of column_bars_plan, each bar with its own diameter (2026-10-31): the joint at a column transition, where
+    the declared transition moves bars inside the joint (Model.Member_Bar_Layers.transition_inventory). An entry is a
+    bar that stays put, (x, y, db), or a bar whose bend sweeps the plan segment from (x0, y0) to (x1, y1),
+    (x0, y0, x1, y1, db): the segment's whole lateral interval is kept clear (thread_bars), so a lane is clear of that
+    bar at every elevation of its bend, wherever the beam rows sit. The core is ``b_col_in`` x ``h_col_in``; the lane
+    rule is the same (the bar grid, the passage clearance ``clear_in``)."""
+    import Structure_Parameters as sp
+    grid = _grid(grid_in)
+    first = sp.first_bar_offset_in(beam_cover_in, beam_hoop_db_in, beam_db_in, grid_in=grid)
+    directions = {}
+    for axis, width_axis_extent in (("x", b_col_in), ("y", h_col_in)):
+        offset = (width_axis_extent - b_beam_in) / 2.0
+        inner_lo, inner_hi = offset + first, offset + b_beam_in - first
+        spans = set()
+        for entry in inventory:
+            *plan, d = entry
+            x0, y0, x1, y1 = plan if len(plan) == 4 else (*plan, *plan)
+            a, b = (y0, y1) if axis == "x" else (x0, x1)
+            low, high = min(a, b), max(a, b)
+            if offset - d < high and low < offset + b_beam_in + d:
+                spans.add((low, high, d))
+        obstacles = sorted(spans)
+        placed = thread_bars(bars_per_face, beam_db_in, inner_lo, inner_hi, [(low, high) for low, high, _d in obstacles],
+                             [d for _l, _h, d in obstacles], clear_in, grid_in=grid)
+        directions[axis] = {"beam_band_in": [offset, offset + b_beam_in], "bar_centre_limits_in": [inner_lo, inner_hi],
+                            "column_bar_lanes_blocked_in": [low if high == low else [low, high] for low, high, _d in obstacles],
+                            "swept_intervals": sum(1 for low, high, _d in obstacles if high > low),
+                            "obstacle_diameters_in": [d for _l, _h, d in obstacles], "threaded_positions_in": placed,
+                            "bars_per_layer_that_fit": len(placed), "clearance_used_in": clear_in}
     return directions
 
 
@@ -406,7 +474,8 @@ def joint_assembly(record, stacking="x_over_y", pass_clearance_in=None, max_laye
                                       for face, count in (("top", r["beam_top_bars"]),
                                                           ("bottom", r["beam_bot_bars"]))}
         d["fits_within_layer_limit"] = d["layers_needed"] is not None and d["layers_needed"] <= max_layers
-        checks.append({"rule": f"fit: beam bars pass between the column bars in at most {max_layers} layer(s) (clearance per 25.2.1)",
+        checks.append({"rule": f"fit: beam bars pass between the column bars in at most {max_layers} layer(s) (passage "
+                               "clearance: the 25.2.1 parallel-bar value reused, a detailing policy)",
                        "direction": axis,
                        "passes": d["fits_within_layer_limit"],
                        "detail": f"top/bottom {r['beam_top_bars']}/{r['beam_bot_bars']} #{r['beam_bar_size']} bars, {d['bars_per_layer_that_fit']} fit per layer "
@@ -528,5 +597,6 @@ def evaluate_cage_geometry(record, stacking=None):
                         "joint_assembly_passes": joint["passes"],
                         "failed_checks": [c for part in (column, beam, joint) for c in part["checks"] if not c["passes"]]},
             "scope": "geometry of the record's scalar quantities against ACI 318-19 Chapter 25 and 18.6/18.7; "
-                     "declared conventions: stacking order, beam-bar-to-column-bar clearance = 25.2.1 limit, slab "
+                     "declared conventions: stacking order, beam-bar-to-column-bar clearance = the 25.2.1 parallel-bar "
+                     "limit reused (a detailing policy, not a code minimum), slab "
                      "mats parallel to a beam omitted within its width; no strength is recomputed here"}

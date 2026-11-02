@@ -239,10 +239,14 @@ def validate_joint_scope():
     return scope
 
 
+# member_theta_p_rad is the MEMBER plastic-rotation interval (Haselton Eq. 3.10, with this end's a_sl) the end's
+# backbone was built with; it was exported as "theta_p" before the frozen IMK V2 calibration (2026-10-29), same value.
+# It is not the native dp the spring was installed with: under the frozen calibration the two differ, and the native
+# values are per axis and sign in the hinge registry (Model/IMK_Spring_Mapping.spring_points).
 INVENTORY_COLUMNS = ("member_tag", "member_type", "end", "location", "floor_index", "axis", "flexure", "bar_slip",
                      "panel_shear", "member_deformation_scope", "interface_present", "interface_scope",
                      "interface_calibration_id", "interface_status", "bond_slip_indicator", "decomposition_status",
-                     "theta_p", "policy")
+                     "member_theta_p_rad", "policy")
 
 
 def end_inventory(hinge_registry):
@@ -255,6 +259,6 @@ def end_inventory(hinge_registry):
             if record is None:
                 continue
             theta_p = ((entry.get("backbone_by_end") or {}).get(end) or {}).get("theta_p", entry.get("theta_p"))
-            rows.append({**{column: record.get(column) for column in INVENTORY_COLUMNS if column != "theta_p"},
-                         "theta_p": theta_p})
+            rows.append({**{column: record.get(column) for column in INVENTORY_COLUMNS if column != "member_theta_p_rad"},
+                         "member_theta_p_rad": theta_p})
     return rows

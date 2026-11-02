@@ -3,13 +3,24 @@ moment-rotation hysteresis.
 
 Generated NTHA output only stores force/rotation ENVELOPES, never the full
 moment-rotation history, so proving the IMK hinge model behaves correctly
-(elastic slope matches Ke, yield at My, capping at FmaxFy*My, post-capping
+(elastic slope matches the spring stiffness Kh, yield at My, capping at
+Mc = FmaxFy*My reached at the native rotation My/Kh + dp, post-capping
 degradation) requires re-running the case with element recorders attached.
 
 This rebuilds the model exactly the way Ground_Motion_Main.py does
 (build_gravity_modal_state() then run_ntha()) so the model is identical to
 the one that produced the dataset, attaches recorders to the requested
 hinges, runs the analysis, and plots the result.
+
+Every loop is drawn against its OWN installed spring, read from the hinge
+registry of the rebuilt model per member end, bending axis and native sign
+(Model/IMK_Spring_Mapping.spring_points): native yield My/Kh, native capping
+My/Kh + dp and, under the frozen IMK V2 calibration (2026-10-29), the
+member-reference yield My/K0 for comparison. The plotted rotation is the native
+zeroLength spring rotation in milliradians: not a story drift and not a member
+chord rotation. The native du is a provisional numerical cutoff, not a collapse
+rotation. The rerun installs the CURRENT member spring calibration; a case
+generated under another one is reported, never silently mixed.
 
 Important: hinges only exist where Structure_Parameters enables them.
 With IMK_APPLY_TO_COLUMNS = False, column elements have no hinge at all and
@@ -29,7 +40,6 @@ so the rerun matches the original generation run.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 from pathlib import Path
@@ -46,20 +56,18 @@ if str(RC_DIR) not in sys.path:
 import numpy as np  # noqa: E402
 import openseespy.opensees as ops  # noqa: E402
 
-import Structure_Parameters as sp  # noqa: E402
 from Analysis.NTHA import run_ntha  # noqa: E402
 from Geometry_Overrides import apply_geometry_overrides  # noqa: E402
 from Design.Design_Driver import DESIGN_ARTIFACT_NAME, load_or_create_design  # noqa: E402
 from Ground_Motion_Main import build_gravity_modal_state  # noqa: E402
 from Loads.Ground_Motion import load_ground_motion_pair_by_result_id  # noqa: E402
-from Model.IMK_Hinges import (  # noqa: E402
-    hinge_element_tag,
-    imk_hinge_stiffness_components,
-    imk_hinge_thresholds,
-    _member_properties,
-)
+from Model import IMK_Spring_Mapping as spring_mapping  # noqa: E402
+from Model.IMK_Hinges import hinge_element_tag, installed_spring_points  # noqa: E402
 
+# zeroLength material index -> recorder label; the registry's spring axis of each label.
 MATERIAL_DIRECTIONS = ((1, "roty"), (2, "rotz"))
+SPRING_AXIS = {"roty": "y", "rotz": "z"}
+END_NAMES = {1: "i", 2: "j"}
 
 
 def read_case_settings(case_dir: Path):
@@ -94,62 +102,69 @@ def attach_recorders(output_dir: Path, element_tags):
             print(f"  recorders: element {ele_tag} end {end_id} -> hinge {hinge_ele}")
 
 
-def backbone_reference_from_case(case_dir: Path, run_name: str, element_tag: int):
-    """Read the backbone actually installed on this element, from the case.
+def case_member_spring_calibration(case_dir: Path, run_name: str):
+    """(calibration, basis): the member spring calibration the case's own NTHA run was generated under.
 
-    Recomputing it is wrong for columns. _member_properties defaults to zero
-    axial load, but a column hinge is calibrated at its own axial force off the
-    P-M surface -- for case_0008 that is My = 2833 kip-in at 183 kip versus
-    1665 at zero, a 41% error. Plotted as a reference the loop would appear to
-    yield far above its own backbone, which reads as a broken IMK model rather
-    than a broken plot. The generated hinge_backbone.csv holds the values the
-    hinge was built with, so use those.
+    Read from the run's global_parameters.json. A run that predates the key was generated before the frozen
+    IMK V2 calibration (2026-10-29), under the pre-freeze rule the legacy replay reproduces. (None, basis) when
+    the run wrote no global_parameters.json.
     """
-    path = case_dir / "ntha" / run_name / "hinge_backbone.csv"
+    path = case_dir / "ntha" / run_name / "global_parameters.json"
     if not path.exists():
-        return None
-    with path.open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            if str(row.get("ele_tag")) != str(element_tag):
-                continue
-            if not float(row.get("plastic_rotation") or 0.0):
-                continue          # the end that never yielded
-            my = float(row["yield_moment_kip_in"])
-            theta_y = float(row["theta_y"])
-            return {
-                "My": my,
-                "Ke": my / theta_y if theta_y > 0 else 0.0,
-                "theta_y": theta_y,
-                "theta_cap": theta_y + float(row["theta_p"]),
-                "theta_u": float(row["theta_u"]),
-                "FmaxFy": getattr(sp, "IMK_FMAXFY_POS", 1.10),
-                "FresFy": getattr(sp, "IMK_FRESFY_POS", sp.IMK_RES_POS),
-                "axial_kip": float(row.get("axial_kip") or 0.0),
-            }
-    return None
+        return None, f"no {path.name} for run {run_name}"
+    recorded = json.loads(path.read_text(encoding="utf-8")).get("imk_member_spring_calibration")
+    if recorded is None:
+        return spring_mapping.LEGACY_REPLAY, "key absent: the run predates the frozen IMK V2 calibration (2026-10-29)"
+    return recorded, "recorded in the run's global_parameters.json"
 
 
-def backbone_reference(member_type: str, length: float):
-    """Backbone values the recorded loop should agree with.
+def backbone_reference(ele_tag: int, end: str, axis: str):
+    """The installed spring the recorded loop should agree with: spring_points of (element, end, axis).
 
-    Zero-axial fallback; prefer backbone_reference_from_case for columns.
+    Read from the hinge registry of the model this rerun built, so it is the material that produced the loop,
+    per native sign (beam ends are asymmetric) and at the column's own axial force. It replaces the earlier
+    references, which took Ke from the nominal member theta_y of hinge_backbone.csv (not the spring stiffness)
+    or the global IMK_THETA_* constants (not the calibrated backbone), and put capping at that theta_y + the
+    member theta_p (not the native My/Kh + dp). None for a released (elastic) end or a member without hinges.
     """
-    properties = _member_properties(member_type)
-    components = imk_hinge_stiffness_components(member_type, "rot_y", length)
-    thresholds = imk_hinge_thresholds(member_type, "rot_y", length)
-    return {
-        "My": properties["my"],
-        "Ke": components["selected_stiffness"],
-        "theta_y": components["actual_theta_y"],
-        "theta_cap": thresholds["theta_cap"],
-        "theta_u": thresholds["theta_u"],
-        "FmaxFy": getattr(sp, "IMK_FMAXFY_POS", 1.10),
-        "FresFy": getattr(sp, "IMK_FRESFY_POS", sp.IMK_RES_POS),
-    }
+    return installed_spring_points(ele_tag, end, axis)
 
 
-def plot_recordings(output_dir: Path, reference: dict, figure_path: Path):
-    """Plot every recorder that captured a real (non-degenerate) response."""
+def installed_spring_references(element_tags):
+    """backbone_reference of every recorded spring, keyed by its recorder file stem."""
+    return {f"hinge_{ele_tag}_end{end_id}_{label}": backbone_reference(ele_tag, END_NAMES[end_id], SPRING_AXIS[label])
+            for ele_tag in element_tags for end_id in (1, 2) for _index, label in MATERIAL_DIRECTIONS}
+
+
+def describe_references(references):
+    """One line per recorded spring and native sign: the four rotations consumers must keep apart."""
+    for stem, points in references.items():
+        if points is None:
+            print(f"  {stem}: no installed IMK spring (released end or member without hinges)")
+            continue
+        for sign in ("positive", "negative"):
+            branch = points[sign]
+            line = (f"  {stem} {sign} ({branch.get('physical_direction')}): My {branch['My_kip_in']:.1f} kip-in, "
+                    f"Kh {points['Kh_kip_in_per_rad']:.3e} kip-in/rad, native My/Kh {branch['native_theta_y_rad']:.6f}, "
+                    f"native capping My/Kh + dp {branch['native_theta_cap_rad']:.5f}, "
+                    f"native du {branch['native_du_rad']:.4f} (numerical cutoff)")
+            if branch.get("member_theta_y_reference_rad") is not None:
+                line += (f"; member reference My/K0 {branch['member_theta_y_reference_rad']:.5f}, "
+                         f"capping {branch['member_theta_cap_reference_rad']:.5f}")
+            print(line)
+
+
+def plot_recordings(output_dir: Path, references: dict, figure_path: Path, calibration=None,
+                    case_calibration=None, case_basis=None):
+    """Plot every recorder this rerun wrote that captured a real (non-degenerate) response against its own
+    installed spring.
+
+    ``references`` maps each recorder stem this rerun attached to backbone_reference (None: a released or elastic
+    end, no reference lines); a hinge_*.out left in output_dir by an earlier rerun is not in it and is skipped.
+    Rotation is the native zeroLength spring rotation in mrad; the ductility is per native yield My/Kh of each
+    sign. When ``case_calibration`` differs from ``calibration`` the figure says so, so it cannot pass for the
+    dataset's model.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -157,6 +172,9 @@ def plot_recordings(output_dir: Path, reference: dict, figure_path: Path):
 
     active = []
     for path in sorted(output_dir.glob("hinge_*.out")):
+        if path.stem not in references:
+            print(f"  {path.name}: not recorded by this rerun (earlier file) -- skipped")
+            continue
         data = np.loadtxt(path)
         if data.ndim != 2 or data.shape[1] < 3:
             print(f"  {path.name}: no material response recorded (hinge absent) -- skipped")
@@ -181,31 +199,52 @@ def plot_recordings(output_dir: Path, reference: dict, figure_path: Path):
     )
 
     for axis, (name, moment, rotation) in zip(axes.flat, active):
-        axis.plot(rotation * 100.0, moment, lw=0.6, color="tab:blue", alpha=0.85)
-        span = np.array([-reference["theta_y"], reference["theta_y"]]) * 1.4
-        axis.plot(span * 100.0, span * reference["Ke"], "k--", lw=1.2, label="elastic Ke")
-        for sign in (1.0, -1.0):
-            axis.axhline(sign * reference["My"], color="tab:red", ls=":", lw=1)
-            axis.axhline(
-                sign * reference["FmaxFy"] * reference["My"],
-                color="tab:orange", ls=":", lw=1,
-            )
-            axis.axvline(
-                sign * reference["theta_cap"] * 100.0, color="tab:green", ls="-.", lw=1
-            )
-        axis.set_xlabel("Hinge rotation (%)")
-        axis.set_ylabel("Hinge moment (kip-in)")
-        axis.set_title(
-            f"{name}\npeak rotation = {np.abs(rotation).max() * 100:.3f}% "
-            f"({np.abs(rotation).max() / reference['theta_y']:.0f} x theta_y)"
-        )
+        axis.plot(rotation * 1000.0, moment, lw=0.6, color="tab:blue", alpha=0.85)
+        points = references.get(name)
+        if points is None:
+            title = f"{name}\nno installed IMK spring (released or elastic end): no backbone reference"
+        else:
+            positive, negative = points["positive"], points["negative"]
+            span = np.array([-negative["native_theta_y_rad"], positive["native_theta_y_rad"]]) * 1.4
+            axis.plot(span * 1000.0, span * points["Kh_kip_in_per_rad"], "k--", lw=1.2, label="elastic Kh")
+            # Each native sign on its own branch: beam ends are asymmetric.
+            for sign, branch in ((1.0, positive), (-1.0, negative)):
+                first = sign > 0
+                axis.axhline(sign * branch["My_kip_in"], color="tab:red", ls=":", lw=1, label="My" if first else None)
+                axis.axhline(sign * branch["Mc_kip_in"], color="tab:orange", ls=":", lw=1,
+                             label="Mc = FmaxFy My" if first else None)
+                axis.axvline(sign * branch["native_theta_cap_rad"] * 1000.0, color="tab:green", ls="-.", lw=1,
+                             label="native capping My/Kh + dp" if first else None)
+            demand = spring_mapping.rotation_demand(points, float(rotation.max()), float(rotation.min()))
+            peak = {sign: demand["by_sign"][sign]["peak_rotation_rad"] for sign in ("positive", "negative")}
+            cutoff = ("reached the native du (numerical cutoff, not collapse)" if demand["past_native_cutoff"]
+                      else "below the native du cutoff")
+            title = (f"{name}\npeak spring rotation +{peak['positive'] * 1000:.2f} / -{peak['negative'] * 1000:.2f} mrad"
+                     f" = {peak['positive'] / positive['native_theta_y_rad']:.1f} / "
+                     f"{peak['negative'] / negative['native_theta_y_rad']:.1f} x native My/Kh\n"
+                     f"capping ratio {demand['capping_ratio']:.2f} ({demand['governing_sign']}; 1 = native capping); "
+                     f"{cutoff}")
+            axis.legend(fontsize=7, loc="lower right")
+        axis.set_xlabel("Native spring rotation (mrad), not story drift")
+        axis.set_ylabel("Spring moment (kip-in)")
+        axis.set_title(title, fontsize=8)
         axis.grid(alpha=0.3)
-        axis.legend(fontsize=8, loc="lower right")
 
     for axis in axes.flat[len(active):]:
         axis.axis("off")
 
-    figure.tight_layout()
+    if calibration is not None:
+        suptitle = f"Member spring calibration installed by this rerun: {calibration}"
+        top = 0.97
+        if case_calibration != calibration:
+            generated = (f"case generated under {case_calibration}" if case_calibration is not None
+                         else "case's member spring calibration unknown")
+            suptitle += f"\n{generated} ({case_basis}): the loops are the rerun's model, not the dataset's"
+            top = 0.95
+        figure.suptitle(suptitle, fontsize=9)
+        figure.tight_layout(rect=(0.0, 0.0, 1.0, top))
+    else:
+        figure.tight_layout()
     figure.savefig(figure_path, dpi=150)
     print(f"\nWrote {figure_path}")
     return figure_path
@@ -229,7 +268,8 @@ def parse_args():
     parser.add_argument(
         "--member-type",
         default="beam",
-        help="Member type for the backbone reference values ('beam' or 'column').",
+        help="Unused since the frozen IMK V2 calibration (2026-10-29): every reference is read from the "
+             "installed spring itself. Kept so existing commands still parse.",
     )
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--damping-ratio", type=float, default=0.05)
@@ -257,8 +297,9 @@ def main():
     # defaults instead of this case's sections and reinforcement. The hinge
     # that produced the recorded loop was then a different hinge entirely:
     # for case_0008 the rerun gave theta_y = 0.000207 rad against the 0.004
-    # actually installed, and rotations 100x too small. The plot looked like
-    # a near-elastic hinge and said nothing about the real model.
+    # the case recorded (its nominal member theta_y column), and rotations 100x
+    # too small. The plot looked like a near-elastic hinge and said nothing
+    # about the real model.
     design_path = case_dir / DESIGN_ARTIFACT_NAME
     if not design_path.exists():
         raise SystemExit(
@@ -276,10 +317,24 @@ def main():
         flush=True,
     )
 
+    # The rerun installs the CURRENT member spring calibration. A case generated under another one is a
+    # different model (frozen IMK V2 calibration, 2026-10-29): say so rather than present the loop as the case's.
+    calibration = spring_mapping.active_calibration()
+    case_calibration, basis = case_member_spring_calibration(case_dir, run_name)
+    if case_calibration != calibration:
+        print(
+            f"WARNING: the case's run was generated under member spring calibration {case_calibration!r} "
+            f"({basis}); this rerun installs {calibration!r}. The loops and their reference lines are the "
+            "rerun's model, not the dataset's.",
+            flush=True,
+        )
+
     _, reference_modal_results, *_ = build_gravity_modal_state()
     print(f"Gravity+modal done at {time.perf_counter() - start:.0f}s", flush=True)
 
     attach_recorders(output_dir, args.element)
+    # The installed springs, read now from the registry of the model just built.
+    references = installed_spring_references(args.element)
 
     _, record_x, record_y = load_ground_motion_pair_by_result_id(
         result_id, set_name=args.set_name, scale_factor=scale_factor
@@ -309,34 +364,10 @@ def main():
         flush=True,
     )
 
-    span = sp.BAY_Y if args.member_type != "column" else sp.STORY_H
-    reference = backbone_reference_from_case(case_dir, run_name, args.element[0])
-    if reference is None:
-        print(
-            "No installed backbone found for element "
-            f"{args.element[0]}; falling back to the zero-axial reference, "
-            "which understates a column's yield moment.",
-            flush=True,
-        )
-        reference = backbone_reference(args.member_type, span)
-    else:
-        print(
-            "Backbone from the case: My %.0f kip-in at %.0f kip axial, "
-            "theta_y %.5f, theta_cap %.5f"
-            % (
-                reference["My"], reference["axial_kip"],
-                reference["theta_y"], reference["theta_cap"],
-            ),
-            flush=True,
-        )
-    print(
-        "\nBackbone reference: "
-        f"My={reference['My']:.1f} kip-in  Ke={reference['Ke']:.3e} kip-in/rad  "
-        f"theta_y={reference['theta_y'] * 100:.4f}%  "
-        f"theta_cap={reference['theta_cap'] * 100:.3f}%  "
-        f"FmaxFy*My={reference['FmaxFy'] * reference['My']:.1f} kip-in"
-    )
-    plot_recordings(output_dir, reference, output_dir / "hysteresis_plot.png")
+    print(f"\nInstalled spring references ({calibration}; native spring rotations, rad):")
+    describe_references(references)
+    plot_recordings(output_dir, references, output_dir / "hysteresis_plot.png", calibration=calibration,
+                    case_calibration=case_calibration, case_basis=basis)
 
 
 if __name__ == "__main__":

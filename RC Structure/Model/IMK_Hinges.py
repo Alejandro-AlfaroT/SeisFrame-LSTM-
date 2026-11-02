@@ -18,6 +18,7 @@ from Model.IMK_Materials import (
     active_energy_modes, define_rotational_imk, define_anchored_rotational_imk, define_canonical_rotational_imk,
     define_mapped_rotational_imk, validate_energy_calibration,
 )
+from Model import IMK_Spring_Mapping as spring_mapping
 # Energy mappings that derive each spring's physical reference energy from its own physical branches (no supplied
 # profile): they need the member's canonical connectivity to place the branches on the input coordinates.
 DERIVED_ENERGY_MODES = (CANONICAL_BASELINE_VERSION, PROVISIONAL_ANCHOR_VERSION)
@@ -340,7 +341,25 @@ def imk_hinge_stiffness(member_type, rot_dir, length, *, props=None, family=None
     )["selected_stiffness"]
 
 
+def installed_spring_points(ele_tag, end, axis):
+    """Native and member-reference rotations of one INSTALLED spring (Model/IMK_Spring_Mapping.spring_points), per
+    native input sign; None for a released end or a member without hinges."""
+    entry = hinge_backbone(ele_tag)
+    if entry is None:
+        return None
+    material = ((entry.get("installed_materials") or {}).get(end) or {}).get(axis)
+    return spring_mapping.spring_points(material)
+
+
 def imk_hinge_thresholds(member_type, rot_dir, length, *, props=None, family=None, axial_kip=0.0):
+    """Legacy member-level thresholds from the GLOBAL IMK_THETA_P/U constants (not the calibrated backbone).
+
+    Kept for the legacy replay only. Under the frozen calibration the capping and cutoff rotations are per end, axis
+    and sign of the installed material; read them with installed_spring_points.
+    """
+    if spring_mapping.is_frozen():
+        raise ValueError(f"imk_hinge_thresholds reads the global IMK_THETA_* constants; under {spring_mapping.FROZEN_V2} "
+                         "read the installed spring with Model.IMK_Hinges.installed_spring_points(ele_tag, end, axis)")
     components = imk_hinge_stiffness_components(member_type, rot_dir, length, props=props, family=family,
                                                 axial_kip=axial_kip)
     theta_y = components["actual_theta_y"]
@@ -360,10 +379,14 @@ def imk_elastic_inertia_factor():
     """(n+1)/n stiffness correction for the elastic segment between springs.
 
     With a rotational spring of stiffness Ke = n * (6EI/L) at each end, the
-    elastic element between them must use I * (n+1)/n so the composite
-    spring-element-spring assembly reproduces the real member stiffness
-    (Ibarra & Krawinkler 2005; Zareian & Medina 2010). Without it the member
-    is softer than intended by exactly that factor.
+    elastic element between them uses I * (n+1)/n (Ibarra & Krawinkler 2005;
+    Zareian & Medina 2010) so the spring-element-spring assembly comes close
+    to the member stiffness. It is not exact: in double curvature each end of
+    the element is 3 EIe/Ls = (n+1)/n K0 in series with n K0, which assembles
+    to n(n+1)/(n^2 + n + 1) K0 = 420/421 K0 for n = 20 (0.2375 % soft); an
+    exact split would need a spring of (n+1) K0 instead. The frozen V2
+    calibration (Model/IMK_Spring_Mapping) retains this split as approved and
+    states the 420/421; it is not silently corrected here.
 
     Only the member-stiffness calibration carries this correction. The
     yield-rotation mode sets Ke from My/theta_y, which is not referenced to
@@ -392,10 +415,25 @@ def _orientation(member_type):
     raise ValueError(f"Unknown member_type: {member_type}")
 
 
+def _deformation_scope(indicator, owner):
+    """What a member-end spring's rotation contains. Bar slip is owned per member end (Model/Deformation_Ownership):
+    the backbone built for the end carries the owner and Haselton's a_sl. No end has been given a calibrated
+    interface, so the decomposition is the legacy included scope unless a diagnostic registered one in-process."""
+    if indicator == 0.0 and owner == "face_interface":
+        return ("member_end_spring; flexure only; bar slip owned by a registered face interface; "
+                "decomposition_not_certified")
+    if indicator == 0.0:
+        return ("member_end_spring; flexure only; bar slip removed without an owner "
+                "(legacy 2026-09-27 state, diagnostic reproduction only)")
+    return ("member_end_spring; flexure and bar slip inside the member hinge (legacy included scope); "
+            "slip_partition_not_validated")
+
+
 def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone=None,
                               yield_moment_negative=None, *, energy_calibration=None,
                               reverse_physical=False, physical_directions=("section_positive", "section_negative"),
-                              verification_only=False, spring_context=None, anchored=False, canonical=False, axis=None):
+                              verification_only=False, spring_context=None, anchored=False, canonical=False, axis=None,
+                              reference=None):
     """Install a member material with its explicit, modern OpenSees signature.
 
     The historical function name is retained for callers. Only Bilin and
@@ -407,23 +445,77 @@ def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone
     (yield_moment, yield_moment_negative) with ``reverse_physical`` placing them.
     ``axis`` ("y" or "z") selects that spring's Eq. 3.20 deterioration when the
     backbone carries one per axis (s/d of the spring's own bending depth).
+
+    Under the frozen V2 calibration (Model/IMK_Spring_Mapping, the default since 2026-10-29) a member-end spring
+    on the canonical physical orientation is installed through that module: the backbone's member intervals are
+    converted once to native dp/dpc on the spring's half-member reference and its S/C energy is the member-reference
+    rule. ``reference`` carries the member's length, its section 6 EI0/L and the elastic element's inertia factor,
+    which the conversion checks against the spring stiffness.
     """
     material_type = sp.IMK_MATERIAL_TYPE
     if material_type not in ("IMKBilin", "IMKPeakOriented"):
         raise ValueError("Member flexure requires IMKBilin or IMKPeakOriented; calibrate joint IMKPinching separately")
     if yield_moment_negative is None:
         yield_moment_negative = yield_moment
+    frozen = spring_mapping.is_frozen()
+
+    def rotation(sign, key):
+        # Per-sign value, else the backbone's symmetric value, else the
+        # global constant (a deterioration-only backbone carries no rotations).
+        default = getattr(sp, f"IMK_{key.upper()}_{sign}")
+        if backbone:
+            return backbone.get(f"{key}_{sign.lower()}", backbone.get(key, default))
+        return default
 
     def branch(sign, strength):
-        def rotation(key):
-            # Per-sign value, else the backbone's symmetric value, else the
-            # global constant (a deterioration-only backbone carries no rotations).
-            default = getattr(sp, f"IMK_{key.upper()}_{sign}")
-            if backbone:
-                return backbone.get(f"{key}_{sign.lower()}", backbone.get(key, default))
-            return default
-        return RotationalBackbone(rotation("theta_p"), rotation("theta_pc"), rotation("theta_u"), strength,
-                                  getattr(sp, f"IMK_FMAXFY_{sign}"), getattr(sp, f"IMK_FRESFY_{sign}"))
+        return RotationalBackbone(rotation(sign, "theta_p"), rotation(sign, "theta_pc"), rotation(sign, "theta_u"),
+                                  strength, getattr(sp, f"IMK_FMAXFY_{sign}"), getattr(sp, f"IMK_FRESFY_{sign}"))
+
+    if frozen:
+        # Mixed policies are refused, not reconciled: the frozen calibration is the canonical orientation with its
+        # own energies, a Haselton backbone and the half-member conversion, nothing else.
+        spring_mapping.require_configuration()
+        if not canonical or anchored or energy_calibration is not None or verification_only:
+            raise ValueError(f"{spring_mapping.FROZEN_V2} installs canonical-orientation member springs only "
+                             f"({spring_mapping._context_label(spring_context)})")
+        if not backbone or backbone.get("source") != "haselton_2008" \
+                or backbone.get("member_spring_calibration") != spring_mapping.FROZEN_V2:
+            raise ValueError(f"{spring_mapping._context_label(spring_context)}: {spring_mapping.FROZEN_V2} requires the "
+                             "member's Haselton backbone built under the same calibration")
+        by_axis = backbone.get("deterioration_by_axis") or {}
+        if axis not in by_axis:
+            raise ValueError(f"{spring_mapping._context_label(spring_context)}: no Eq. 3.20 lambda for spring axis {axis!r}")
+
+        def member_branch(sign, strength, direction):
+            return spring_mapping.MemberBranch(direction, strength, rotation(sign, "theta_p"),
+                                               rotation(sign, "theta_pc"), rotation(sign, "theta_u"),
+                                               getattr(sp, f"IMK_FMAXFY_{sign}"), getattr(sp, f"IMK_FRESFY_{sign}"))
+        indicator = backbone.get("bond_slip_indicator", bond_slip_indicator())
+        owner = backbone.get("slip_owner", "member_hinge")
+        provenance = {"backbone_source": backbone["source"],
+                      "deterioration_source": backbone.get("deterioration_source"),
+                      "deformation_scope": _deformation_scope(indicator, owner),
+                      "bond_slip_indicator": indicator, "slip_owner": owner,
+                      "end_location": backbone.get("end_location"),
+                      "deterioration": {**{key: backbone[key] for key in backbone if key.startswith("deterioration_")},
+                                        "spring_axis": axis,
+                                        "lambda_haselton_dimensionless": by_axis[axis]["lambda_haselton_dimensionless"]},
+                      "regression_guards": backbone.get("regression_guards"),
+                      "legacy_cutoff_padding_rad": backbone.get("legacy_cutoff_padding_rad")}
+        if backbone.get("theta_p_longitudinal_steel") is not None:
+            provenance["theta_p_longitudinal_steel"] = backbone["theta_p_longitudinal_steel"]
+        if spring_context is not None:
+            provenance["spring_context"] = spring_context
+        reference = reference or {}
+        return spring_mapping.define_frozen_member_imk(
+            material_type, mat_tag, elastic_stiffness,
+            member_branch("POS", yield_moment, physical_directions[0]),
+            member_branch("NEG", yield_moment_negative, physical_directions[1]),
+            lambda_haselton=by_axis[axis]["lambda_haselton_dimensionless"],
+            c_s=sp.IMK_C_S, c_c=sp.IMK_C_C, c_a=sp.IMK_C_A, c_k=sp.IMK_C_K, d_pos=sp.IMK_D_POS, d_neg=sp.IMK_D_NEG,
+            reverse=reverse_physical, physical_directions=physical_directions, provenance=provenance,
+            context=spring_context, length_in=reference.get("length_in"),
+            k0_from_section=reference.get("k0_from_section"), element_factor=reference.get("element_factor"))
 
     # Deterioration capacities: the member backbone carries them when
     # IMK_DETERIORATION_MODE translated Haselton's lambda into the OpenSees
@@ -454,25 +546,13 @@ def _define_imk_peak_material(mat_tag, elastic_stiffness, yield_moment, backbone
         lamda_a=lamda.get("A"), c_a=sp.IMK_C_A if "A" in modes else None,
         energy_convention=sp.IMK_ENERGY_CONVENTION,
     )
-    # Bar slip is owned per member end (Model/Deformation_Ownership): the backbone built for this
-    # end carries the owner and Haselton's a_sl. No end has been given a calibrated interface, so
-    # the decomposition is the legacy included scope unless a diagnostic registered one in-process.
     indicator = (backbone or {}).get("bond_slip_indicator", bond_slip_indicator())
     owner = (backbone or {}).get("slip_owner", "member_hinge")
-    if indicator == 0.0 and owner == "face_interface":
-        scope = ("member_end_spring; flexure only; bar slip owned by a registered face interface; "
-                 "decomposition_not_certified")
-    elif indicator == 0.0:
-        scope = ("member_end_spring; flexure only; bar slip removed without an owner "
-                 "(legacy 2026-09-27 state, diagnostic reproduction only)")
-    else:
-        scope = ("member_end_spring; flexure and bar slip inside the member hinge (legacy included scope); "
-                 "slip_partition_not_validated")
     provenance = {"calibration_id": calibration_id,
                     "status": sp.IMK_CYCLIC_CALIBRATION_STATUS,
                     "deterioration_source": deterioration_source,
                     "backbone_source": (backbone or {}).get("source", "fixed"),
-                    "deformation_scope": scope,
+                    "deformation_scope": _deformation_scope(indicator, owner),
                     "bond_slip_indicator": indicator,
                     "slip_owner": owner,
                     "end_location": (backbone or {}).get("end_location")}
@@ -579,13 +659,18 @@ def _create_end_hinge(
     # input at the start end i of a canonically connected member), the section's positive direction otherwise.
     directions_y = (("hogging", "sagging") if member_type.startswith("beam")
                     else ("section_positive_y", "section_negative_y"))
+    # The half-member reference each spring is calibrated on (frozen calibration): the member's centerline length,
+    # its section's own 6 EI0/L about the spring axis and the inertia factor its elastic element receives.
+    references = {axis: {"length_in": length, "element_factor": imk_elastic_inertia_factor(),
+                         "k0_from_section": _elastic_rotational_stiffness(props["e"], props[inertia], length)}
+                  for axis, inertia in (("y", "iy"), ("z", "iz"))}
     if energy_profiles is None and (anchored or canonical):
         material_y = _define_imk_peak_material(mat_y, ke_y, hogging, backbone, sagging, anchored=anchored,
             canonical=canonical, reverse_physical=reverse_physical, physical_directions=directions_y,
-            spring_context=contexts[0], axis="y")
+            spring_context=contexts[0], axis="y", reference=references["y"])
         material_z = _define_imk_peak_material(mat_z, ke_z, props["mz"], backbone, anchored=anchored, canonical=canonical,
             reverse_physical=reverse_physical, physical_directions=("section_positive_z", "section_negative_z"),
-            spring_context=contexts[1], axis="z")
+            spring_context=contexts[1], axis="z", reference=references["z"])
     elif energy_profiles is None:
         material_y = _define_imk_peak_material(mat_y, ke_y, positive, backbone, negative, spring_context=contexts[0],
                                                axis="y")
@@ -673,6 +758,13 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
     tie to the end nodes.
     """
     joint_i, joint_j = (int(joint_nodes[0]), int(joint_nodes[1])) if joint_nodes is not None else (n_i, n_j)
+    # The member spring calibration is checked before the domain is touched: the frozen calibration refuses a
+    # configuration that would mix it with another policy (Model/IMK_Spring_Mapping.configuration_problems).
+    if spring_mapping.is_frozen():
+        spring_mapping.require_configuration()
+        if _verification_calibrations is not None:
+            raise ValueError(f"{spring_mapping.FROZEN_V2} derives its own energies; synthetic member energy fixtures "
+                             f"need the explicit legacy replay ({spring_mapping.LEGACY_REPLAY})")
     # Validate all four profiles before mutating the OpenSees domain. Normal
     # builders never pass the private synthetic-fixture argument.
     energy_profiles = _member_energy_profiles(ele_tag, _verification_calibrations)
@@ -738,6 +830,7 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
 
     ke_y = imk_hinge_stiffness(member_type, "rot_y", length, props=props)
     ke_z = imk_hinge_stiffness(member_type, "rot_z", length, props=props)
+    frozen = spring_mapping.is_frozen()
     _HINGE_REGISTRY[int(ele_tag)] = {
         "ele_tag": int(ele_tag),
         "member_type": member_type,
@@ -745,6 +838,13 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
         "ke_y_kip_in_per_rad": ke_y,
         "ke_z_kip_in_per_rad": ke_z,
         "energy_mapping_mode": getattr(sp, "IMK_ENERGY_MAPPING_MODE", "legacy_unmapped"),
+        # The member-to-native spring calibration the materials were installed under, and per end and axis the
+        # native and member-reference rotations of each installed spring (Model/IMK_Spring_Mapping.spring_points).
+        # The flat theta_p/theta_pc/theta_u below are the MEMBER intervals and the retained cutoff; under the frozen
+        # calibration the native dp/dpc differ from them and are only in installed_materials and spring_points.
+        "member_spring_calibration": spring_mapping.active_calibration(),
+        "spring_points": {end: {axis: spring_mapping.spring_points(material) for axis, material in materials.items()}
+                          for end, materials in (("i", materials_i), ("j", materials_j))},
         "verification_only": _verification_calibrations is not None,
         "installed_materials": {"i": materials_i, "j": materials_j},
         "ends_released": released,
@@ -772,7 +872,11 @@ def create_imk_member(ele_tag, n_i, n_j, member_type, transf_tag, *, joint_nodes
         "stiffness_basis": props.get("iy_basis"),
         "flange_width_in": props.get("flange_width_in"),
         "iy_effective_in4": props["iy"],
-        "theta_y_target": props["theta_y"],
+        # The nominal member yield rotation (0.005 beam / 0.004 column). Under the frozen calibration it is no active
+        # quantity (the member-reference yield is My/K0 per spring, in spring_points), so it is kept only as labelled
+        # historical metadata; the legacy replay keeps it under its old name.
+        "theta_y_target": None if frozen else props["theta_y"],
+        "historical_nominal_theta_y_rad": props["theta_y"],
         # The spring's OWN elastic limit. theta_y_target is a member-level
         # nominal (a fixed 0.004 for columns, 0.005 for beams), but the spring
         # is deliberately IMK_HINGE_STIFFNESS_FACTOR times the member

@@ -144,8 +144,10 @@ class GradeMoves(unittest.TestCase):
         self.sfrs_column = next(g for g in sorted(self.state.groups) if cg.family_of(self.state, g) == "sfrs_column")
 
     def test_a_gravity_failure_steps_only_the_gravity_columns(self):
+        # Every gravity column check routes alike; the hoop configuration stands in because the capacity shear, read per
+        # direction (ACI 318-19 22.5.1.1), passes on the selected hoops.
         moves = gs.propose_growth(evaluation(capacity_design_failed_checks=[
-            {"id": "gravity.column_capacity_shear", "location": self.gravity_column}]), self.state)
+            {"id": "gravity.column_hoop_configuration_lo", "location": self.gravity_column}]), self.state)
         self.assertEqual(set(moves), {"gravity_column_grade"})
         self.assertEqual(moves["gravity_column_grade"][0], 6.0)
         moved = gs.apply_moves(self.state, moves)
@@ -165,7 +167,7 @@ class GradeMoves(unittest.TestCase):
 
     def test_both_families_move_independently_in_one_proposal(self):
         moves = gs.propose_growth(evaluation(capacity_design_failed_checks=[
-            {"id": "gravity.column_capacity_shear", "location": self.gravity_column},
+            {"id": "gravity.column_hoop_configuration_lo", "location": self.gravity_column},
             {"id": "column.pm_strength", "location": self.sfrs_column}]), self.state)
         self.assertEqual(set(moves), {"gravity_column_grade", "sfrs_column_grade"})
         moved = gs.apply_moves(self.state, moves)
@@ -175,7 +177,7 @@ class GradeMoves(unittest.TestCase):
         top = gs.regraded(self.state, "gravity_column", 7.0)
         self.assertIsNone(gs.next_grade(top, "gravity_column"))
         moves = gs.propose_growth(evaluation(capacity_design_failed_checks=[
-            {"id": "gravity.column_capacity_shear", "location": self.gravity_column}]), top)
+            {"id": "gravity.column_hoop_configuration_lo", "location": self.gravity_column}]), top)
         self.assertNotIn("gravity_column_grade", moves)
         self.assertIn(top.tie_of(self.gravity_column), moves)        # the size, never an 8 ksi gravity column
         self.assertEqual(cg.grade(gs.apply_moves(top, moves), "gravity_column"), 7.0)
