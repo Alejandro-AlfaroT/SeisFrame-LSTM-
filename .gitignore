@@ -26,5 +26,8 @@ RC Hybrid Surrogate Model/outputs/
 RC Hybrid Surrogate Model/checkpoints/
 RC Hybrid Surrogate Model/derived_features/
 
+# Local research runs and evidence (large; kept off GitHub)
+/research/
+
 # IDE settings
 .idea/
