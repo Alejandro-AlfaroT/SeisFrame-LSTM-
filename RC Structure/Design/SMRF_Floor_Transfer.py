@@ -13,6 +13,10 @@ floor of the frame in place of the tributary nodal loads.
 Accounting, so nothing is counted twice:
 - floor pressure (slab self-weight + SDL, and live) is applied to the floor
   model only, and reaches the frame solely through this transfer;
+- the floor model is the centreline plate. The strip of the physical floor
+  outside it (over the outer half of the perimeter beams) is not in the
+  transfer; Loads/Perimeter_Strip puts it on the perimeter beams, and the
+  validators here are given the plate's load, not the footprint's (2026-11-05);
 - beam drop and column self-weight stay on the frame as element loads
   (Gravity_Loads._apply_element_self_weight) and are never floor pressure;
 - the seismic mass keeps its tributary-area distribution; only the gravity
@@ -369,8 +373,15 @@ def validate_floor_transfers_by_floor(record, geometry, description, slab_thickn
         raise ValueError("Floor transfer does not hold exactly one solution per distinct floor of the current design.")
     result = {}
     for sha, sections, floors in floor_sections.distinct_floors(description):
+        def expected(value):
+            if not isinstance(value, dict):
+                return value
+            amounts = [float(value[k] if k in value else value[str(k)]) for k in floors]
+            if not amounts or any(v != amounts[0] for v in amounts[1:]):
+                raise ValueError("Floors sharing one transfer must share the exact physical loaded area")
+            return amounts[0]
         transfer = validate_floor_transfer(transfers[sha], geometry, sections, slab_thickness_in,
-                                           expected_dead_kip, expected_live_kip)
+                                           expected(expected_dead_kip), expected(expected_live_kip))
         if transfer.get("mesh_per_bay") != record.get("mesh_per_bay"):
             raise ValueError("Floor transfers of one design must share one mesh.")
         for floor in floors:

@@ -64,9 +64,14 @@ def _floor_mode_shape(mode):
     return shape
 
 
-def run_modal_analysis():
+def run_modal_analysis(*, constraint_handler=None):
     ops.wipeAnalysis()
-    apply_analysis_constraints()
+    if constraint_handler is None:
+        apply_analysis_constraints()
+    elif constraint_handler == 'Transformation':
+        ops.constraints('Transformation')
+    else:
+        raise ValueError('Unknown explicit modal-analysis constraint handler')
     ops.numberer("RCM")
     ops.system("BandGeneral")
 

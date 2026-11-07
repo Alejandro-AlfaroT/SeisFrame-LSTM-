@@ -28,7 +28,7 @@ def _apply_nodal_gravity_loads(load_factor=1.0):
                     node_tag(k, i, j),
                     0.0,
                     0.0,
-                    -load_factor * sp.node_gravity_load_kip(i, j),
+                    -load_factor * sp.node_gravity_load_kip(i, j, floor=k),
                     0.0,
                     0.0,
                     0.0,
@@ -59,7 +59,7 @@ def _apply_beam_uniform_gravity_loads(load_factor=1.0):
     # ── X beams (half-tributary in the Y-direction) ───────────────────────────
     for k in range(1, sp.NUM_FLOOR + 1):
         for j in range(sp.NUM_BAY_Y + 1):
-            wz = load_factor * sp.beam_gravity_wz_kip_per_in("x", j) / 2.0
+            wz = load_factor * sp.beam_gravity_wz_kip_per_in("x", j, floor=k) / 2.0
             for i in range(sp.NUM_BAY_X):
                 ops.eleLoad("-ele", ele_tag, "-type", "-beamUniform", 0.0, wz, 0.0)
                 ele_tag += 1
@@ -68,9 +68,19 @@ def _apply_beam_uniform_gravity_loads(load_factor=1.0):
     for k in range(1, sp.NUM_FLOOR + 1):
         for j in range(sp.NUM_BAY_Y):
             for i in range(sp.NUM_BAY_X + 1):
-                wz = load_factor * sp.beam_gravity_wz_kip_per_in("y", i) / 2.0
+                wz = load_factor * sp.beam_gravity_wz_kip_per_in("y", i, floor=k) / 2.0
                 ops.eleLoad("-ele", ele_tag, "-type", "-beamUniform", 0.0, wz, 0.0)
                 ele_tag += 1
+    if sp.SLAB_THICKNESS_IN is not None:
+        from Model import Floor_Footprint as fp
+        for k in range(1,sp.NUM_FLOOR+1):
+            physical = fp.physical_floor(k)
+            cx, cy = physical["centroid_in"]
+            weight = load_factor * sp.total_floor_gravity_load(k)
+            mx = -.5*weight*(cy-sp.NUM_BAY_Y*sp.BAY_Y/2)
+            my = .5*weight*(cx-sp.NUM_BAY_X*sp.BAY_X/2)
+            if mx or my:
+                ops.load(node_tag(k,0,0),0.,0.,0.,mx,my,0.)
 
 
 def _beam_element_tag(k, axis, line_index, span_index):
@@ -82,7 +92,23 @@ def _beam_element_tag(k, axis, line_index, span_index):
     return n_col + n_beam_x + ((k - 1) * sp.NUM_BAY_Y + span_index) * (sp.NUM_BAY_X + 1) + line_index + 1
 
 
-def _apply_slab_transfer_loads(dead_factor=1.0, live_factor=1.0, live_pattern="all"):
+def _apply_perimeter_strip(k, transfer, dead_factor, live_factor, live_pattern):
+    """Put floor k's perimeter strip on the frame (Loads.Perimeter_Strip, 2026-11-05).
+
+    The transfer is the centreline plate's. The slab layer over the outer half of each perimeter beam, with
+    its superimposed dead and live load, is a uniform line load on that beam; the couple of its eccentricity
+    about the beam axis goes half to each end joint, and each corner square to its corner joint.
+    """
+    from Loads import Perimeter_Strip as strip
+    loads = strip.floor_loads(k, transfer, dead_factor, live_factor, live_pattern)
+    for (axis, line_index, span_index), w in loads["beams"].items():
+        ops.eleLoad("-ele", _beam_element_tag(k, axis, line_index, span_index), "-type", "-beamUniform", 0.0, -w, 0.0)
+    for (i, j), (load, mx, my) in loads["joints"].items():
+        if load or mx or my:
+            ops.load(node_tag(k, i, j), 0.0, 0.0, -load, mx, my, 0.0)
+
+
+def _apply_slab_transfer_loads(dead_factor=1.0, live_factor=1.0, live_pattern="all", perimeter_strip=True):
     """
     Apply the slab-to-frame transfer on every floor.
 
@@ -98,11 +124,15 @@ def _apply_slab_transfer_loads(dead_factor=1.0, live_factor=1.0, live_pattern="a
     design carries one transfer per mechanically distinct floor (its own beam
     lines and supports), and every floor receives its own; a uniform transfer
     is refused there, and there is no tributary fallback.
+
+    A transfer is solved for the centreline plate and is validated against that plate's load. The rest of
+    the physical floor the weights use, the perimeter strip, is added floor by floor
+    (``_apply_perimeter_strip``, 2026-11-05); ``perimeter_strip=False`` leaves it out for a comparison
+    against a model of the centreline plate alone.
     """
     from Design.SMRF_Floor_Transfer import validate_floor_transfer
     geometry = {"num_bay_x": sp.NUM_BAY_X, "num_bay_y": sp.NUM_BAY_Y, "bay_x_in": sp.BAY_X, "bay_y_in": sp.BAY_Y}
-    area = sp.BAY_X * sp.NUM_BAY_X * sp.BAY_Y * sp.NUM_BAY_Y / 144.0
-    dead_kip, live_kip = sp.floor_dead_load_ksf() * area, sp.FLOOR_LIVE_LOAD_KSF * area
+    from Loads import Perimeter_Strip as strip
     if mg.is_grouped():
         from Design import SMRF_Floor_Sections as floor_sections
         from Design.SMRF_Floor_Transfer import is_by_floor, validate_floor_transfers_by_floor
@@ -110,6 +140,8 @@ def _apply_slab_transfer_loads(dead_factor=1.0, live_factor=1.0, live_pattern="a
             raise mg.GroupedStateError(
                 "The installed floor transfer is one common floor's; a grouped design needs the transfer of each of its "
                 "own floors (Design.SMRF_Floor_Transfer.build_floor_transfers_by_floor). It is not applied.")
+        # The plate each transfer was solved for; plate + strip = the footprint the weights use, or this raises.
+        dead_kip, live_kip = strip.plate_loads_kip(sp.floor_dead_load_ksf(), sp.FLOOR_LIVE_LOAD_KSF)
         transfers = validate_floor_transfers_by_floor(
             sp.FLOOR_TRANSFER, {**geometry, "num_floor": sp.NUM_FLOOR}, floor_sections.by_floor(), sp.SLAB_THICKNESS_IN,
             dead_kip, live_kip)
@@ -119,7 +151,10 @@ def _apply_slab_transfer_loads(dead_factor=1.0, live_factor=1.0, live_pattern="a
             if id(transfer) not in accumulated:
                 accumulated[id(transfer)] = _accumulate_transfer(transfer, dead_factor, live_factor, live_pattern)
             _apply_floor_transfer(k, *accumulated[id(transfer)])
+            if perimeter_strip:
+                _apply_perimeter_strip(k, transfer, dead_factor, live_factor, live_pattern)
         return
+    dead_kip, live_kip = strip.plate_loads_kip(sp.floor_dead_load_ksf(), sp.FLOOR_LIVE_LOAD_KSF)
     transfer = validate_floor_transfer(
         sp.FLOOR_TRANSFER, geometry,
         {"b_beam_in": sp.B_BEAM, "h_beam_in": sp.H_BEAM, "fc_beam_ksi": sp.FC_BEAM_KSI,
@@ -129,6 +164,8 @@ def _apply_slab_transfer_loads(dead_factor=1.0, live_factor=1.0, live_pattern="a
     loads = _accumulate_transfer(transfer, dead_factor, live_factor, live_pattern)
     for k in range(1, sp.NUM_FLOOR + 1):
         _apply_floor_transfer(k, *loads)
+        if perimeter_strip:
+            _apply_perimeter_strip(k, transfer, dead_factor, live_factor, live_pattern)
 
 
 def _accumulate_transfer(transfer, dead_factor, live_factor, live_pattern):
@@ -242,7 +279,7 @@ def _apply_element_self_weight(load_factor=1.0):
     n_beam_x = sp.NUM_FLOOR * sp.NUM_BAY_X       * (sp.NUM_BAY_Y + 1)
     n_beam_y = sp.NUM_FLOOR * (sp.NUM_BAY_X + 1) * sp.NUM_BAY_Y
 
-    if mg.is_grouped():
+    if mg.is_grouped() or sp.SLAB_THICKNESS_IN is not None:
         # Every member weighs its own section between its own joint faces (Model.Member_Properties).
         from Model import Member_Properties as mp
         for tag in range(1, n_col + n_beam_x + n_beam_y + 1):
@@ -250,8 +287,15 @@ def _apply_element_self_weight(load_factor=1.0):
             w = load_factor * mp.member_self_weight_kip_per_in(member)
             if member.is_column:
                 ops.eleLoad("-ele", tag, "-type", "-beamUniform", 0.0, 0.0, -w)
+                couple = [load_factor*v for v in mp.column_weight_eccentricity_kipin(member)]
+                if any(couple):
+                    ops.load(member.node_j, 0., 0., 0., *couple)
             else:
                 ops.eleLoad("-ele", tag, "-type", "-beamUniform", 0.0, -w, 0.0)
+                couple = [.5*load_factor*v for v in mp.beam_weight_eccentricity_kipin(member)]
+                if any(couple):
+                    ops.load(member.node_i, 0., 0., 0., *couple)
+                    ops.load(member.node_j, 0., 0., 0., *couple)
         return
 
     w_col  = load_factor * sp.col_self_weight_kip_per_in()   # kip/in, magnitude
@@ -280,7 +324,8 @@ def _apply_roof_extension_weight(load_factor=1.0):
 
 
 def apply_gravity_loads(floor_factor=1.0, self_weight_factor=None,
-                        dead_factor=None, live_factor=None, live_pattern="all", roof_extension=True):
+                        dead_factor=None, live_factor=None, live_pattern="all", roof_extension=True,
+                        perimeter_strip=True):
     """Apply gravity loads, optionally factored for a design load combination.
 
     floor_factor
@@ -300,6 +345,11 @@ def apply_gravity_loads(floor_factor=1.0, self_weight_factor=None,
     roof_extension
         The weight of the column extensions above the roof joints (Model/Roof_Extension), with the
         self-weight factor. False only for a comparison against a model that has no such extension.
+    perimeter_strip
+        Slab-transfer mode only: the strip of the physical floor outside the centreline plate the transfer
+        was solved for (Loads/Perimeter_Strip), with the floor dead and live factors. False only for a
+        comparison against a model of the centreline plate alone. The tributary modes load the physical
+        floor themselves.
     """
     if live_pattern not in (None, "all") and sp.effective_gravity_load_model() != "slab_transfer":
         raise ValueError("Live-load patterns require the slab-transfer load model.")
@@ -315,7 +365,7 @@ def apply_gravity_loads(floor_factor=1.0, self_weight_factor=None,
 
     mode = sp.effective_gravity_load_model()
     if mode == "slab_transfer":
-        _apply_slab_transfer_loads(dead_factor, live_factor, live_pattern)
+        _apply_slab_transfer_loads(dead_factor, live_factor, live_pattern, perimeter_strip)
     elif mode == "nodal":
         _apply_nodal_gravity_loads(floor_factor)
     elif mode == "beam_uniform":

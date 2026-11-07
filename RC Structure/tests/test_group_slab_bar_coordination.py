@@ -113,4 +113,16 @@ class FixedMats(unittest.TestCase):
         self.assertGreaterEqual(abs(offsets[('x',0)]-offsets[('y',0)]),bl.pitch_in(d,d))
 
 
+
+def setUpModule():
+    # These tests verify the 3D physical detail route, which the computed common-action route keeps (2026-11-07).
+    global _DETAIL_BASIS
+    _DETAIL_BASIS = sp.DETAIL_BASIS
+    sp.DETAIL_BASIS = "physical_3d_v2"
+
+
+def tearDownModule():
+    sp.DETAIL_BASIS = _DETAIL_BASIS
+
+
 if __name__=='__main__':unittest.main()

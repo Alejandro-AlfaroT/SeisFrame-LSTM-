@@ -24,6 +24,7 @@ Nothing here asserts a verification or lifts Design.SMRF_Qualification.GENERATIO
 from __future__ import annotations
 
 import contextlib
+import gzip
 import hashlib
 import json
 import math
@@ -53,7 +54,7 @@ from Model import Member_Properties as mp
 SCHEMA = gd.SCHEMA
 ARTIFACT_NAME = "grouped_design.json"
 CANDIDATE_LOG_NAME = "grouped_candidates.jsonl"
-QUALIFICATION_VERSION = "grouped_qualification_v3_slab_structural_gates_fire_scope"
+QUALIFICATION_VERSION = "grouped_qualification_v4_computed_common_actions_replay"
 # The search log's decision for a candidate that passes the preliminary screen: "screen_passed" since 2026-10-30
 # ("feasible" in records written before; it meant the same screen, never the complete code check).
 SCREEN_PASSED_DECISIONS = ("screen_passed", "feasible")
@@ -67,12 +68,13 @@ NOMINAL_BEAM_CAGE = {"bar_size": 8, "top_bars": 3, "bot_bars": 3, "side_bars": 0
 _STATE_KEYS = ("SLAB_THICKNESS_IN", "FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF", "SEISMIC_LIVE_LOAD_FRACTION", "AGGREGATE_MAX_SIZE_IN",
                "REINFORCEMENT_SPECIFICATION", "MATERIAL_EXPOSURE", "FLOOR_TRANSFER", "SLAB_REINFORCEMENT", "SLAB_ACTIONS",
                "BEAM_BAR_STACKING", "BEAM_BAR_MAX_LAYERS", "BEAM_BAR_LAYER_ORDER", "JOINT_SHEAR_CATEGORIES",
-               "BEAM_CLEAR_COVER_IN", "COL_CLEAR_COVER_IN", "FY_KSI")
+               "BEAM_CLEAR_COVER_IN", "COL_CLEAR_COVER_IN", "FY_KSI", "DETAIL_BASIS", "BEAM_TORSION_DESIGN")
 LIMITATIONS = (
     "Column transitions follow the declared rules of Design.SMRF_Transitions (" + transition_rules.RULES_ID + "): a limited "
-    "supported scope, not a statement that no other detail can be built. They await engineering review; a face step of "
-    "3 in or more (dowels, ACI 318-19 10.7.4.2) is not a supported transition, and hoop-leg engagement at offset bends, "
-    "the lap zone and the confinement above a reduced column are not established.",
+    "supported scope, not a statement that no other detail can be built. Actual offset bends, hoop/crosstie engagement, "
+    "lap/device envelopes, roof development and reduced-column restraint are checked per physical context. A computed "
+    "failure rejects that detail; missing product qualification or development evidence remains unknown. Nominal "
+    "geometry checks do not replace fabrication tolerances, inspection or construction qualification.",
     "Concrete grades step up before any section grows (strength, then reinforcement, then size; Design.Grouped_Search) "
     "and are not stepped back down after a size grows: no size is shown to be a minimum, and no geometry infeasible, "
     "over the full material domain.",
@@ -87,10 +89,14 @@ LIMITATIONS = (
     "flange-concrete rule for two beam grades on one floor is decided (materials.concrete_grades.gravity_beams states "
     "whether that grade lies on the gravity ladder). Group-specific grades within a family are not available.",
     "Square columns; opposite sides of the plan share a group; the recorded story-band rule is a research policy, not a code rule.",
-    "The story-strength model is provisional (review item M1); vertical strength regularity is recorded, not established.",
+    "Connected full-frame nominal story strength is available only where the saved equilibrium and dual verification "
+    "certificates reproduce on the actual member capacities and gravity actions. Missing or failed proof leaves "
+    "strength regularity unresolved; a saved status or a separate human review cannot supply that calculation.",
     "Nonlinear model scope: IMK member hinges with rigid centerline joints. Fiber members, scissors joint springs and the "
     "floor compatibility, cut-region, nodal-cut and composite-section diagnostics refuse a grouped design.",
-    "Quantities are modeled quantities for comparing candidates (no laps, hooks, waste); no cost data is used.",
+    "Quantities include the explicit physical longitudinal runs, owned hooks, lap steel, selected coupler envelopes, "
+    "transverse fabrication paths and roof extensions without duplicate ownership. They exclude waste and "
+    "unmodeled construction allowances; product volume is not an asserted purchase price.",
 )
 
 
@@ -222,6 +228,9 @@ def grouped_request_identity(cfg=None, seed=None, policy=None, grouping_policy_i
                           "max_column_size_step_in": gs.MAX_COLUMN_SIZE_STEP_IN,
                           "max_beam_reduction_options": gs.MAX_BEAM_REDUCTION_OPTIONS},
                "rules": {"evaluation": gd.EVALUATION_VERSION, "reinforcement_selection": selection.RULES_ID,
+                         "column_strength": "rotated_whitney_finite_bar_displacement_biaxial_v1",
+                         "column_actions": "centerline_component_envelope_at_both_axial_ends_v2",
+                         "torsional_strength_distribution": "reflected_frame_pair_strength_fraction_v1",
                          "system_reinforcement_selection": selection.SYSTEM_RULES_ID, "lever_order": gs.LEVER_ORDER_ID,
                          "column_transitions": transition_rules.RULES_ID, "bar_layers": bar_layers.RULE_ID,
                          "joint_inventory_lanes": bar_layers.JOINT_INVENTORY_RULE_ID,
@@ -364,7 +373,7 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
     mg.install(state)
     slab = evidence["slab"]
     coupled = None
-    if sp.FLOOR_TRANSFER is not None:
+    if sp.FLOOR_TRANSFER is not None and evidence.get("common_actions") is None:
         from Design.SMRF_Coupled_Comparison import compare_transfer_to_coupled
         if verbose:
             print("[grouped] coupled load-path comparison of the selected design", flush=True)
@@ -380,6 +389,8 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
     record = {
         "schema_version": SCHEMA,
         "design_mode": "grouped",
+        "detail_basis": sp.DETAIL_BASIS,
+        "elf": evidence["elf"],
         "geometry": driver._slab_geometry(),
         "materials": _materials(cfg, state),
         "member_groups": state.to_record(),
@@ -399,14 +410,17 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
                     "design_basis": sp.seismic_design_basis(risk_category=cfg.demands.risk_category)},
         "demand": {"basis": "Signed gravity/seismic combinations, Ev and 100/30 effects; scope limitations in qualification",
                    "model_period_sec": evidence["period"], "base_shear_kip": elf.get("base_shear_kip"),
-                   "story_forces_kip": elf.get("story_forces_kip")},
+                   "story_forces_kip": elf.get("story_forces_kip"), "cs_basic": elf.get("cs_basic")},
         "design_actions": {
             "basis": ("Signed simultaneous centerline elastic member actions of every physical member on its own group's "
                       "section, compression-positive axial forces; joint-face moment transport is separate"),
             "expected_combination_ids": evidence["expected_ids"], "combinations": evidence["actions"]},
+        "story_strength_gravity_actions": evidence.get("story_strength_gravity_actions"),
         "member_strength": evidence["strengths"],
         "beam_end_strengths": beam_end_strengths(state),
         "capacity_design": capacity,
+        "common_actions": evidence.get("common_actions"),
+        "common_torsion": capacity.get('common_torsion_input'),
         "compatibility": evidence.get("compatibility"),
         "systems": systems_block(state, evidence, capacity),
         "joint_checks": evidence["joint_checks"],
@@ -436,16 +450,28 @@ def build_record(search, cfg, seed, identity=None, verbose=True):
         "legacy_uniform_summary": _legacy_summary(state),
         "limitations": list(LIMITATIONS),
     }
+    if identity is not None:
+        record["request_identity"] = identity
     ops.wipe()
     record = _canonical(record)
     from Design.SMRF_Design_Evidence import analysis_input_signature
     signature = analysis_input_signature(record)
     record["design_actions"]["analysis_input_sha256"] = signature
+    if record.get("common_actions") is not None:
+        from Design.SMRF_Common_Action_Contract import saved_binding
+        record["common_actions_input_binding"] = saved_binding(record, record["common_actions"])
+    if record.get('common_torsion') is not None:
+        record['common_torsion_input_binding']={'analysis_input_sha256':signature,
+            'common_torsion_sha256':_sha256(record['common_torsion']),
+            'source_id':record['common_torsion'].get('source_id'),
+            'state_identity':state.identity()}
+    record["story_strength_input_binding"] = {
+        "analysis_input_sha256": signature,
+        "gravity_actions_sha256": _sha256(record["story_strength_gravity_actions"]),
+        "signed_actions_sha256": _sha256(record["design_actions"]["combinations"])}
     record["drift_screen"]["analysis_input_sha256"] = signature
     if record.get("coupled_comparison"):
         record["coupled_comparison"]["analysis_input_sha256"] = signature
-    if identity is not None:
-        record["request_identity"] = identity
     record["qualification"] = _canonical(qualify_grouped_design(record))
     record["dcr"]["accepted"] = record["qualification"]["accepted"]
     apply_grouped_design(record)                     # qualification restores the previous state; leave the design in force
@@ -566,6 +592,9 @@ def apply_grouped_design(record):
     previous = mg.active()
     saved = {key: getattr(sp, key, None) for key in _STATE_KEYS}
     try:
+        from Design import SMRF_Conventional_Detail as conventional
+        sp.DETAIL_BASIS = record.get("detail_basis", conventional.PHYSICAL_BASIS)
+        sp.BEAM_TORSION_DESIGN = None
         sp.apply_reinforcement_grade(fy_ksi=selected_grade)
         slab = _validated_slab(record)
         mg.install(state)
@@ -585,16 +614,24 @@ def apply_grouped_design(record):
             raise ValueError("The grouped record's floor descriptions are not those of its member groups.")
         transfer = record.get("floor_transfer")
         if record.get("gravity_load_model") == "slab_transfer":
-            from Design.SMRF_Floor_Transfer import validate_floor_transfers_by_floor
-            area = mp.floor_area_in2() / 144.0
-            validate_floor_transfers_by_floor(transfer, record["geometry"], description, sp.SLAB_THICKNESS_IN,
-                                              sp.floor_dead_load_ksf() * area, sp.FLOOR_LIVE_LOAD_KSF * area)
+            if _computed_action_route(record):
+                _physical_gravity_transfer(record)
+            else:
+                from Design.SMRF_Floor_Transfer import validate_floor_transfers_by_floor
+                from Loads.Perimeter_Strip import plate_loads_kip
+                # The centreline plate the transfers were solved for; plate + perimeter strip = the footprint (2026-11-05).
+                validate_floor_transfers_by_floor(transfer, record["geometry"], description, sp.SLAB_THICKNESS_IN,
+                                                  *plate_loads_kip(sp.floor_dead_load_ksf(), sp.FLOOR_LIVE_LOAD_KSF))
             sp.FLOOR_TRANSFER = transfer
         else:
             if transfer is not None:
                 raise ValueError("The grouped record carries a floor transfer but does not declare the slab_transfer load model.")
             sp.FLOOR_TRANSFER = None
         strength = record.get("slab_reinforcement")
+        # Physical replay reads the actual globally phased installed mat.  The
+        # enclosing transaction restores this assignment if any check fails.
+        if _computed_action_route(record):
+            sp.SLAB_REINFORCEMENT = strength
         if strength is not None and strength.get("inputs"):
             from Design.SMRF_Slab_Reinforcement import evaluate_slab_reinforcement
             if evaluate_slab_reinforcement(strength)[0]["status"] != "pass":
@@ -635,6 +672,83 @@ def apply_record(record):
         return apply_grouped_design(record)
     mg.clear()
     return driver.apply_design(record)
+
+
+def _bound_common_torsion(record):
+    """Missing legacy evidence stays missing; changed saved inputs are refused."""
+    package=record.get('common_torsion')
+    if package is None:return None
+    from Design.SMRF_Design_Evidence import analysis_input_signature
+    binding=record.get('common_torsion_input_binding') or {}
+    identity=(record.get('member_groups') or {}).get('sha256')
+    if (not isinstance(package,dict) or not package.get('source_id') or
+        binding.get('analysis_input_sha256')!=analysis_input_signature(record) or
+        binding.get('common_torsion_sha256')!=_sha256(package) or
+        binding.get('source_id')!=package.get('source_id') or
+        not identity or binding.get('state_identity')!=identity or package.get('state_identity')!=identity):
+        raise ValueError('Saved concurrent torsion is not bound to the exact analysis input, grouped state and recovery source')
+    return package
+
+
+def _bound_common_actions(record):
+    from Design.SMRF_Common_Action_Contract import bound_saved_package
+    return bound_saved_package(record)
+
+
+def _computed_action_route(record):
+    procedure = (((record.get("request_identity") or {}).get("policy") or {}).get("floor_analysis") or {}).get("common_action_procedure") or {}
+    return procedure.get("kind") == "computed_common_actions_v1"
+
+
+def _physical_gravity_transfer(record):
+    """Bind the physical member fields without invoking the legacy slab solver.
+
+    This is input integrity only. Signed load-path equilibrium and every
+    original case remain independent mandatory common-action proof rows.
+    """
+    if not _computed_action_route(record):
+        raise ValueError("Physical gravity transfer requires the explicit computed procedure")
+    common = _bound_common_actions(record)
+    if not isinstance(common, dict):
+        raise ValueError("Physical gravity transfer has no bound common-action package")
+    transfer = record.get("floor_transfer")
+    expected = common.get("capacity_gravity_transfer")
+    if not isinstance(transfer, dict) or transfer != expected:
+        raise ValueError("Saved physical gravity transfer differs from its bound common package")
+    actions = common.get("story_strength_gravity_actions")
+    if not isinstance(actions, list) or not actions or transfer.get("physical_gravity_member_actions") != actions:
+        raise ValueError("Physical gravity member action inventory is absent or changed")
+    ids = [item.get("id") for item in actions if isinstance(item, dict)]
+    if (len(ids) != len(actions) or any(not isinstance(v, str) or not v for v in ids)
+            or len(ids) != len(set(ids)) or transfer.get("expected_physical_gravity_case_ids") != ids):
+        raise ValueError("Physical gravity case inventory is incomplete or duplicated")
+    if (transfer.get("state_identity") != (record.get("member_groups") or {}).get("sha256")
+            or transfer.get("source_identity") != _sha256(common.get("source_identity"))
+            or transfer.get("physical_definition_sha256") != common.get("definition_sha256")):
+        raise ValueError("Physical gravity transfer belongs to different state, source or definition")
+    return transfer
+
+
+def _common_action_checks(record, state):
+    """Replay the actual package; an old saved pass/approval cannot supply these rows."""
+    from Design import SMRF_Conventional_Detail as conventional
+    if record.get("detail_basis") == conventional.BASIS:
+        return []                                       # the production route has its floor rows (_floor_checks)
+    from Design.SMRF_Common_Action_Contract import assess_common_actions, unknown_checks
+    try:
+        package = _bound_common_actions(record)
+    except Exception as exc:
+        return [make_check("qualification.common_action_input_binding", "Evidence integrity", 0, 1, "==",
+                           details={"reason": f"{type(exc).__name__}: {exc}"})] + unknown_checks(str(exc))
+    result = assess_common_actions(state, package)
+    if package is None:
+        binding = not_evaluated("qualification.common_action_input_binding", "Evidence integrity",
+                                "The saved record has no actual common-action package.")
+    else:
+        binding = make_check("qualification.common_action_input_binding", "Evidence integrity", 1, 1, "==",
+                             details={"payload_sha256": package["payload_sha256"],
+                                      "replay_completed": result["replay_completed"]})
+    return [binding] + result["checks"]
 
 
 # ---- qualification ---------------------------------------------------------------------------------------------
@@ -843,16 +957,35 @@ def _capacity_completion_checks(capacity, state):
                              details={"anchorage_items": len(anchorage), "splices": splices,
                                       "groups_without_legal_splice_placement": illegal,
                                       "scope": "hooked anchorage, through-bar depth, splice type and its permitted interval and "
-                                               "proposed location per group (detailing.splice_location) and cover; coupler "
-                                               "product qualification, congestion and placement are reviews"}))
-    mechanical = sorted([gid for gid, splice in splices.items() if str(splice.get("splice_type", "")).startswith("type_2")]
-                        + [f"transition {key}" for key in couplers])
-    if mechanical:
-        check = awaiting_review("detailing.mechanical_splice_product_qualification", "ACI 318-19 25.5.7, 18.2.7.1",
-                                f"{len(mechanical)} group(s) use Type 2 mechanical splices: the coupler's Type 2 qualification "
-                                f"for Grade {sp.FY_KSI:g} bars of the sizes used and its actual length are product evidence",
-                                "mechanical_splice_product_qualification")
-        check["details"]["groups"] = mechanical
+                                               "proposed location per group (detailing.splice_location) and cover; actual "
+                                               "device and transverse geometry are separate required physical-detail rows"}))
+    from Design.SMRF_Coupler_Catalog import lookup_coupler
+    products={}
+    for gid,splice in splices.items():
+        for context in splice.get("member_contexts",[]):
+            if context.get("owner")!="ordinary_member_splice" or str(context.get("splice_type")).startswith("class_B"):
+                continue
+            design=state.designs[gid]
+            products[f"{gid}/member:{context['member_tag']}"]=((context.get("physical_detail") or {}).get("product") or
+                lookup_coupler(design.bar_size,design.bar_size,sp.FY_KSI,sp.REINFORCEMENT_SPECIFICATION))
+    for key,splice in couplers.items():
+        for name,context in splice.get("contexts",{}).items():
+            products[f"transition/{key}/{name}"]=(context.get("physical_detail") or {}).get("product",{"status":"not_evaluated"})
+    for name,kind in capacity.get("joint_types",{}).items():
+        if kind.get("column_above_group") is None:
+            roof=kind.get("physical_roof_anchorage") or {}
+            if roof.get("termination_type") not in ("straight_bar_at_declared_extension_top","standard_hook_at_declared_extension_top"):
+                products[f"roof/{name}"]=roof.get("product",{"status":"not_evaluated"})
+    if products:
+        states=[p.get("status") for p in products.values()]
+        if "fail" in states:
+            check=make_check("detailing.mechanical_splice_product_qualification","ACI 318-19 25.5.7;18.2.7;IAPMO ER-0129",0,1,"==")
+        elif all(s=="pass" for s in states):
+            check=make_check("detailing.mechanical_splice_product_qualification","ACI 318-19 25.5.7;18.2.7;IAPMO ER-0129",1,1,"==")
+        else:
+            check=not_evaluated("detailing.mechanical_splice_product_qualification","ACI 318-19 25.5.7;18.2.7",
+                                "At least one exact bar-size/grade/specification combination has no pinned published product.")
+        check["details"].update(products=products,scope="Published product applicability only; actual fit, placement and local hoops are independently required. No shop fabrication or inspection approval is asserted.")
         checks.append(check)
     open_items = [c for c in capacity.get("checks", []) if c.get("status") == "not_evaluated"]
     failed = [c for c in capacity.get("checks", []) if c.get("status") == "fail"]
@@ -887,9 +1020,21 @@ def _open_checks(record, capacity):
          "details": {"reason": "awaiting independent validation",
                      "category": "nonlinear model review: required before time-history generation, not part of the "
                                  "candidate code check (Design.Code_Check_Contract)"}},
-        not_evaluated("detailing.congestion_and_placement", "ACI 318-19 25.2 / 26.6; constructability",
-                      "Bar-placement drawings, mechanical-splice staggering and congestion at joints are not designed."),
     ]
+    physical=[c for c in (capacity or {}).get("checks",[]) if c.get("id") in
+              ("column.transition_physical_detail","column.roof_anchorage_physical_detail","beam.joint_physical_detail",
+               "beam.slab_physical_inventory","detailing.splice_physical_detail")]
+    states=[c.get("status") for c in physical]
+    if "fail" in states:
+        check=make_check("detailing.congestion_and_placement","ACI 318-19 25.2;25.3;26.6; physical geometry",0,1,"==")
+    elif states and all(s=="pass" for s in states):
+        check=make_check("detailing.congestion_and_placement","ACI 318-19 25.2;25.3;26.6; physical geometry",1,1,"==")
+    else:
+        check=not_evaluated("detailing.congestion_and_placement","ACI 318-19 25.2;25.3;26.6","Actual physical placement evidence is incomplete.")
+    check["details"].update(required_rows=len(physical),failed=[f"{c['id']}@{c.get('location')}" for c in physical if c.get("status")=="fail"],
+        unknown=[f"{c['id']}@{c.get('location')}" for c in physical if c.get("status") not in ("pass","fail")],
+        scope="Computed nominal bar/product envelopes, owned hooks, finite bends and explicit transverse steel; construction tolerances and fabrication inspection remain construction obligations.")
+    checks.append(check)
     # A selected layout is not by itself a developed slab contribution (2026-10-30): the slab record's own development
     # check must pass on the current floor context (the eligibility the recomputed capacity design read).
     from Design.SMRF_Slab_Reinforcement import slab_strength_eligibility
@@ -915,12 +1060,17 @@ def _open_checks(record, capacity):
         checks.append(check)
     changing = sorted(key for key, t in (capacity.get("transitions") or {}).items() if t.get("kind") != "same_cage")
     if changing:
-        check = not_evaluated("detailing.column_transition_rules_reviewed",
-                              "ACI 318-19 10.7.4, 10.7.6.4, 15.2.6, 18.7.4.4, 25.4, 25.5",
-                              f"{len(changing)} band boundary transition(s) move, splice or stop column bars under the declared "
-                              f"rules {transition_rules.RULES_ID}, which await engineering review")
+        statuses=[(item.get("physical_detail") or {}).get("status") for key in changing
+                  for item in (capacity["transitions"][key].get("contexts") or {key:capacity["transitions"][key]}).values()]
+        clause="ACI 318-19 10.7.4;10.7.6.4;15.2.6;18.7.4.4;25.4--25.5"
+        if "fail" in statuses:
+            check=make_check("detailing.column_transition_rules_reviewed",clause,0,1,"==")
+        elif statuses and all(s=="pass" for s in statuses):
+            check=make_check("detailing.column_transition_rules_reviewed",clause,1,1,"==")
+        else:
+            check=not_evaluated("detailing.column_transition_rules_reviewed",clause,"At least one actual transition lacks physical evidence.")
         open_items = sorted({item for key in changing for item in (capacity["transitions"][key].get("not_established") or [])})
-        check["details"].update({"category": "awaiting review of the declared transition rules", "transitions": changing,
+        check["details"].update({"category": "computed physical verification of the declared transition rules; no human approval asserted", "transitions": changing,
                                  "kinds": {key: capacity["transitions"][key].get("kind") for key in changing},
                                  "not_established": open_items})
         checks.append(check)
@@ -933,8 +1083,8 @@ def grouped_scope(record):
     The uniform scope text (every grid line a moment frame, no collectors) cannot be borrowed: under a system
     policy only the perimeter frames (and a core ring or core lines) are the SFRS and the interior lines are gravity
     frames, so the floor diaphragm has to deliver the story forces to them through collectors and chords. The
-    grouped qualification evaluates no diaphragm, collector or chord design for either policy; that stays an
-    explicit unresolved requirement (diaphragm.design_and_collectors), never a statement that none is needed.
+    Legacy grouped qualification leaves the diaphragm unresolved. A record carrying the complete required
+    common-action inventory includes it in its scope; only replay of the raw calculations can establish a pass.
     """
     from Design.SMRF_Qualification import qualification_scope
     policy_id = (((record.get("member_groups") or {}).get("policy") or {}).get("id")) or mg.POLICY_ID
@@ -945,7 +1095,22 @@ def grouped_scope(record):
                   .get(layout, "") + "; the other frame lines are gravity frames (ACI 318-19 18.14)")
     else:
         system = "RC special moment frame archetype; every grid line in X and Y (band grouping policy)"
-    return {**qualification_scope(system=system, diaphragm_evaluated=False),
+    scope = qualification_scope(system=system, diaphragm_evaluated=False)
+    from Design.SMRF_Common_Action_Contract import required_inventory
+    saved_rows = record.get("code_check_rows") or []
+    if isinstance(saved_rows, dict):
+        saved_rows = saved_rows.get("rows", [])
+    present = {(row.get("family"), row.get("id"), row.get("location", ""))
+               for row in saved_rows if isinstance(row, dict)}
+    if required_inventory() <= present:
+        scope["diaphragm"] = ("Required computed common-action, diaphragm/collector/chord and method-proof checks; "
+                              "their presence does not establish that they pass. Saved raw evidence is replayed.")
+    from Design.Code_Check_Contract import CONTRACT_VERSION
+    saved_contract = (record.get("code_check_rows") or {}).get("contract_version") if isinstance(record.get("code_check_rows"), dict) else None
+    return {**scope,
+            "saved_limitations_status": ("current_contract_scope; each result still requires replay"
+                                          if saved_contract == CONTRACT_VERSION else
+                                          "legacy_saved_text; retained without upgrade, current replay governs qualification"),
             "geometry": "regular rectangular grid; sections and reinforcement by story band and plan location",
             "grouping_policy": policy_id}
 
@@ -955,6 +1120,14 @@ def slab_context_check(record, state):
     (Grouped_Design.slab_completion_context with the record's own slab-action assertions) and compared."""
     from Design.Config import SlabActionAssertions
     name, clause = "slab.completion_context_current", "Evidence integrity: slab completion context of the final design"
+    strength=record.get('slab_reinforcement') or {}
+    from Design import SMRF_Computed_Slab as computed
+    if strength.get('method_version')==computed.METHOD:
+        try:
+            matches=computed.replay(strength)==strength and strength.get('state_identity')==state.identity()
+            return make_check(name,clause,int(matches),1,'==',details={'basis':'Actual physical mat/nominal-development replay; no legacy zero-N assertion'})
+        except Exception as exc:
+            return not_evaluated(name,clause,f'{type(exc).__name__}: {exc}')
     saved = (record.get("slab_reinforcement") or {}).get("inputs") or {}
     if saved.get("context") is None:
         return not_evaluated(name, clause, "the saved slab reinforcement carries no floor context")
@@ -967,7 +1140,11 @@ def slab_context_check(record, state):
         view = types.SimpleNamespace(slab_actions=assertions, floor_analysis=types.SimpleNamespace(
             slab_assertion_floor_sections=None if covered is None else tuple(covered),
             slab_assertion_thickness_in=analysis.get("slab_assertion_thickness_in"),
-            slab_procedure=analysis.get("slab_procedure")))
+            slab_procedure=analysis.get("slab_procedure"),
+            # The record's slab evidence basis (2026-11-07): on the computed basis the shear-path and local-steel
+            # premises are computed, not asserted (SMRF_Conventional_Floor.computed_slab_basis).
+            slab_evidence_basis=analysis.get("slab_evidence_basis"),
+            common_action_procedure=analysis.get("common_action_procedure")))
         current = gd.slab_completion_context(record["slab"], view, state)
         from Design.SMRF_Slab_Reinforcement import _context
         matches = _context(current) == saved["context"]
@@ -978,8 +1155,13 @@ def slab_context_check(record, state):
                                         "installed design against those the slab completion checks used"})
 
 
-def _diaphragm_check(record):
-    """The diaphragm requirement of a grouped record, left explicitly open (no evaluator covers it here)."""
+def _diaphragm_check(record, common_checks=None):
+    """Use the raw common-action replay, or retain the historical unresolved requirement."""
+    rows = [row for row in (common_checks or []) if row.get("id") == "common.diaphragm_collectors_chords"]
+    if len(rows) == 1:
+        row = {**rows[0], "id": "diaphragm.design_and_collectors"}
+        row["details"] = {**row.get("details", {}), "basis": "Recomputed common-action evidence; no profile approval inferred"}
+        return row
     policy_id = (((record.get("member_groups") or {}).get("policy") or {}).get("id")) or mg.POLICY_ID
     reason = ("the slab diaphragm, its collectors and chords (ACI 318-19 18.12 on the ASCE 7-22 12.10 forces) are not "
               "designed for a grouped record"
@@ -989,6 +1171,45 @@ def _diaphragm_check(record):
     check = not_evaluated("diaphragm.design_and_collectors", "ACI 318-19 18.12; ASCE 7-22 12.10", reason)
     check["details"]["category"] = "requirement outside the implemented grouped checks"
     return check
+
+
+def _floor_checks(record, state, transfers, common_checks):
+    """The floor and diaphragm rows at qualification: recomputed on the production route and compared with the saved
+    code-check rows; the earlier single row on any other record."""
+    from Design import SMRF_Conventional_Detail as conventional
+    if record.get("detail_basis") != conventional.BASIS:
+        return [_diaphragm_check(record, common_checks)]
+    from Design.SMRF_Conventional_Floor import floor_rows
+    view = types.SimpleNamespace(demands=types.SimpleNamespace(risk_category=(record.get("seismic") or {}).get("risk_category")))
+    rows = floor_rows(state, {"slab": record["slab"], "reinforcement": record.get("slab_reinforcement")}, record.get("elf"), view, transfers)
+    rebuilt = {(row["id"], row.get("location", "")): (row["status"], row.get("demand"), row.get("capacity")) for row in rows}
+    saved = {(row["id"], row.get("location", "")): (row["status"], row.get("demand"), row.get("capacity"))
+             for row in ((record.get("code_check_rows") or {}).get("rows") or []) if row.get("family") == "floor"}
+    found = differences(_canonical({str(k): v for k, v in saved.items()}), _canonical({str(k): v for k, v in rebuilt.items()}))
+    passed = all(row["status"] == "pass" for row in rows)
+    summary = make_check("diaphragm.design_and_collectors", "ACI 318-19 18.12; ASCE 7-22 12.10", int(passed), 1, "==",
+                         details={"rows": len(rows), "basis": "recomputed floor and diaphragm rows of the production route"})
+    integrity = make_check("grouped.floor_rows_recomputed", "Evidence integrity", int(not found), 1, "==", details={"differences": found})
+    return [integrity, summary, *rows]
+
+
+def replay_story_premise_refusal(saved_strength, state, actions, expected_ids, capacity, gravity_actions):
+    """Differences between a saved refused story strength and the rebuilt design's own answer (2026-11-06).
+
+    The adapter must refuse the same premise with the same reason and evidence. A rebuilt design that the adapter no
+    longer refuses, or refuses for another reason, does not reproduce the saved record. Nothing is verified here: the
+    record stays an incomplete story strength and its regularity row stays not evaluated."""
+    from Design.SMRF_Story_Adapter import calculate, StoryStrengthPremiseUnavailable, ADAPTER_METHOD, METHOD
+    labels = ("method", "adapter_method")
+    try:
+        calculate(state, actions, expected_ids, capacity, gravity_actions=gravity_actions)
+    except StoryStrengthPremiseUnavailable as again:
+        # The refusal and the method that made it: a record of another adapter or story method does not reproduce.
+        return differences(_canonical({"premise_refusal": saved_strength.get("premise_refusal"),
+                                       **{k: saved_strength.get(k) for k in labels}}),
+                           _canonical({"premise_refusal": {"reason": str(again), **again.evidence},
+                                       "method": METHOD, "adapter_method": ADAPTER_METHOD}))
+    return ["the saved story strength records a refused premise that the rebuilt design does not refuse"]
 
 
 def qualify_grouped_design(record):
@@ -1015,6 +1236,7 @@ def _qualification_checks(record, state):
     from Design.SMRF_Design_Evidence import analysis_input_signature, slab_strength_inputs, validated_combinations
     from Design.SMRF_Joints import evaluate_joints
     from Design.SMRF_Qualification import reinforcement_consistency_checks
+    common_checks = _common_action_checks(record, state)
     checks = [make_check("grouped.record_installs", "Evidence integrity", 1, 1, "==",
                          details={"groups": len(state.groups), "members": len(state.members()),
                                   "member_groups_sha256": state.identity(),
@@ -1039,11 +1261,15 @@ def _qualification_checks(record, state):
         if [a["id"] for a in actions] != expected_ids or saved_ids != expected_ids:
             raise ValueError("the solved combinations are not exactly the canonical set, in order")
         if record.get("gravity_load_model") == "slab_transfer":
-            from Design.SMRF_Floor_Transfer import validate_floor_transfers_by_floor
-            area = mp.floor_area_in2() / 144.0
-            transfers = validate_floor_transfers_by_floor(record["floor_transfer"], geometry, floor_sections.by_floor(),
-                                                          record["slab"]["thickness_in"], loads["floor_dead_load_ksf"] * area,
-                                                          loads["floor_live_load_ksf"] * area)
+            if _computed_action_route(record):
+                transfers = _physical_gravity_transfer(record)
+            else:
+                from Design.SMRF_Floor_Transfer import validate_floor_transfers_by_floor
+                from Loads.Perimeter_Strip import plate_loads_kip
+                # The centreline plate the transfers were solved for; plate + perimeter strip = the footprint (2026-11-05).
+                transfers = validate_floor_transfers_by_floor(record["floor_transfer"], geometry, floor_sections.by_floor(),
+                                                              record["slab"]["thickness_in"],
+                                                              *plate_loads_kip(loads["floor_dead_load_ksf"], loads["floor_live_load_ksf"]))
         checks.append(make_check("joint.reproducible_actions", "ACI 318-19 18.7--18.8", 1, 1, "==",
                                  details={"combinations": len(actions)}))
     except (KeyError, ValueError, TypeError) as exc:
@@ -1055,7 +1281,9 @@ def _qualification_checks(record, state):
     if actions is not None:
         try:
             recomputed = capacity_design.build_group_capacity_design(actions, expected_ids, cfg, transfers, state,
-                                                                     compatibility=record.get("compatibility"))
+                                                                     compatibility=record.get("compatibility"),
+                                                                     common_torsion=_bound_common_torsion(record),
+                                                                     common_actions=_bound_common_actions(record) if record.get('common_actions') is not None else None)
             found = differences(record.get("capacity_design"), _canonical(recomputed))
         except Exception as exc:                      # noqa: BLE001 -- any failure is a finding, not a pass
             recomputed, found = None, [f"recomputation failed: {type(exc).__name__}: {exc}"]
@@ -1104,21 +1332,40 @@ def _qualification_checks(record, state):
                              details={"differences": found, "total_seismic_weight_kip": ledger["total_seismic_weight_kip"]}))
     regularity = (record.get("demand_basis") or {}).get("regularity") or {}
     saved_strength = regularity.get("lateral_strength_distribution") or {}
+    strength_verified = False
     try:
-        # Only the numbers are compared; the applicability status of the model is the record's own assertion policy.
-        stories = _canonical(gd.story_strength_distribution(None))
-        found = differences({k: saved_strength.get(k) for k in ("one_side_fraction", "stories")},
-                            {k: stories[k] for k in ("one_side_fraction", "stories")})
-        # The applicability status of the strength model is the record's own (its assertion policy), carried over.
-        stories["applicability"] = saved_strength.get("applicability")
+        from Design.SMRF_Story_Adapter import verify_saved_result, computed_verification_valid
+        gravity_actions=record.get("story_strength_gravity_actions")
+        binding=record.get("story_strength_input_binding") or {}
+        if (binding.get("analysis_input_sha256")!=analysis_input_signature(record)
+                or binding.get("gravity_actions_sha256")!=_sha256(gravity_actions)
+                or binding.get("signed_actions_sha256")!=_sha256(actions)):
+            raise ValueError("Exact story-strength gravity actions are not bound to this analysis input")
+        from Design import SMRF_Conventional_Story as conventional_story
+        if saved_strength.get("method")==conventional_story.METHOD:
+            # A deterministic function of the saved actions and the recomputed capacity design: rebuilt and compared.
+            rebuilt=conventional_story.calculate(state,actions,capacity,gravity_actions)
+            keys=("method","gravity_state","stories")
+            found=differences(_canonical({k:saved_strength.get(k) for k in keys}),_canonical({k:rebuilt.get(k) for k in keys}))
+        elif saved_strength.get("premise_refusal"):
+            # A saved refusal of a story-model premise has no certificates to replay: the adapter is asked again.
+            found=replay_story_premise_refusal(saved_strength,state,actions,expected_ids,capacity,gravity_actions)
+        else:
+            verification=verify_saved_result(state,actions,expected_ids,capacity,gravity_actions=gravity_actions,result=saved_strength)
+            found=differences(saved_strength.get("verification"),verification)
+        symmetry=_canonical(gd.story_strength_distribution(None,state=state))
+        keys=("one_side_fraction","independent_distribution_bound")
+        found+=differences({k:saved_strength.get(k) for k in keys},{k:symmetry[k] for k in keys})
+        strength_verified=not found and (computed_verification_valid(saved_strength) or conventional_story.model_valid(saved_strength))
+        stories=saved_strength
         vertical = _canonical(gd.vertical_regularity(
-            record["drift_screen"], {key: (record.get("demand") or {}).get(key) for key in ("story_forces_kip", "base_shear_kip")},
+            record["drift_screen"], {key: (record.get("demand") or {}).get(key) for key in ("story_forces_kip", "base_shear_kip", "cs_basic")},
             stories, ledger))
         found += differences(regularity.get("vertical_evidence"), vertical)
     except Exception as exc:                          # noqa: BLE001
         vertical, found = None, [f"recomputation failed: {type(exc).__name__}: {exc}"]
     checks.append(make_check("demands.story_evidence_recomputed", "Evidence integrity", int(not found), 1, "==",
-                             details={"basis": "story-by-story line strengths from the installed beams, story stiffness from the "
+                             details={"basis": "saved full-frame nominal equilibrium/dual certificates rebuilt from final sections and exact gravity actions; story stiffness from the "
                                                "saved drift runs and ELF story shears, story mass from the member ledger",
                                       "differences": found}))
     from Design.SMRF_Demands import evaluate_demand_basis
@@ -1131,12 +1378,7 @@ def _qualification_checks(record, state):
                                           policy.get("risk_category") or seismic.get("risk_category") or "II")
         except (KeyError, ValueError, TypeError):
             sdc = None
-        from Design.SMRF_Common import assertion_provenance_valid
-        verification = (((record.get("request_identity") or {}).get("policy") or {}).get("verification")
-                        or (record.get("demand_basis") or {}).get("verification") or {})
-        asserted = (assertion_provenance_valid(verification) and verification.get("story_strength_model_verified") is True
-                    and (saved_strength.get("applicability") or {}).get("status") == "verified")
-        checks.extend(gd.regularity_checks(vertical, sdc, strength_model_verified=asserted))
+        checks.extend(gd.regularity_checks(vertical, sdc, strength_model_verified=strength_verified))
     else:
         for name in ("demands.vertical_stiffness_regularity", "demands.vertical_strength_regularity"):
             checks.append(not_evaluated(name, "ASCE 7-22 Table 12.3-2", "the saved story evidence does not reproduce"))
@@ -1155,8 +1397,9 @@ def _qualification_checks(record, state):
                                  "Recomputed frame load inventory and force/moment balance, floor by floor",
                                  int(transfers is not None), 1, "==",
                                  details={"distinct_floors": len((record.get("floor_sections") or {}).get("distinct") or {})}))
-        from Design.SMRF_Coupled_Comparison import evaluate_coupled_comparison
-        checks.extend(evaluate_coupled_comparison(record))
+        if not _computed_action_route(record):
+            from Design.SMRF_Coupled_Comparison import evaluate_coupled_comparison
+            checks.extend(evaluate_coupled_comparison(record))
     from Design.SMRF_Beam_Actions import evaluate_saved_beam_bending
     checks.append(evaluate_saved_beam_bending(record))
     strength = record.get("slab_reinforcement") or {}
@@ -1175,7 +1418,9 @@ def _qualification_checks(record, state):
     from Design.SMRF_Slab_Reinforcement import evaluate_slab_reinforcement
     checks.extend(evaluate_slab_reinforcement(strength))
     from Design.SMRF_Slab_Actions import evaluate_slab_actions
-    checks.extend(evaluate_slab_actions((strength or {}).get("inputs", {}).get("demand_evidence") or record.get("slab_actions")))
+    from Design.SMRF_Computed_Slab import METHOD as computed_slab_method
+    if (strength or {}).get('method_version')!=computed_slab_method:
+        checks.extend(evaluate_slab_actions((strength or {}).get("inputs", {}).get("demand_evidence") or record.get("slab_actions")))
 
     # The slab was priced on the floor context of the installed design (its cages, hoops and column cores).
     checks.append(slab_context_check(record, state))
@@ -1203,7 +1448,8 @@ def _qualification_checks(record, state):
     else:
         checks.append(not_evaluated("demands.drift_and_stability_results", "ASCE 7-22 12.8.6--12.8.7",
                                     "Independent QEx/QEy drift/stability results are not available."))
-    checks.append(_diaphragm_check(record))
+    checks.extend(common_checks)
+    checks.extend(_floor_checks(record, state, transfers, common_checks))
 
     # 6. The quantities the search compared candidates on.
     try:
@@ -1216,6 +1462,70 @@ def _qualification_checks(record, state):
                              details={"differences": found}))
     checks.extend(_open_checks(record, capacity or {}))
     return checks
+
+
+def replay_summary(qualification):
+    """What a replay of a saved record established, kept apart: the rows that rebuild the record from its own inputs (evidence
+    integrity), the engineering rows, and the rows that wait on a person. A review item is not a failed design."""
+    rows = qualification.get("checks") or []
+    review = [row for row in rows if row.get("id") in REVIEW_ROW_IDS]
+    others = [row for row in rows if row.get("id") not in REVIEW_ROW_IDS]
+    integrity = [row for row in others if row.get("clause") == "Evidence integrity"]
+    failed = [f"{row.get('id')}@{row.get('location', '')}" for row in others if row.get("status") == "fail"]
+    unknown = [f"{row.get('id')}@{row.get('location', '')}" for row in others if row.get("status") == "not_evaluated"]
+    return {"replayed": bool(integrity) and all(row.get("status") == "pass" for row in integrity),
+            "integrity_rows": len(integrity), "engineering_rows": len(others) - len(integrity),
+            "failed": failed[:60], "failed_count": len(failed), "unknown": unknown[:60], "unknown_count": len(unknown),
+            "engineering_passed": not failed and not unknown,
+            "review_items": [row.get("id") for row in review if row.get("status") != "pass"]}
+
+
+REVIEW_ROW_IDS = ("qualification.strength_model_verification", "qualification.detailing_model_consistency",
+                  "floor.independent_hand_verification", "floor.compatibility_idealization_reviewed")
+
+
+def build_record_from_evaluation(evaluation, cfg, seed, identity=None, verbose=False):
+    """The saved record of one evaluated candidate, with the slab, transfer and detailing basis it was evaluated on.
+    The run's model state is put back afterwards."""
+    evidence = evaluation["evidence"]
+    slab = evidence["slab"]
+    search = {"final": {**evaluation, "evidence": evidence, "state": evidence["state"]}, "version": "single_evaluation_record_v1",
+              "policy": None, "stop": {"reason": "evaluated_candidate", "detail": evaluation.get("label")},
+              "counts": {"evaluations": 1}, "elapsed_seconds": evaluation.get("elapsed_seconds"), "log": [], "tradeoffs": [],
+              "interpretation": "one candidate of a generation run"}
+    with scratch_state():
+        mg.install(evidence["state"])
+        driver._apply_slab(slab["slab"])
+        sp.FLOOR_TRANSFER, sp.SLAB_ACTIONS, sp.SLAB_REINFORCEMENT = slab["transfer"], slab["evidence"], slab["reinforcement"]
+        sp.DETAIL_BASIS = evaluation.get("detail_basis", sp.DETAIL_BASIS)
+        return build_record(search, cfg, seed, identity=identity, verbose=verbose)
+
+
+def save_evaluation_record(evaluation, cfg, seed, path):
+    """Build, qualify and write the record of one evaluated candidate. The identity is taken with no design installed, as
+    a request identity is; the installed design and model are put back. Returns the file hash and the replay summary."""
+    previous = mg.active()
+    if previous is not None:
+        mg.clear()
+    try:
+        identity = grouped_request_identity(cfg, seed, grouping_policy_id=evaluation["evidence"]["state"].policy_id)
+    finally:
+        if previous is not None:
+            mg.install(previous)
+    record = build_record_from_evaluation(evaluation, cfg, seed, identity=identity)
+    # Written in the record's canonical order, not with sorted keys: evidence texts that embed mappings (the slab strip
+    # demand_location) are rebuilt on replay from the reloaded mappings and must read the same (2026-11-07).
+    text = json.dumps(record, separators=(",", ":"), allow_nan=False)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(target, "wt", encoding="utf-8") as handle:
+        handle.write(text)
+    return {"sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "replay": replay_summary(record["qualification"])}
+
+
+def load_saved_record(path):
+    with gzip.open(Path(path), "rt", encoding="utf-8") as handle:
+        return json.load(handle)
 
 
 def require_accepted_grouped_design(record):

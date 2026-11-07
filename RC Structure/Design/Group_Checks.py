@@ -1,15 +1,16 @@
 """Solved member actions and member strength checks for a grouped design (2026-10-02).
 
 The uniform checks (Design.ACI_Checks) read one column and one beam from cfg and Structure_Parameters.
-Here every member is checked on its own group's section and cage, against its own concurrent actions in
-every solved combination: a column's P, My and Mz are those of one combination at that column (the
-biaxial load-contour check of ACI_Checks.check_column_pm, unchanged), a beam's sagging and hogging
-moments those of its own span envelope. A group's result is the governing member and combination; no
-action is assembled from unrelated extrema.
+Here every member is checked on its own group's section and cage in every solved
+combination. Column checks conservatively retain the componentwise end moment
+and shear envelope at BOTH centerline axial ends; this is not a concurrent
+joint-face P-M tuple. Beam moments use their own span envelope. A group's result
+names its governing physical member, combination and axial end.
 
-The formulas are the uniform ones with the section passed in:
-  columns  phi P-M about each axis from ACI_Checks.pm_diagram_for (the sweep build_pm_diagram uses), the
-           axial cap, and the load-contour interaction; analysis shear with ACI_Checks.check_shear;
+The grouped slab-aware checks use:
+  columns  rotated strain compatibility with actual bars and biaxial tension-strain
+           phi; the tied-column axial cap; analysis shear with ACI_Checks.check_shear.
+           Legacy no-slab adapters retain the empirical load contour.
   beams    member-resolved T/L section strengths, actual bar rows and developed slab mats;
            undeveloped exterior mats are excluded and the weakest end/span section is used
            against the full-span envelope; analysis shear uses check_shear on the smaller depth.
@@ -79,15 +80,28 @@ def capture_member_actions(dead_factor=1.0):
 
 # ---- columns ------------------------------------------------------------------------------------------------
 def column_pm_diagrams(design):
-    """{"y": phi P-M bending through h, "z": through b} of one column design (ACI_Checks.build_pm_diagrams)."""
+    """Uniaxial reporting curves and the actual-cage biaxial section used for checks.
+
+    In slab/actual-cage mode selection and final checking use rotated strain
+    compatibility, including phi at the actual biaxial strain state. The
+    legacy no-slab adapter retains its historical load-contour method.
+    """
     layers_y = _design_col_steel_layers(design, about="h")
     layers_z = _design_col_steel_layers(design, about="b")
-    key = (design.b_in, design.h_in, design.fc_ksi, tuple(layers_y), tuple(layers_z), sp.FY_KSI, sp.ES_KSI)
+    key = (design.b_in, design.h_in, design.fc_ksi, tuple(layers_y), tuple(layers_z), sp.FY_KSI, sp.ES_KSI,
+           sp.SLAB_THICKNESS_IN is not None)
     if key not in _DIAGRAMS:
         if len(_DIAGRAMS) > 2048:
             _DIAGRAMS.clear()
         _DIAGRAMS[key] = {"y": pm_diagram_for(design.b_in, design.h_in, design.fc_ksi, sp.FY_KSI, sp.ES_KSI, layers_y),
                           "z": pm_diagram_for(design.h_in, design.b_in, design.fc_ksi, sp.FY_KSI, sp.ES_KSI, layers_z)}
+        if sp.SLAB_THICKNESS_IN is not None:
+            from Design.SMRF_Biaxial_Section import BiaxialSection
+            from Design.SMRF_Transitions import bar_coordinates
+            bars = [(p["x_in"], p["y_in"], design.bar_area_in2)
+                    for p in bar_coordinates(design, sp.COL_CLEAR_COVER_IN)]
+            _DIAGRAMS[key]["biaxial_section"] = BiaxialSection(
+                design.b_in, design.h_in, design.fc_ksi, sp.FY_KSI, bars, sp.ES_KSI)
     return _DIAGRAMS[key]
 
 
@@ -99,7 +113,7 @@ def column_force_components(local_force):
 
 
 def column_pm_dcr(diagrams, axial_kip, my_kip_in, mz_kip_in, alpha=1.5):
-    """Biaxial load-contour DCR of ACI_Checks.check_column_pm for explicit diagrams.
+    """Actual-cage strain-compatible DCR, or the legacy no-slab load contour.
 
     Returns {"dcr", "basis", "domain_failure", "phi_mn_y_kip_in", "phi_mn_z_kip_in", "axial_dcr"}. The axial
     load is placed against BOTH ends of the surface before anything else (ACI_Checks.axial_limits,
@@ -110,6 +124,23 @@ def column_pm_dcr(diagrams, axial_kip, my_kip_in, mz_kip_in, alpha=1.5):
     moment at an axial load where the surface has no flexural strength left (the tension end) is the
     named failure ``moment_at_axial_end`` with the reserved value DOMAIN_FAILURE_DCR.
     """
+    section = diagrams.get("biaxial_section")
+    if section is not None:
+        values = _biaxial_envelope(section, [(0, "scalar", axial_kip, my_kip_in, mz_kip_in, 0., 0.)])
+        result = {"dcr": values["dcr"], "basis": values["basis"], "axial_dcr": values["axial_values"][0],
+                  "axial_capacity_compression_kip": section.compression_cap,
+                  "axial_capacity_tension_kip": section.tension_cap, "domain_failure": values["row_domain_failures"][0],
+                  "phi_mn_y_kip_in": None, "phi_mn_z_kip_in": None}
+        result["section_method"] = values["basis"]
+        if result["domain_failure"] is not None:
+            result["basis"] = {"compression": "axial_compression_above_cap",
+                               "tension": "axial_tension_outside_surface",
+                               "moment_at_axial_end": "no_flexural_strength_at_axial_load"}[result["domain_failure"]]
+        if result["domain_failure"] is None and abs(my_kip_in) + abs(mz_kip_in) >= 1e-4:
+            result["phi_mn_y_kip_in"] = float(section.at_axial(axial_kip, math.pi / 2)["mh"])
+            result["phi_mn_z_kip_in"] = float(section.at_axial(axial_kip, 0.)["mb"])
+            result["phi_mn_demand_ray_kip_in"] = values["ray_capacities"][0]
+        return result
     diagram_y, diagram_z = diagrams["y"], diagrams["z"]
     compression, tension = axial_limits(diagram_y, diagram_z)
     axial_dcr = axial_demand_ratio(axial_kip, compression, tension)
@@ -145,6 +176,8 @@ def column_pm_envelope(diagrams, rows, alpha=1.5):
     Returns {"dcr": largest, "index": its row, "values": every row's DCR, "domain_failures": {"compression",
     "tension", "moment_at_axial_end": row counts}, "outside_domain": True when any row is a domain failure}.
     """
+    if diagrams.get("biaxial_section") is not None:
+        return _biaxial_envelope(diagrams["biaxial_section"], rows)
     import numpy as np
     p = np.array([row[2] for row in rows], dtype=float)
     my = np.abs(np.array([row[3] for row in rows], dtype=float))
@@ -184,13 +217,74 @@ def column_pm_envelope(diagrams, rows, alpha=1.5):
             "outside_domain": any(failures.values())}
 
 
+def _biaxial_envelope(section, rows):
+    """Vectorized actual strain-compatible capacities, used identically by selection and final checks."""
+    import numpy as np
+    from Design.SMRF_Biaxial_Section import METHOD
+    p=np.asarray([row[2] for row in rows],dtype=float)
+    mh=np.abs([row[3] for row in rows]);mb=np.abs([row[4] for row in rows])
+    axial=np.where(p<0.,p/section.tension_cap,p/section.compression_cap)
+    above=p>section.compression_cap;below=p<section.tension_cap
+    moment=np.hypot(mh,mb)
+    zero=moment<1e-4
+    tension_end=(p<=section.tension_cap+1e-8)&~zero&~below
+    valid=~above&~below&~zero&~tension_end
+    dcr=axial.copy();capacities=np.zeros(p.shape)
+    dcr[tension_end]=DOMAIN_FAILURE_DCR
+    if valid.any():
+        result=section.ray_capacity(p[valid],mh[valid],mb[valid])
+        capacities[valid]=result["capacity"]
+        dcr[valid]=np.maximum(axial[valid],result["dcr"])
+    index=int(np.argmax(dcr))
+    failures={"compression":int(above.sum()),"tension":int(below.sum()),"moment_at_axial_end":int(tension_end.sum())}
+    return {"dcr":float(dcr[index]),"index":index,"values":dcr.tolist(),"domain_failures":failures,
+            "outside_domain":any(failures.values()),"basis":METHOD,"axial_values":axial.tolist(),
+            "ray_capacities":capacities.tolist(),"row_domain_failures":[
+                "compression" if a else "tension" if b else "moment_at_axial_end" if t else None
+                for a,b,t in zip(above,below,tension_end)]}
+
+
+def column_pm_selection_screen(diagrams, rows, limit, alpha=1.5):
+    """Reject on an exact failing witness; check every row before permitting a cage.
+
+    The old contour only orders probes. It cannot accept a cage, supply a
+    reported final DCR, or omit a row from a passing result. Most undersized
+    cages can be rejected after a few exact section solves.
+    """
+    section = diagrams.get("biaxial_section")
+    if section is None or len(rows) <= 6:
+        result = column_pm_envelope(diagrams, rows, alpha)
+        return {**result, "all_rows_checked": True}
+    approximate = column_pm_envelope({axis: diagrams[axis] for axis in ("y", "z")}, rows, alpha)
+    order = sorted(range(len(rows)), key=lambda i: approximate["values"][i], reverse=True)[:4]
+    order += [min(range(len(rows)), key=lambda i: rows[i][2]), max(range(len(rows)), key=lambda i: rows[i][2])]
+    order = list(dict.fromkeys(order))
+    probe = _biaxial_envelope(section, [rows[i] for i in order])
+    if probe["outside_domain"] or probe["dcr"] > limit:
+        return {**probe, "index": order[probe["index"]], "all_rows_checked": False,
+                "checked_row_indices": order, "scope": "exact failing witness for rejection only; not a final envelope"}
+    result = _biaxial_envelope(section, rows)
+    return {**result, "all_rows_checked": True}
+
+
 def column_demand_rows(tags, actions):
-    """[(tag, combination id, P, My, Mz, Vy, Vz)] of the given columns in every solved combination."""
+    """[(tag, combination id, P, My, Mz, Vy, Vz, axial_end)] for BOTH column ends.
+
+    Compression is f[0] at i and -f[6] at j. Column self-weight makes them
+    different; greater compression is not always more adverse on a P-M curve.
+    Retain the conservative componentwise end-moment/shear envelope at each P,
+    so the old bottom check remains and the omitted top check is added. These
+    are centerline action envelopes, not a claim of concurrent face actions.
+    SCWB retains its separate joint-face transport and axial-range calculation.
+    """
     rows = []
     for action in actions:
         members = action["members"]
         for tag in tags:
-            rows.append((tag, action["id"], *column_force_components(members[str(tag)]["local_force_kip_kipin"])))
+            forces = members[str(tag)]["local_force_kip_kipin"]
+            _p, *envelope = column_force_components(forces)
+            for end, axial in (("i", float(forces[0])), ("j", -float(forces[6]))):
+                rows.append((tag, action["id"], axial, *envelope, end))
     return rows
 
 
@@ -200,16 +294,19 @@ def column_group_strength(design, rows, alpha=1.5):
     cover = sp.longitudinal_cover_in("column", design.bar_size, design.stirrup_bar_size)
     av = design.stirrup_legs * sp.rebar_area(design.stirrup_bar_size)
     best_pm, best_shear = None, None
-    for tag, combination, p, my, mz, vy, vz in rows:
-        pm = column_pm_dcr(diagrams, p, my, mz, alpha)
-        if best_pm is None or pm["dcr"] > best_pm["dcr"]:
-            best_pm = {**pm, "member_tag": tag, "combination": combination, "axial_kip": p, "my_kip_in": my, "mz_kip_in": mz}
+    envelope = column_pm_envelope(diagrams, rows, alpha)
+    for index, (tag, combination, p, my, mz, vy, vz, *end_context) in enumerate(rows):
+        axial_end = end_context[0] if end_context else None
+        if index == envelope["index"]:
+            pm = column_pm_dcr(diagrams, p, my, mz, alpha)
+            best_pm = {**pm, "member_tag": tag, "combination": combination, "axial_kip": p, "my_kip_in": my, "mz_kip_in": mz,
+                       "axial_end": axial_end, "action_basis": "centerline_component_envelope_at_both_axial_ends_v2"}
         vu = math.hypot(vy, vz)
         shear = check_shear(vu, p, bw=design.b_in, d=design.h_in - cover, fc_ksi=design.fc_ksi, Av=av,
                             s=design.stirrup_spacing_in, fy_ksi=sp.FYT_KSI, h=design.h_in)
         if best_shear is None or shear.dcr > best_shear["dcr"]:
             best_shear = {"dcr": shear.dcr, "vu_kip": vu, "phi_vn_kip": shear.capacity, "member_tag": tag,
-                          "combination": combination, "axial_kip": p}
+                          "combination": combination, "axial_kip": p, "axial_end": axial_end}
     ast = design.longitudinal_area_in2
     return {"pm": best_pm, "shear": best_shear, "rho": ast / (design.b_in * design.h_in), "ast_in2": ast,
             "observations": len(rows)}
@@ -217,7 +314,11 @@ def column_group_strength(design, rows, alpha=1.5):
 
 # ---- beams --------------------------------------------------------------------------------------------------
 def beam_demand_rows(tags, actions):
-    """[(tag, combination id, Mu+, Mu-, Vu)] of the given beams: each span's own sagging and hogging envelope."""
+    """[(tag, id, Mu+, Mu-, Vu, Nmin, Nmax)] for each member/combination.
+
+    Compression-positive external end N is paired with that combination's
+    moment envelope. The internal web/flange flexural couple is not added.
+    """
     rows = []
     for action in actions:
         members = action["members"]
@@ -225,8 +326,22 @@ def beam_demand_rows(tags, actions):
             member = members[str(tag)]
             envelope = member["span_bending"]["full_span"]
             f = member["local_force_kip_kipin"]
-            vu = math.hypot(max(abs(f[1]), abs(f[7])), max(abs(f[2]), abs(f[8])))
-            rows.append((tag, action["id"], envelope["mu_positive_kip_in"], envelope["mu_negative_kip_in"], vu))
+            if str(member['span_bending'].get('method_version','')).startswith('physical_piecewise_section_force_extrema_'):
+                from Design.SMRF_Physical_Member_Actions import validated_member_span
+                envelope=validated_member_span(member)['full_span']
+                vu=math.hypot(envelope['maximum_abs_inplane_shear_kip'],envelope['maximum_abs_vertical_shear_kip'])
+                axial=(envelope['axial_min_kip'],envelope['axial_max_kip'])
+            else:
+                vu = math.hypot(max(abs(f[1]), abs(f[7])), max(abs(f[2]), abs(f[8])))
+                axial = (float(f[0]), -float(f[6]))
+            # What the plate carries across the flange, the torsion steel taken from the faces and the collector force
+            # enter the section equilibrium here (Design.SMRF_Conventional_Floor, 2026-11-07).
+            floor = member.get("floor_actions") or {}
+            face = float(floor.get("torsion_face_moment_kip_in", 0.0))
+            extra = float(floor.get("n_diaphragm_kip", 0.0))
+            rows.append((tag, action["id"], envelope["mu_positive_kip_in"] + float(floor.get("mu_slab_sagging_kip_in", 0.0)) + face,
+                         envelope["mu_negative_kip_in"] + float(floor.get("mu_slab_hogging_kip_in", 0.0)) + face, vu,
+                         min(axial) - extra, max(axial) + extra))
     return rows
 
 
@@ -244,7 +359,7 @@ def beam_flexural_strengths(design, rows):
     return result
 
 
-BEAM_STRENGTH_BASIS = "member_composite_t_l_actual_rows_developed_mats_v2_two_datum_hooks"
+BEAM_STRENGTH_BASIS = "member_composite_t_l_actual_rows_developed_mats_v3_net_concrete"
 
 
 def beam_section_context(member):
@@ -262,9 +377,15 @@ def beam_section_context(member):
     hooks = tuple((end, tuple((key, tuple(sorted(value.items())) if isinstance(value, dict) else value)
                               for key, value in sorted(inputs.items())))
                   for end, inputs in sorted(mp.exterior_end_anchorage_inputs(member).items()))
+    from Design import SMRF_Conventional_Detail as conventional
+    inventory=None
+    if (sp.SLAB_REINFORCEMENT or {}).get("layout") and not conventional.active():
+        from Design.SMRF_Joint_Mat_Physical import member_slab_inventory
+        inventory=member_slab_inventory(member,flange)
+    physical_key=(inventory["status"],tuple((face,layer["count"],layer["depth_in"]) for face,layer in inventory["layers"].items())) if inventory else None
     return (flange["flange_width_in"], flange["clear_span_in"], flange["slab_sides"],
             tuple((o["overhang_in"], o["clear_to_adjacent_web_in"]) for o in flange["overhangs"]),
-            tuple(mp.exterior_ends(member).items()), edge.b_in, edge.fc_ksi, edge.stirrup_bar_size, hooks)
+            tuple(mp.exterior_ends(member).items()), edge.b_in, edge.fc_ksi, edge.stirrup_bar_size, hooks,physical_key)
 
 
 def beam_group_representatives(state, gid):
@@ -324,11 +445,35 @@ def resolved_beam_flexural_strengths(member, rows):
 
 def beam_group_strength(design, rows, bar_rows, state=None):
     """Governing flexure (each sign) and analysis-shear DCR of one beam design over its group's demand rows."""
+    from Design.SMRF_Beam_Axial import installed_member_sections, capacity_at_axial, METHOD as AXIAL_METHOD
+    import numpy as np
     strengths = beam_flexural_strengths(design, bar_rows)
     cache, by_member = {}, {}
+    # Solve all external axial ordinates of each physical section family in
+    # one vector call. The legacy five-field helper rows imply N=0; production
+    # capture always supplies both axial ends and uses the exact section path.
+    axial_by_context, axial_capacity, member_context = {}, {}, {}
+    if state is not None:
+        for tag, _combination, _mu_pos, _mu_neg, _vu, *axial in rows:
+            if not axial:
+                continue
+            member = state.member(tag)
+            key = member_context.setdefault(tag, beam_section_context(member))
+            entry = axial_by_context.setdefault(key, {'member': member, 'values': set()})
+            entry['values'].update(axial)
+        for key, entry in axial_by_context.items():
+            ps = sorted(entry['values'])
+            values = capacity_at_axial(installed_member_sections(entry['member'], bar_rows), ps)
+            axial_capacity[key] = {p: {
+                'positive': float(values['positive_kip_in'][i]), 'negative': float(values['negative_kip_in'][i]),
+                'domain_failure': bool(values['domain_failure'][i]),
+                'tension_controlled': bool(values['tension_controlled'][i]),
+                'section': {s: str(values['section'][s][i]) for s in ('positive', 'negative')},
+                'phi': {s: float(values['phi'][s][i]) for s in ('positive', 'negative')},
+            } for i, p in enumerate(ps)}
     av = design.stirrup_legs * sp.rebar_area(design.stirrup_bar_size)
     best = {"positive": None, "negative": None, "shear": None}
-    for tag, combination, mu_pos, mu_neg, vu in rows:
+    for tag, combination, mu_pos, mu_neg, vu, *axial in rows:
         if state is not None and tag not in by_member:
             member = state.member(tag)
             key = beam_section_context(member)
@@ -338,22 +483,38 @@ def beam_group_strength(design, rows, bar_rows, state=None):
         current = by_member[tag] if state is not None else strengths
         d = min(current["positive"]["d_in"], current["negative"]["d_in"])
         for sign, mu in (("positive", mu_pos), ("negative", mu_neg)):
-            dcr = mu / current[sign]["phi_mn_kip_in"] if mu > 0.0 else 0.0
-            if not current[sign].get("tension_controlled", True):
+            cap = current[sign]['phi_mn_kip_in']
+            controlled = current[sign].get('tension_controlled', True)
+            axial_governor, axial_result = None, None
+            domain = False
+            if state is not None and axial:
+                table = axial_capacity[member_context[tag]]
+                axial_governor = min(axial, key=lambda p: -float('inf') if table[p]['domain_failure']
+                                     or not table[p]['tension_controlled'] else table[p][sign])
+                axial_result = table[axial_governor]
+                domain = axial_result['domain_failure']
+                cap = axial_result[sign] if np.isfinite(axial_result[sign]) and not domain else 0.
+                controlled = axial_result['tension_controlled']
+            dcr = mu / max(cap, 1e-9) if mu > 0.0 else 0.0
+            if domain or not controlled:
                 # The zero-axial-force beam section must satisfy 9.3.3.1. Reducing phi alone
                 # cannot make a non-tension-controlled composite beam an accepted design.
                 dcr = max(dcr, DOMAIN_FAILURE_DCR)
             if best[sign] is None or dcr > best[sign]["dcr"]:
-                best[sign] = {"dcr": dcr, "mu_kip_in": mu, "phi_mn_kip_in": current[sign]["phi_mn_kip_in"],
+                best[sign] = {"dcr": dcr, "mu_kip_in": mu, "phi_mn_kip_in": cap,
                               "member_tag": tag, "combination": combination,
-                              "strength_basis": current[sign].get("basis", "rectangular_no_slab"),
-                              "tension_controlled": current[sign].get("tension_controlled", True),
-                              "section": current[sign].get("section")}
-        shear = check_shear(vu, 0.0, bw=design.b_in, d=d, fc_ksi=design.fc_ksi, Av=av, s=design.stirrup_spacing_in,
-                            fy_ksi=sp.FYT_KSI)
+                              "strength_basis": AXIAL_METHOD if axial_result else current[sign].get("basis", "rectangular_no_slab"),
+                              "tension_controlled": controlled, 'axial_kip': axial_governor,
+                              'axial_domain_failure': domain,
+                              "section": axial_result['section'][sign] if axial_result else current[sign].get("section")}
+        # Minimum compression / greatest tension is the adverse axial term.
+        # Do not take compression credit from a composite area in a web shear check.
+        shear_axial = min(0., *axial) if axial else 0.
+        shear = check_shear(vu, shear_axial, bw=design.b_in, d=d, fc_ksi=design.fc_ksi, Av=av, s=design.stirrup_spacing_in,
+                            fy_ksi=sp.FYT_KSI, h=design.h_in)
         if best["shear"] is None or shear.dcr > best["shear"]["dcr"]:
             best["shear"] = {"dcr": shear.dcr, "vu_kip": vu, "phi_vn_kip": shear.capacity, "member_tag": tag,
-                             "combination": combination}
+                             "combination": combination, 'axial_kip': shear_axial}
     return {"flexure_positive": best["positive"], "flexure_negative": best["negative"], "shear": best["shear"],
             "strengths": ({sign: by_member[best[sign]["member_tag"]][sign] for sign in ("positive", "negative")}
                           if by_member else strengths), "observations": len(rows),
@@ -408,6 +569,7 @@ def strength_checks(actions, cfg, state=None):
                                 result["shear"]["dcr"])
             groups[gid] = {"member_type": design.member_type, **result}
     return {"groups": groups, "worst": worst,
-            "basis": ("every member on its own group's section and cage; columns: concurrent P, My, Mz of each combination "
-                      "with the biaxial load-contour interaction; beams: each span's own sagging and hogging envelope; a "
+            "basis": ("every member on its own group's section and cage; columns: each combination's componentwise "
+                      "centerline moment/shear envelope checked at both end axial forces with rotated biaxial strain "
+                      "compatibility in actual-cage mode (legacy load contour without a slab); beams: each span's own sagging and hogging envelope; a "
                       "group's value is its governing member and combination")}

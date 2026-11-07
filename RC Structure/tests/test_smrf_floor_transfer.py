@@ -295,13 +295,18 @@ class FrameApplicationTests(unittest.TestCase):
 
         floor_nodal, weight_nodal = applied(None, floor_factor=1.0)
         floor_transfer, weight_transfer = applied(self.transfer, floor_factor=1.0)
-        self.assertAlmostEqual(floor_transfer, floor_nodal, places=9)
+        # The transfer is the centreline plate's. The perimeter strip of the physical floor (2026-11-05) reaches the
+        # perimeter beams as uniform line loads, which this helper counts with the member weight, and the corner
+        # joints as nodal loads: the two modes agree on the whole, and without the strip on each part.
+        self.assertAlmostEqual(floor_transfer + weight_transfer, floor_nodal + weight_nodal, places=9)
         self.assertAlmostEqual(floor_nodal, sp.NUM_FLOOR * sp.total_floor_gravity_load(), places=9)
-        self.assertAlmostEqual(weight_transfer, weight_nodal, places=9)
-        # Separate dead/live factors are honoured by the transfer path.
         area = sp.BAY_X * sp.NUM_BAY_X * sp.BAY_Y * sp.NUM_BAY_Y / 144.0
+        floor_plate, weight_plate = applied(self.transfer, floor_factor=1.0, perimeter_strip=False)
+        self.assertAlmostEqual(floor_plate, sp.NUM_FLOOR * (sp.floor_dead_load_ksf() + 0.05) * area, places=9)
+        self.assertAlmostEqual(weight_plate, weight_nodal, places=9)
+        # Separate dead/live factors are honoured by the transfer path.
         floor_factored, _ = applied(self.transfer, floor_factor=1.0, self_weight_factor=1.2,
-                                    dead_factor=1.2, live_factor=1.6)
+                                    dead_factor=1.2, live_factor=1.6, perimeter_strip=False)
         self.assertAlmostEqual(floor_factored, sp.NUM_FLOOR * (1.2 * sp.floor_dead_load_ksf() + 1.6 * 0.05) * area, places=9)
 
     def test_beam_loads_land_on_the_right_elements(self):

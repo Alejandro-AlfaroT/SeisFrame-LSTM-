@@ -95,6 +95,35 @@ def hook_geometry(bar_size, kind):
     raise ValueError(f"Unknown hook kind {kind!r}")
 
 
+def standard_hook_tail_fits(bar_size, face, row_offset_in, member_depth_in, clear_cover_in):
+    """Whether the standard 90-degree hook (Table 25.3.1) of a beam bar row turned into the member ends inside the
+    opposite cover. ``row_offset_in`` is the row centroid from its own face ("top" or "bottom"). The joint context
+    (SMRF_Transition_Context, rule standard_hook_tail_fits_member_depth) applies this expression to every terminating
+    row; selection screens with it."""
+    hook = hook_geometry(bar_size, "development_90")
+    db = hook["db_in"]
+    radius = (hook["inside_bend_diameter_in"] + db) / 2
+    z = -row_offset_in if face == "top" else -member_depth_in + row_offset_in
+    turn = -1 if face == "top" else 1
+    tail_end = z + turn * (radius + hook["extension_in"])
+    return (min(z, tail_end) - db / 2 >= -member_depth_in + clear_cover_in - 1e-9
+            and max(z, tail_end) + db / 2 <= -clear_cover_in + 1e-9)
+
+
+def same_lane_hook_separation_in(bar_size):
+    """Least vertical distance between a top row and a bottom row of one lane whose standard 90-degree hooks turn
+    toward each other in the lane's plane: each tail (bend radius to the bar axis + extension) must end one bar
+    diameter short of the other row's straight run, whatever the two hooks' positions along the embedment."""
+    hook = hook_geometry(bar_size, "development_90")
+    return (hook["inside_bend_diameter_in"] + hook["db_in"]) / 2 + hook["extension_in"] + hook["db_in"]
+
+
+def same_lane_hooks_clear(bar_size, top_offset_in, bottom_offset_in, member_depth_in):
+    """Whether a top row and a bottom row sharing a lane can both take in-plane standard hooks (offsets from each
+    row's own face). The joint context (SMRF_Transition_Context) finds no placement otherwise."""
+    return member_depth_in - top_offset_in - bottom_offset_in >= same_lane_hook_separation_in(bar_size) - 1e-9
+
+
 def tie_set(width_in, depth_in, clear_cover_in, tie_size, crosstie_spans, set_index=0, depth_covers_in=None):
     """One hoop set: the perimeter hoop and its crossties, dimensioned, with the 90-degree ends alternated.
 

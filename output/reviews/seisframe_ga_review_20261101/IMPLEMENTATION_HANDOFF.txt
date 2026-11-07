@@ -1,0 +1,54 @@
+SEISFRAME REVIEW IMPLEMENTATION HANDOFF
+Companion to SeisFrame_GA_Review.pdf and SeisFrame_GA_Review.txt
+Review date: November 1, 2026
+
+PURPOSE
+
+Finish and validate the existing genetic design-generation approach using the independent review's findings. This handoff preserves the review recommendations; it does not itself authorize production edits, new solves, GA runs or engineering assertions. Any execution must follow the user's current authorization.
+
+NONNEGOTIABLE CONSTRAINTS
+
+- Practical beam reinforcement ceiling: 0.0175 maximum. Do not raise it.
+- Fire-resistance design is outside capstone scope; never record a fictitious pass.
+- Applicable structural strength, shear, detailing, drift, stability and slab requirements remain required.
+- Retain the existing GA and operator approach. Do not add a new optimizer or major redesign.
+- Preserve user edits, untracked files, research records and the reviewed cycle behavior.
+- Keep candidate code acceptance, structural qualification and nonlinear performance separate.
+
+CORRECT FIRST
+
+1. Complete the detailing inventory at the acceptance boundary.
+   Code_Check_Contract currently permits a broad minimum-one-row detailing pattern. A synthetic failing beam.minimum_steel assessment becomes accepted if that row is omitted. Enumerate applicable detailing check identities and face/location variants; require missing-row rejection independently of the emitter. Add omission regressions for every required row. No live production omission or falsely accepted physical design was demonstrated.
+   Start: RC Structure/Design/Code_Check_Contract.py:224-243 and RC Structure/Design/Grouped_Record.py:684-719.
+
+2. Reject explicit TEST FIXTURE evidence across all production profile formats.
+   The v1 fixture passes validation if only kind is changed to reviewed, even while the reviewer/decision still explicitly label it a software fixture. The stronger text prohibition is v2-only. Extend that guard and change test_design_evidence_profile.py:487 to expect rejection. The fixture's fake scope and unresolved structural assessments mean the demonstrated loader weakness alone is not a real accepted pilot.
+   Start: RC Structure/Design/Design_Evidence_Profile.py:266-309, 341-343.
+
+3. Enforce the authorized ratio at shared engineering entry points.
+   Runner and generation_v3 reject ceilings above 0.0175; direct legacy/evaluator/selector paths trust supplied mutable configuration. Pure pricing admitted a 0.01956869 cage at a supplied 0.020 cap; the same cage failed at 0.0175. Add shared validation and a no-solve regression. Do not increase the limit. No protected pilot violation was found.
+   Start: RC Structure/Design/Config.py:665-680; Genetic_Search.py:306-367; Group_Selection.py:343-354.
+
+ENGINEERING EVIDENCE STILL NEEDED
+
+The current tree already implements the structural slab gates, explicit fire exclusion, distinct hook-datum consumers, roof applicability and procedure-profile infrastructure. Do not reapply historical reports as if those changes were absent.
+
+The checked-in v2 profile is inactive_unreviewed and all seven dispositions are open: floor idealization; supports/faces; stiffness sensitivity; two-way shear path; local slab-column steel; independent reference; tolerance. Finish the bounded evidence and named review before activation. A method profile is not permission to set flags true. Every candidate floor must establish its own coverage and numerical evidence.
+
+The candidate contract still has declared structural review/scope limitations, and grouped qualification retains diaphragm/collector and other reviews. Finishing slab P1 alone does not establish qualification. Keep these limits explicit in the required finish line.
+
+NEXT VALIDATION GATE
+
+After the boundary corrections and engineering evidence are ready, freeze a fresh source/configuration/profile identity. Verify one complete end-to-end candidate before the broader pilot. Keep generation_v3, the 0.0175 cap and intended preference policy explicit. Use the existing operators only where their evidence supports a route; unknowns and solver failures are not strengthening instructions.
+
+The reviewed pilot settings use population/offspring four, guidance 0.75, severe threshold 1.25, preferred share 0.80, jump target 0.85 and minimum gain 0.02. These are search settings, not engineering thresholds. Screening limits are cooperative; full evaluation remains necessary.
+
+Report actual final sections, cages, materials, slab basis, governing checks, runtime and acceptance class. If a bounded attempt finds no accepted design, report governing physical failures and available routes without claiming structural infeasibility.
+
+EVIDENCE AND CAUTIONS
+
+287 inspected isolated tests passed in the completed review. No GA runs or structural solves were performed. Three small no-solve reproductions support the defects above. Passing tests do not validate the slab model or certify readiness. Current full evaluation and resume execution were not tested.
+
+Historical o0001 to o0007 reduced worst exceedance and survived while failed rows rose from 19 to 23. It remained unresolved with 194 unknown rows. That example is not current-source validation. The 15-minute pilot directory had no final result.json; the saved next-run plan differed from the current source in 22 normalized source hashes plus new infrastructure.
+
+Read the full review for all 12 claim assessments, operator and jump semantics, evaluator/caching trace, cycle limitations, exact references, test breakdown and scope limits. This package contains no raw test logs or frozen source snapshot; it does not claim to provide either.

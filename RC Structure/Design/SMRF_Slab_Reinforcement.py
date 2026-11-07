@@ -106,10 +106,16 @@ def _policy(policy):
 def _demands(evidence, inputs):
     if not isinstance(evidence, dict):
         raise ValueError("Verified slab action evidence is missing.")
-    if any(evidence.get(flag) is not True for flag in _VERIFIED_FLAGS):
+    from Design.SMRF_Conventional_Floor import SLAB_EVIDENCE_COMPUTED, slab_acceptance_problems
+    computed_basis = evidence.get("acceptance_basis") == SLAB_EVIDENCE_COMPUTED
+    if computed_basis:
+        problems = slab_acceptance_problems(evidence)
+        if problems:
+            raise ValueError(f"The computed slab demands are not accepted: {problems}.")
+    elif any(evidence.get(flag) is not True for flag in _VERIFIED_FLAGS):
         missing = [flag for flag in _VERIFIED_FLAGS if evidence.get(flag) is not True]
         raise ValueError(f"Upstream slab analysis verification is incomplete: {missing}.")
-    if "engineering_assertions" in evidence:
+    if "engineering_assertions" in evidence and not computed_basis:
         from Design.SMRF_Common import assertion_provenance_valid
         assertions = evidence["engineering_assertions"]
         if (not assertion_provenance_valid(assertions)
@@ -436,7 +442,11 @@ def _hook_rejected_spacings(bar, inputs, policy, context):
     if context is None:
         return {}, None
     from Design.SMRF_Beam_Slab_Strength import perimeter_hook
-    embedment = context["beam_width_in"] - context["beam_clear_cover_in"] - context["beam_hoop_diameter_in"]
+    # Both mats must fit. Their actual 90-degree tails occupy separate
+    # axial planes; the bottom hook is inset by db + max(1 in, db).
+    db=_BARS[bar][0]
+    embedment = (context["beam_width_in"] - context["beam_clear_cover_in"] - context["beam_hoop_diameter_in"]
+                 - db-max(1.,db))
     rejected = {}
     for spacing in policy["spacing_options_in"]:
         hooks = [perimeter_hook(bar, spacing, context["fc_beam_ksi"], inputs["fy_ksi"], embedment,
@@ -575,10 +585,10 @@ def _local_steel_check(context):
                           "alpha_f1 l2/l1",
                           details={"columns_at_beam_intersections": True, "alpha_f_min": context["alpha_f_min"],
                                    "alpha_f_l2_l1_min": context["alpha_f_l2_l1_min"],
-                                   "basis": "assessed not applicable: the slab bears on beams on every edge and every "
-                                            "column is at a beam intersection, so no slab-column two-way critical "
-                                            "section exists at which 8.6.1.2 would require local steel (asserted in "
-                                            "SlabActionAssertions.slab_column_local_steel_assessed)"})
+                                   "basis": "not applicable by the beam-supported premise computed here: the slab bears on "
+                                            "beams on every edge with alpha_f1 l2/l1 >= 1 and every column is at a beam "
+                                            "intersection, so no slab-column two-way critical section exists at which "
+                                            "8.6.1.2 would require local steel"})
     return _unresolved("slab_column_local_minimum_steel", clause,
                        "The floor meets the beam-supported premise; whether 8.6.1.2 applies to it is an engineering "
                        "assessment to assert in Design.Config.SlabActionAssertions.slab_column_local_steel_assessed; "
@@ -734,6 +744,13 @@ def design_slab_reinforcement(slab_inputs, demand_evidence, policy=None, context
 
 def evaluate_slab_reinforcement(record):
     """Recompute saved evidence, including every bar selection and capacity."""
+    from Design import SMRF_Computed_Slab as computed
+    if isinstance(record,dict) and record.get('method_version')==computed.METHOD:
+        try:
+            expected=computed.replay(record)
+            return [make_check('slab_computed_saved_evidence','Exact physical slab replay',int(record==expected),1,'=='),*expected['checks']]
+        except Exception as exc:
+            return [not_evaluated('slab_computed_saved_evidence','Exact physical slab replay',f'{type(exc).__name__}: {exc}')]
     if not isinstance(record, dict) or not isinstance(record.get("inputs"), dict):
         return design_slab_reinforcement(None, None)["checks"]
     data = record["inputs"]
@@ -769,6 +786,9 @@ def slab_strength_eligibility(record, current_context=None):
     and perimeter-anchorage statuses, ``credit`` ("developed" or "not_established"), ``reason_code`` and
     ``reason``, the failed, unknown and review-dependent checks, and a ``signature`` of everything read.
     """
+    from Design import SMRF_Computed_Slab as computed
+    if isinstance(record,dict) and record.get('method_version')==computed.METHOD:
+        return computed.eligibility(record,current_context)
     result = {"version": ELIGIBILITY_VERSION, "record_present": isinstance(record, dict), "layout_selected": False,
               "slab_checks_complete": False, "slab_checks_passed": False, "interior_development": "unknown",
               "perimeter_anchorage": {"x": "unknown", "y": "unknown"}, "context_current": None,
@@ -846,3 +866,31 @@ def slab_strength_eligibility(record, current_context=None):
                "development": development, "anchorage": anchorage, "method_version": record.get("method_version")}
     result["signature"] = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
     return result
+
+
+def computed_layout(slab_inputs,bar_size,spacings,policy=None):
+    """Construct an explicit trial from the unchanged four-layer catalog, with no demand assertion."""
+    inputs,resolved=_inputs(slab_inputs),_policy(policy)
+    names=('x_top','x_bottom','y_top','y_bottom')
+    if bar_size not in resolved['bar_sizes'] or not isinstance(spacings,dict) or set(spacings)!=set(names):
+        raise ValueError('Explicit shared bar and all four layer spacings are required')
+    layers={}
+    for name in names:
+        spacing=spacings[name]
+        if spacing not in resolved['spacing_options_in']:raise ValueError('Spacing is outside the existing catalog')
+        axis,face=name.split('_');layer=_layout(inputs,resolved,bar_size,axis,spacing)
+        if layer is None:raise ValueError('The selected layer has no positive effective depth')
+        layers[name]={**layer,'face':face}
+    db=_BARS[bar_size][0]
+    return {'bar_size':bar_size,'outer_axis':resolved['outer_axis'],
+            'mat_clear_gap_in':inputs['thickness_in']-2*resolved['clear_cover_in']-4*db,
+            'minimum_mat_clear_gap_in':max(1.,4/3*inputs['max_aggregate_size_in']),
+            'uniform_all_panels_and_floors':True,'layers':layers}
+
+
+def computed_slab_reinforcement(slab_inputs,layout,*,state,material_inventory,common_actions=None,procedure=None,
+                               policy=None,slab_geometry_record=None):
+    """Explicit common-action physical detailing; never calls the asserted zero-N strip selector."""
+    from Design.SMRF_Computed_Slab import computed_record
+    return computed_record(slab_inputs,layout,state=state,material_inventory=material_inventory,
+        common_actions=common_actions,procedure=procedure,policy=policy,slab_geometry_record=slab_geometry_record)

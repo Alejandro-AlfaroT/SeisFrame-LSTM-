@@ -1,0 +1,2358 @@
+{
+  "manifest_integrity": {
+    "verified": true,
+    "files": 407,
+    "bytes": 909909840,
+    "sha256": "6162f293767c434c96321c32f5eeab6c0c7b00c7ff3d9ca57c7747c99c758308",
+    "audit_time_utc": "2026-10-21T06:14:35.669262+00:00"
+  },
+  "comparison_counts": {
+    "identical": 38,
+    "handoff_only": 70,
+    "newline_or_bom_only": 14,
+    "implementation_or_config_changed": 47,
+    "documentation_or_format_only": 1
+  },
+  "scope": {
+    "sources_compared": 170,
+    "comparison": "All manifested non-output Python/config files against the same RC-root relative path. Text comparison normalizes newline/BOM; AST comparison strips documentation only, without importing or executing package code.",
+    "live_only_count": 131,
+    "live_only_test_and_fixture_count": 115,
+    "raw_byte_differences": {
+      "identical": 38,
+      "handoff_only": 70,
+      "changed": 62
+    }
+  },
+  "recommendation": "Retain live repository as the design/population integration baseline. Keep SSD handoff immutable as a research evidence and selective patch source. Do not overlay the snapshot.",
+  "carry_forward_live_requirements": [
+    {
+      "topic": "population",
+      "files": [
+        "Data_Generation/Generate_Parameterized_Dataset.py",
+        "tools/build_lhs_pilot.py"
+      ],
+      "observation": "Live preserves 3-7 bays and height/least-plan-width <=2.25; SSD reverts to 2-6 bays and lacks aspect admissibility filter."
+    },
+    {
+      "topic": "mixed spans and mesh",
+      "files": [
+        "Design/SMRF_Floor_Sections.py",
+        "Design/SMRF_Floor_Mesh.py"
+      ],
+      "observation": "Live has SPAN_SCHEMA and graded_mixed_face_levels; SSD reinstates uniform-line rejection and drops shared-interior mixed-width mesh recipe."
+    },
+    {
+      "topic": "reinforcement policy",
+      "files": [
+        "Structure_Parameters.py",
+        "Design/Config.py",
+        "Model/Sections.py",
+        "Model/Member_Bar_Layers.py"
+      ],
+      "observation": "SSD lacks live Grade 80 policy helpers, separate Grade 60 hoop/slab strengths, half-inch bar-position grid, and practical beam steel cap. Preserve live policy and tests; selectively adapt research bar geometry."
+    },
+    {
+      "topic": "design lateral load path",
+      "files": [
+        "Structure_Parameters.py",
+        "Model/IMK_Hinges.py",
+        "Design/Perimeter_Systems.py",
+        "Design/Gravity_Frame_Members.py",
+        "Design/SMRF_Diaphragm.py"
+      ],
+      "observation": "SSD removes live perimeter-SFRS gravity-beam release path and omits the three named design modules. Do not silently change design load path."
+    },
+    {
+      "topic": "tests",
+      "files": [
+        "tests/"
+      ],
+      "observation": "All 115 live test/fixture source/config files are absent from the SSD. Package integrity is not test acceptance."
+    }
+  ],
+  "selective_candidate_changes": [
+    {
+      "topic": "directional hinge recorder provenance",
+      "files": [
+        "Analysis/Hinge_Moment_Rotation.py",
+        "Analysis/Hinge_Hysteresis_Diagnostic.py"
+      ],
+      "status": "Candidate integration after regression review",
+      "observation": "Adds installed positive/negative rotation capacities and branch-consistent demand ratios; labels ratio as virgin rotation-demand proxy, not cyclic damage state."
+    },
+    {
+      "topic": "directional beam calibration and sign mapping",
+      "files": [
+        "Model/IMK_Calibration.py",
+        "Model/IMK_Hinges.py"
+      ],
+      "status": "Candidate implementation with unresolved physical calibration",
+      "observation": "Adds actual bar-row centroids and directional Eq3.12 capacities/mapping. Stem-only slab-excluding reinforcement scope and provisional theta_u remain unresolved. Need preserve current grade, grid, release features while integrating."
+    },
+    {
+      "topic": "numerical hinge stiffness",
+      "files": [
+        "Structure_Parameters.py",
+        "Model/IMK_Hinges.py"
+      ],
+      "status": "Experimental fixture setting, not an automatic production default",
+      "observation": "SSD changes n=20 to n=10 and correctly describes scalar elastic-spine correction as approximate. Require assembled member/subassembly stiffness tests across end conditions before adoption."
+    },
+    {
+      "topic": "research/reference tools",
+      "files": [
+        "pilots/case0041BeamTip/",
+        "pilots/case0041Fema461/",
+        "tools/*case0041*",
+        "Reference_Specimens/park_ruitong_1988/"
+      ],
+      "status": "Retain as evidence/reference fixtures",
+      "observation": "New beam-tip fixture and research extraction/calibration tools can be isolated and pinned; old FEMA fixture has different supports/actuation. Do not use provisional or nonfinite cyclic results as validated production parameters."
+    },
+    {
+      "topic": "additional SSD design/analysis modules",
+      "files": [
+        "Analysis/Anchorage_Reference.py",
+        "Analysis/Joint_Slip_Subassembly.py",
+        "Model/Joint_Panel.py",
+        "Design/SMRF_Composite_Sections.py",
+        "Design/SMRF_Cracked_Section.py",
+        "Design/SMRF_Cut_Regions.py",
+        "Design/SMRF_Floor_Compatibility.py",
+        "Design/SMRF_Generated_Sections.py",
+        "Design/SMRF_Nodal_Cuts.py",
+        "Design/SMRF_Section_Interaction.py",
+        "Design/SMRF_Shell_Membrane.py"
+      ],
+      "status": "Review candidates only; not promoted",
+      "observation": "Presence and docstrings inventoried; not independently qualified or fully code-reviewed in this reconciliation."
+    }
+  ],
+  "expected_omissions": [
+    "Ground-motion libraries",
+    "General datasets",
+    "Git history",
+    "Installed environments",
+    "Non-case0041 output directories",
+    "All live test sources/fixtures"
+  ],
+  "runtime": {
+    "handoff_recorded": {
+      "python": "3.12.12",
+      "openseespy": "3.8.0.0",
+      "numpy": "2.4.2",
+      "scipy": "1.17.1",
+      "matplotlib": "3.10.8"
+    },
+    "environment_yml": "Text-equivalent to live; only Python 3.12 and OpenSeesPy 3.8.0.0 pinned. NumPy/SciPy/Matplotlib remain unpinned in environment-generation.yml. No runtime import/run was performed."
+  },
+  "limitations": [
+    "Read-only reconciliation; no structural rerun, tests, production merge, or calibration adoption.",
+    "Targeted high-risk diff inspection, not an exhaustive review of every differing implementation.",
+    "A hash-matching handoff establishes transfer integrity, not correctness or production readiness."
+  ],
+  "files": [
+    {
+      "relative_path": "Analysis/__init__.py",
+      "handoff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "live_exists": true,
+      "live_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/Anchorage_Reference.py",
+      "handoff_sha256": "dbe2984c053d88217b9797f4fb5be436106fe24a388400f9cc75a7f338e117d7",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Section-equilibrium anchorage reference for a beam face (joint-spring review 2026-09-29; repaired\nafter the anchorage follow-up review of 2026-09-30).\n\nThe review amended the calibration target to \"a section-equilibrium anchorage reference, followed by a\nreduced interface fitted jointly with the member\". This module builds the reference and stops there:\nnothing is fitted and nothing is installed in the frame.\n\nFor one beam section and one bending direction (hogging: top bars in tension; sagging: bottom bars in\ntension) it derives, at every moment level of a curvature-controlled section analysis:\n  1. the section state with every bar layer kept by a stable identity: neutral-axis depth c, each layer's\n     strain and stress from the chosen steel law, the extreme concrete strain;\n  2. for each tension layer, the anchorage state of its bars through the joint: the bond lengths needed on\n     the near side and on the far side, where the far-face stress of the SAME layer comes from the opposite\n     face's section at a declared companion moment; a zero-stress zone when both fit inside the column\n     depth, a fully mobilised two-face tension profile when the far face is also in tension, and an\n     explicit \"capacity exceeded\" state when a compressive far face cannot be developed (the near-face slip\n     is then a screening estimate, marked invalid);\n  3. each layer's slip at the face from bond compatibility with two strain-profile treatments reported side\n     by side: Sezen and Setzler's bilinear approximation over the yielded length and the direct integration\n     of the invers",
+      "top_level_definitions": [
+        "Steel",
+        "Concrete",
+        "Bond",
+        "Section",
+        "_fc_psi",
+        "moment_curvature",
+        "aci_nominal",
+        "_interpolate_row",
+        "find_events",
+        "_elastic_elongation",
+        "_yielded_elongation",
+        "layer_anchorage",
+        "face_rotation",
+        "reference",
+        "frame_section",
+        "unit1_section",
+        "export_rows",
+        "run",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Analysis/Diagnostics.py",
+      "handoff_sha256": "e2affe56eac60951aa9ba4bd756c60cd8e83a58e604fa02430106bf375bb14c3",
+      "live_exists": true,
+      "live_sha256": "414bedf7eef61a4dd38283d9d16b3eed8136dfbb3586580cabceb051920f0dfe",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Analysis__Diagnostics.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Analysis/Fixed_Design_Diagnostics.py",
+      "handoff_sha256": "29cdf4677a904c5807032ee6faa6a7006599299776302edb0fd2625c877e6ba6",
+      "live_exists": true,
+      "live_sha256": "29cdf4677a904c5807032ee6faa6a7006599299776302edb0fd2625c877e6ba6",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/Gravity.py",
+      "handoff_sha256": "d757c982616f1c916e3ac0267ba8e5133c1aa792ca6c4fdbf056991066d83c91",
+      "live_exists": true,
+      "live_sha256": "d757c982616f1c916e3ac0267ba8e5133c1aa792ca6c4fdbf056991066d83c91",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/Hinge_Hysteresis_Diagnostic.py",
+      "handoff_sha256": "684d6096d1f1003503f2e88f7cda6a2fabec9ce48bb66d82125e1a74cc12d75b",
+      "live_exists": true,
+      "live_sha256": "c77fe377fb6362f013eb92088c163246a2cce9be0469270aeac9a9c65a9e5094",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Analysis__Hinge_Hysteresis_Diagnostic.py.diff",
+      "diff_lines": 46,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Analysis/Hinge_Moment_Rotation.py",
+      "handoff_sha256": "7a8e8a585c2f8ffb4ff19136b3f7d374a504f2e2b610ed812de3cc331d7adf1e",
+      "live_exists": true,
+      "live_sha256": "31ba5015c41c2447b58ce7ddcc6fdf90f4d15b3cf0f1d2e25be2f4645fd27bc9",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Analysis__Hinge_Moment_Rotation.py.diff",
+      "diff_lines": 108,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Analysis/Joint_Loops_Diagnostic.py",
+      "handoff_sha256": "4ec5f64aad6cb9b4b4775c0a3a6a9d435085df5953b73b3c43c10e2aee439376",
+      "live_exists": true,
+      "live_sha256": "4ec5f64aad6cb9b4b4775c0a3a6a9d435085df5953b73b3c43c10e2aee439376",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/Joint_Slip_Subassembly.py",
+      "handoff_sha256": "aa82dd46fcbc201e35f02be100822bc1ac895ffa66da76afc575969d3b782637",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Isolated beam-column-joint subassembly with member-face slip interfaces (diagnostic, 2026-09-27).\n\nThe joint-slip review asked for an isolated diagnostic before anything touches the frame: the\nforce/rotation map written first (Model/JOINT_SLIP_SUBASSEMBLY.md), flexural rotation, slip rotation\nand panel shear recorded separately, total displacement and external/internal work checked, and the\nprovisional slip calibration kept out of the production model. The slip-calibration resolution\n(the same evening) added: the interface stiffness must be a property of the physical calibration,\ninvariant under node-order/axis reversal, with complete branches and reference energies mapped\ntogether (Model/IMK_Materials.define_mapped_rotational_imk); bar slip is owned per member end\n(Model/Deformation_Ownership); both spring orientations, both in-plane bending axes, elastic\nflexibility, equilibrium, convergence and complete exports are reported. This module is that diagnostic.\n\nTopology (interior joint, one vertical plane, one story between inflection points):\n\n    top node (lateral displacement imposed, column axial load)\n      |  elastic upper column, H/2\n    column hinge (frame law)         <- optional column-face slip interface\n    J = column core  ==panel spring (installed joint law)==  B = beam core\n    beam hinge (frame law) -- optional beam-face slip interface -- B, both faces\n      elastic half beams, L/2, far ends on vertical rollers\n    column hinge (frame law)\n      |  elastic lower column, H/2\n    base pin\n\nThe members, hinges, backbones and the panel spring are the frame's own ",
+      "top_level_definitions": [
+        "cracked_neutral_axis",
+        "slip_calibration",
+        "interface_stiffness",
+        "_fix_out_of_plane",
+        "_rotational_spring",
+        "_member_hinge_material",
+        "_slip_material",
+        "_member_deterioration_suppressed",
+        "build",
+        "protocol",
+        "run_protocol",
+        "_work",
+        "_cumulative_work",
+        "elastic_member_energy",
+        "evaluate",
+        "_elastic_rotation_limit",
+        "compare_histories",
+        "plot",
+        "_jsonable",
+        "export",
+        "run_one",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Analysis/Mechanism_Checks.py",
+      "handoff_sha256": "8b923a9d00b7c5185be090254eb86c1851f29f1573224e4bb4bb2c120b0be850",
+      "live_exists": true,
+      "live_sha256": "8b923a9d00b7c5185be090254eb86c1851f29f1573224e4bb4bb2c120b0be850",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/Modal.py",
+      "handoff_sha256": "4729f68e09bb7add1024ca07005146a0949b703c526cd3244549f10feca0f90b",
+      "live_exists": true,
+      "live_sha256": "4729f68e09bb7add1024ca07005146a0949b703c526cd3244549f10feca0f90b",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/NTHA.py",
+      "handoff_sha256": "91427454f7d005c3233493bfe5eeab19b98eb01b154b2af74d6cea4832732de4",
+      "live_exists": true,
+      "live_sha256": "91427454f7d005c3233493bfe5eeab19b98eb01b154b2af74d6cea4832732de4",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/Pushover.py",
+      "handoff_sha256": "55eb22cf9430a0ab770f63a2d9f1d4ebb571d380ef17a65a1120a0203de72edb",
+      "live_exists": true,
+      "live_sha256": "55eb22cf9430a0ab770f63a2d9f1d4ebb571d380ef17a65a1120a0203de72edb",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/Pushover_Diagnostic.py",
+      "handoff_sha256": "aed91e1cc2c0bdc2b875c148b98c2f50d517864d1d5fc4ad2b36043465da7ba7",
+      "live_exists": true,
+      "live_sha256": "aed91e1cc2c0bdc2b875c148b98c2f50d517864d1d5fc4ad2b36043465da7ba7",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Analysis/Response_Spectrum.py",
+      "handoff_sha256": "d2b255a8ef3a53780e0b22d1cfab0bb4508104fa05b7ca05977f6d2e08f3fa43",
+      "live_exists": true,
+      "live_sha256": "d2b255a8ef3a53780e0b22d1cfab0bb4508104fa05b7ca05977f6d2e08f3fa43",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Data_Generation/__init__.py",
+      "handoff_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "live_exists": true,
+      "live_sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Data_Generation____init__.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Data_Generation/Analyze_Parameter_Space.py",
+      "handoff_sha256": "9d5abca89fdf091380e85bf0d4be53eebb5b08ebbdba7cfa4ba7032fdc72547f",
+      "live_exists": true,
+      "live_sha256": "fb040c3c29c27926eefcad822501c08470c976b8d03e051c526466392f376580",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Data_Generation__Analyze_Parameter_Space.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Data_Generation/Build_Weighted_Seismic_Calibration_Plan.py",
+      "handoff_sha256": "eca923dfcb3647df82c3fddb73177506f6f56b2d84647e6ef8915a96de9d7b04",
+      "live_exists": true,
+      "live_sha256": "eca923dfcb3647df82c3fddb73177506f6f56b2d84647e6ef8915a96de9d7b04",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Data_Generation/Calibrate_Intensity.py",
+      "handoff_sha256": "afd6b2dba010a28521a832580740aec14d236487c1755499aad31d91ead768a2",
+      "live_exists": true,
+      "live_sha256": "afd6b2dba010a28521a832580740aec14d236487c1755499aad31d91ead768a2",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Data_Generation/Check_Dataset_DCR.py",
+      "handoff_sha256": "88b7a6b429e79e3c4c5c2e1ad8122c3b83c290547b471a8a616b96c60871d8b6",
+      "live_exists": true,
+      "live_sha256": "88b7a6b429e79e3c4c5c2e1ad8122c3b83c290547b471a8a616b96c60871d8b6",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Data_Generation/Collect_Weighted_Seismic_Calibration.py",
+      "handoff_sha256": "babeae9e48b6f506270e6975259bfa5f7b48586f18dfa23d9a9d3482c222ba96",
+      "live_exists": true,
+      "live_sha256": "1dc4bd752c0ddcf2fa1dc0f77096052f144eed560cd6f8eb3728ca2e29ff641c",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Data_Generation__Collect_Weighted_Seismic_Calibration.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Data_Generation/Generate_Hybrid_Dataset.py",
+      "handoff_sha256": "ee9b426c44ffb4f905d4bba04408665811c7467818ce4bd9ee229e93925f683d",
+      "live_exists": true,
+      "live_sha256": "ee9b426c44ffb4f905d4bba04408665811c7467818ce4bd9ee229e93925f683d",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Data_Generation/Generate_Parameterized_Dataset.py",
+      "handoff_sha256": "c508ed9b8b6f0dcda3deed9b421cd87910c2799faaf50b4515fdf15f9c9aff81",
+      "live_exists": true,
+      "live_sha256": "38631d66500e474e41975da0bbb1a4bc19a391ec2df97d01ea4393f3d482838c",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Data_Generation__Generate_Parameterized_Dataset.py.diff",
+      "diff_lines": 96,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Data_Generation/Graph_Exporter.py",
+      "handoff_sha256": "2f528e71d972692a311d50c5adcac5b3c918f5f3fc9baa58c47bf16e3dd56a3c",
+      "live_exists": true,
+      "live_sha256": "2f528e71d972692a311d50c5adcac5b3c918f5f3fc9baa58c47bf16e3dd56a3c",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Data_Generation/Hybrid_Exporter.py",
+      "handoff_sha256": "28958ad0346647cae8d7fd509cda7eb9cc26220e2352b10e4435d3d60e2a4c7a",
+      "live_exists": true,
+      "live_sha256": "28958ad0346647cae8d7fd509cda7eb9cc26220e2352b10e4435d3d60e2a4c7a",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Data_Generation/Inspect_Calibration_Designs.py",
+      "handoff_sha256": "fc6861badb701e30b7a275a9a8821f136e198867eb816e843aef259664d6cd41",
+      "live_exists": true,
+      "live_sha256": "8891f6546fc58eee4f8f350b58f07064cd23cef9ca691bd50b8b19fc2777713d",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Data_Generation__Inspect_Calibration_Designs.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Data_Generation/Record_Hinge_Hysteresis.py",
+      "handoff_sha256": "b2588da9a33abedcf183eed7eddb754e87237cbbd1589261907063f4f112b393",
+      "live_exists": true,
+      "live_sha256": "b2588da9a33abedcf183eed7eddb754e87237cbbd1589261907063f4f112b393",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Data_Generation/Research_Batch_Evidence.py",
+      "handoff_sha256": "cf84749ba9bc89de331ca60d88ac81a6e0471ee27a21441c4a07ba330a5e7cf1",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Portable, fail-closed consumption of the adopted per-design M1 evidence.\n\nReplays qualification arithmetic, not structural analysis or limit optimization.\nHistorical files and the adopted reviewer implementation are never rewritten.",
+      "top_level_definitions": [
+        "digest",
+        "find_case_file",
+        "portable_evidence",
+        "validated_addendum",
+        "load_case_addendum",
+        "effective_state"
+      ]
+    },
+    {
+      "relative_path": "Data_Generation/Run_Research_Batch.py",
+      "handoff_sha256": "3486d4e2d6b250d2de83f46ae8fd86fa75157cc1e0d78db23854564a55769f4c",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Declared diagnostic research batch: one nonlinear response-history run per designed structure.\n\nThis is NOT the production generation route. ``Design.SMRF_Qualification.GENERATION_RELEASE_READY`` is not\nconsulted or changed, no acceptance function is patched, and nothing here asserts a design check. The batch\nruns the same model build, analysis and export code as production (``Ground_Motion_Main.run_one``) on saved\ndesigns, and writes beside every run what a reader needs to decide what the run is worth: the design's\nqualification state with every open and failed check id, the analysis profile, the source fingerprint, the\nrecord pair and its file hashes, and the scaling. A surrogate trained on these runs emulates this specified\nmodel; that is not a statement about physical structures.\n\nDefinition of the batch (pre-generation review, 2026-10-04):\n  * one case = one structure with one ground-motion assignment and one nonlinear run;\n  * both horizontal components of one recorded pair, X and Y together, relative timing kept, ONE common\n    amplitude multiplier (the natural directional imbalance is preserved);\n  * scale = alpha * Sa_design(T_ref) / sqrt(Sa_x_raw(T_ref) * Sa_y_raw(T_ref)), 5 %-damped pseudo-acceleration,\n    the site's ASCE 7 design spectrum, T_ref = max(T_x, T_y) of the unscaled elastic model, each direction's\n    period being the mode with the largest effective modal mass in that direction (never a mode picked by\n    number, which could be torsional). T_ref is fixed before any shaking;\n  * raw spectra are computed with multiplier 1; the multiplier written and ap",
+      "top_level_definitions": [
+        "_sha256_file",
+        "_sha256_json",
+        "_write_json",
+        "_read_json",
+        "source_identity",
+        "design_spectrum_sa_g",
+        "pseudo_acceleration_g",
+        "directional_periods",
+        "scale_factor",
+        "assign_alphas",
+        "record_pairs",
+        "assign_records",
+        "build_plan",
+        "validate_plan",
+        "require_source_match",
+        "load_or_write_plan",
+        "find_design",
+        "design_state",
+        "design_usable",
+        "history_checks",
+        "_folder_bytes",
+        "claim",
+        "run_case",
+        "complete_history",
+        "worker_main",
+        "case_state",
+        "select_cases",
+        "launch",
+        "validate_collected_case",
+        "summarize",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Data_Generation/Run_Weighted_Seismic_Calibration.py",
+      "handoff_sha256": "de10905a8183e1c15c8c5d6bb0f526fd72543efbc18c5f64143560a9cb39836f",
+      "live_exists": true,
+      "live_sha256": "4641e999ce3111dd0213187f41b7b1b0f0c71e0497719f5e801f18f57ecddf94",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Data_Generation__Run_Weighted_Seismic_Calibration.py.diff",
+      "diff_lines": 31,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Data_Generation/Seismic_Response_Score.py",
+      "handoff_sha256": "bebb1438d5ab9df3bc7606466561e12ab27a6eaac5f06651102b1d58510dafbc",
+      "live_exists": true,
+      "live_sha256": "83e39efabfeaefbd13ac727c810041a814e6250e35372aa9ea8080e5b3f01b12",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Data_Generation__Seismic_Response_Score.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Design/__init__.py",
+      "handoff_sha256": "318edaf6101e4b5a1593405337d3f7718b9d1c8582f37ffd0af8aaca0cd552a1",
+      "live_exists": true,
+      "live_sha256": "756d6e6cc3ee2cbabeeaa7f8c89164170802b1900a22c39df582a27fd24041e1",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design____init__.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Design/ACI_Checks.py",
+      "handoff_sha256": "29ce558aa3801af64efdb1076427847c8e2adb67af49379749068077de05b524",
+      "live_exists": true,
+      "live_sha256": "852cfc5c61e6274ea45aa004a89b605b6599ec6b932ba34098cd9e6eb2a5b767",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__ACI_Checks.py.diff",
+      "diff_lines": 84,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/CheckResult.py",
+      "handoff_sha256": "8635e5ff981ddad2db5222fa23aa8817fe0baa0107483e0de42c737381b34730",
+      "live_exists": true,
+      "live_sha256": "2c2488a71aad90c283dd04e53346b7e44c7e18f5adeecd59d85bdab2d00feb45",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__CheckResult.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Design/Compare_SAP2000.py",
+      "handoff_sha256": "19a92c2fa637216e15a1f5a1631d746b5468fd9030c8f9211bc2fdb4bc12500d",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Design/Compare_SAP2000.py\n=========================\n\nCompare SAP2000 results against the design record's own numbers, per case.\n\nWorkflow\n--------\n1. Export_SAP2000.py writes <case>_frame.$2k and <case>_frame_targets.json.\n2. Import the $2k into SAP2000, run all cases, run concrete design.\n3. Export these tables to CSV (Display > Show Tables > File > Export):\n     Modal Periods And Frequencies          -> modal.csv\n     Joint Displacements                    -> joints.csv\n     Base Reactions                         -> reactions.csv\n     Concrete Design 1 - Column Summary     -> col_design.csv      (optional)\n     Concrete Design 2 - Beam Summary       -> beam_design.csv     (optional)\n   Export with the default SAP column headers, Kip-in units.\n4. Run:\n     python Design/Compare_SAP2000.py <case>_frame_targets.json --sap-dir <dir with the csvs>\n\nWhat is compared, and which assertion each result speaks to\n-----------------------------------------------------------\n  period T1               model stiffness/mass       (sanity)\n  base shear under EQX/EQY applied ELF               (sanity; should be exact)\n  story drift, DRIFT_X/Y  elastic + Cd/Ie design     drift screen\n  column / beam DCR       SAP concrete design        qualification.strength_model_verification\n  base axials, DEAD       floor transfer             floor.independent_hand_verification (slab variant)\n\nSAP's CSV headers vary slightly by version and by whether you export from a\nselection. The reader is case-insensitive and tolerant of spaces, but if a\ncolumn is not found it says which one and stops rather than gues",
+      "top_level_definitions": [
+        "read_csv",
+        "col",
+        "fnum",
+        "pct",
+        "line",
+        "compare",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Design/Config.py",
+      "handoff_sha256": "ac4bd9d14f62b4877dd9633ad52401110859a104fc3779e40261ed2be3bdddc0",
+      "live_exists": true,
+      "live_sha256": "c60cc3b0b0fcc318d25d37e0ca40367e5be402d4749002a555cf26087b7d9b09",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Config.py.diff",
+      "diff_lines": 44,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Design_Driver.py",
+      "handoff_sha256": "3cc749aee84db7197ae143c7312c06db6bf1c282b85706123493aeb457a4d307",
+      "live_exists": true,
+      "live_sha256": "343619e3b26028cf71ebffedb558d2094d9a53097882e9110aba4f02e1942cd1",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Design_Driver.py.diff",
+      "diff_lines": 359,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Design_Figures.py",
+      "handoff_sha256": "d23332a51c7e169a3068fad3435815acd35fe7809aa8eb7380ef255ff5e89b2d",
+      "live_exists": true,
+      "live_sha256": "8ef5185a350ddc3f16e482cb2a9bd71f844f94481504f597c6b38aa9519fcf34",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Design_Figures.py.diff",
+      "diff_lines": 157,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Evidence_Summary.py",
+      "handoff_sha256": "2fca6176eeb34195cf17c6488e5bbb39170a8d0e17c5fef7f84e520a8d3c5997",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Evidence summary for one representative design, for the assertion review.\n\nWrites ``evidence_summary.md`` beside a ``design.json``: every quantity a\nreviewer needs before filling ``SlabActionAssertions``, ``DemandPolicy`` and\n``IndependentVerification`` in ``Design/Config.py``, each computed from the\nartifact or measured on the model built from it by this script, with the hand\nreference beside it where a hand formula exists. Nothing is transcribed.\n\n    python Design/Evidence_Summary.py --output-dir outputs/smrf_evidence_review_<date>\n    python Design/Evidence_Summary.py --design-file <path>/design.json\n\nWithout ``--design-file`` the representative case is designed here under\nPROBE slab-action and demand assertions (so the assertion-dependent\nevidence is visible) with ``IndependentVerification`` deliberately empty, so\nthe artifact reports exactly the items the review settles. The probe is\nrecorded in the request identity and is not a certification.",
+      "top_level_definitions": [
+        "probe_config",
+        "design_review_case",
+        "load_record",
+        "write_evidence_summary",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Design/Export_SAP2000.py",
+      "handoff_sha256": "f5c9041ed0ff839337c4324fa488711b7a294a54649f3e6f475587e0fbf615be",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Design/Export_SAP2000.py\n========================\n\nEmit a SAP2000 text-import (.$2k) model of a designed structure, for\nindependent verification of the design model in a second solver.\n\nWhy\n---\nSeveral qualification items in Design/Config.IndependentVerification attest\nthat a person checked things the design code cannot check about itself: that\nthe floor load transfer is right, that the strength model is right, that the\nslab/frame idealization is acceptable. Hand calculation is not realistic for\na 3D multi-story frame with a shell floor transfer. A second finite-element\nprogram modelling the same structure from the same record is the practical\nform of independent verification, and SAP2000 also runs its own ACI 318-19\nconcrete design, which is a direct check on ACI_Checks.py.\n\nTwo variants are written, because the OpenSees design model is two things:\n\n  frame   Frame + rigid diaphragm, gravity applied as the exact per-member\n          loads the shell floor transfer produced (stored in the record).\n          This is a comparison model, not a validated solver-equivalent copy:\n          see the exported limitations, particularly P-Delta and mass mapping.\n\n  slab    Frame + shell slab + area pressures. SAP performs its own floor\n          transfer. Column axials and beam moments against the record's\n          transfer totals check floor.independent_hand_verification; a\n          frame-only vs with-slab comparison speaks to\n          floor.compatibility_idealization_reviewed.\n\nLabels match OpenSees exactly: joints are node_tag(k, i, j), frames are the\nelement tags in create_eleme",
+      "top_level_definitions": [
+        "load_record",
+        "node_tag",
+        "_beam_stiffness_ratios",
+        "Frame",
+        "concrete_e_ksi",
+        "rect_props",
+        "S2K",
+        "build",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Design/Group_Capacity.py",
+      "handoff_sha256": "92c4e443fd8ae5183ee2c95b3f76a4320723a66641e46ca943139cef2f80ee7e",
+      "live_exists": true,
+      "live_sha256": "fa51d212bc2d0852dd1c217dfcbfa65a76aaaef60903bb45e2884bc98d75eb1f",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Group_Capacity.py.diff",
+      "diff_lines": 452,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Group_Checks.py",
+      "handoff_sha256": "0b4b8e464a6e5b63622ca89d38fbc110fc3761b004f468c99b0832d652f0ab50",
+      "live_exists": true,
+      "live_sha256": "fa6cffda43fa6927a71a030730997a81f027e318f7e48d64e4a1fd03118e7f60",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Group_Checks.py.diff",
+      "diff_lines": 189,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Group_Selection.py",
+      "handoff_sha256": "cbe1934b8851e062be404f787fdab64108c444986a9bae948573768714ce8bf3",
+      "live_exists": true,
+      "live_sha256": "23d4b11bc44bd2b9ddfcfc42da11d606e3d6e313d6c3aa95e81e40bbae44f022",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Group_Selection.py.diff",
+      "diff_lines": 448,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Grouped_Design.py",
+      "handoff_sha256": "57f8b8a8735b1870eeda65615eaf870f257f3c48dadaa3a1fcc4e357e1601c13",
+      "live_exists": true,
+      "live_sha256": "353ce83db37d10b2ca6e3057a6e0432dc01d98ddb100d98f5b7b38d359112f25",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Grouped_Design.py.diff",
+      "diff_lines": 247,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Grouped_Record.py",
+      "handoff_sha256": "ab7940a0afffb25a0bc9580fb184990ca0bbf7f6e3e63548ad6628c18af52aef",
+      "live_exists": true,
+      "live_sha256": "24abe6d89f23432a312834ff9865ce9d07fd4cf4ea23bbf99313ce41ed00194d",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Grouped_Record.py.diff",
+      "diff_lines": 554,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Grouped_Runner.py",
+      "handoff_sha256": "78a19f0415751f1430b3a89aa77fdf2cc70927fa741eccc861ba4a93a2f7b736",
+      "live_exists": true,
+      "live_sha256": "064582a8155cec459f6bdd68d31352dd0c31796dc44f3b9b8fc324abacaf45dd",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Grouped_Runner.py.diff",
+      "diff_lines": 138,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Grouped_Search.py",
+      "handoff_sha256": "fe36a2aad658f04c102496ae72d6bd523cec6b8275fdd704cd3479636453118b",
+      "live_exists": true,
+      "live_sha256": "9ff0d565894f771b3111eeb44ff05a34580f1d8a1dee0f497df64290a2c4042b",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Grouped_Search.py.diff",
+      "diff_lines": 608,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Joint_Design_Tracking.py",
+      "handoff_sha256": "191e284c5148993b1aa5ee87aeb08e6d4e2a9c5971c5f312e699d8ec03cb1b16",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Read-only, per-physical-joint tracking of a saved regular SMRF design.\n\nReuses the existing joint-area geometry rule; it does not redesign or promote\ncategory-level capacity-design results to independently solved joint demands.\nBase anchorage, nonlinear joint calibration, and detailing drawings are outside\nthis inventory. Missing evidence remains explicit.",
+      "top_level_definitions": [
+        "_positive",
+        "build_joint_design_tracking",
+        "markdown_report",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Design/Replay_Uniform_Candidate.py",
+      "handoff_sha256": "6542947c231d9c74c824f07693a3dac8bc26b630dfc71ddce8d693944742e051",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Re-evaluate a saved uniform section pair without replacing the original run.\n\nExample: python Design/Replay_Uniform_Candidate.py --case-dir <old case_0004>\n         --output-dir <new folder> [--reduction-trials 24]\nThe saved dimensions seed a fresh design; the old cage is audited separately.",
+      "top_level_definitions": [
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Design/Screening_Manifest.py",
+      "handoff_sha256": "2c6cc3524bb94d0733aa0a53fd1bbdea110d9d76fad19e32d719ed68482c5c07",
+      "live_exists": true,
+      "live_sha256": "f4689cfd3cdb087b22cf0e1c4b1ad325aeaba461c7a4d3c0b2d6a57fa2d7b08d",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Screening_Manifest.py.diff",
+      "diff_lines": 28,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Section_Design.py",
+      "handoff_sha256": "a85177549b7c63f5c2e15ca76fb75927df90781e7962f5016938c23c9aee6e6a",
+      "live_exists": true,
+      "live_sha256": "93d91903b255f17beb61019b77565a6b175df69e728d39d2dcbb61dcf19f875a",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Section_Design.py.diff",
+      "diff_lines": 101,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Beam_Actions.py",
+      "handoff_sha256": "bd727ab041a7d17f73efff3fae333c9d2b85cc8e23322b70d6dcce447a4dc332",
+      "live_exists": true,
+      "live_sha256": "9eeae211003d55c162a0b3d9943bb2d20922ccde118bf7f9088106f46c6e5771",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Beam_Actions.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Design/SMRF_Beam_Slab_Strength.py",
+      "handoff_sha256": "768fee3463c2407daacc9d35f8942bb84a565c88dd10d1e20e7f93bf683156aa",
+      "live_exists": true,
+      "live_sha256": "1c25f7d10eb7db74fb8691e0a391fd4dc05fe759ad1bb2d8e2d5d9fd306f1e1b",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Beam_Slab_Strength.py.diff",
+      "diff_lines": 176,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Beam_Spacing.py",
+      "handoff_sha256": "1745c91da950a036f14cff1e5f0fdde0bd4f4ce433b955c56bb6a1b7ad650973",
+      "live_exists": true,
+      "live_sha256": "ee4f17d7a9cbae29770e028ad12d9018a6a9e3b3c6ffe92fe1dd02cceb49f3e6",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Beam_Spacing.py.diff",
+      "diff_lines": 35,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Cage_Geometry.py",
+      "handoff_sha256": "a1d41f98a228810b98aef7018d2d239385a22088b954310e56ead64d6619f3b3",
+      "live_exists": true,
+      "live_sha256": "4cc8817eb3359d01eb21641e5ec06028803785300b82fddb9a646f24e38f56f2",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Cage_Geometry.py.diff",
+      "diff_lines": 295,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Cage_Layout.py",
+      "handoff_sha256": "0cf9297f7f9adde33eb46224d7aa041e91131cf5901d27f21b0c043c6df7ef20",
+      "live_exists": true,
+      "live_sha256": "ea44045a8ce6d3a2c3975ca21386add2eda7777035ede4c2cf4bcc6c58225d6f",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Cage_Layout.py.diff",
+      "diff_lines": 117,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Capacity_Design.py",
+      "handoff_sha256": "5a81fab421bab9322887244c8b947da5e765a02207688c991ebb1073111dfd2f",
+      "live_exists": true,
+      "live_sha256": "36cd59fb6a12a5781e1758007db093614bbdf57917ad68a53352909577aeaa07",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Capacity_Design.py.diff",
+      "diff_lines": 307,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Common.py",
+      "handoff_sha256": "c08bb44a86d2284db8583419cf93de27aed260b58fdb4af72ea34f897d22901f",
+      "live_exists": true,
+      "live_sha256": "c08bb44a86d2284db8583419cf93de27aed260b58fdb4af72ea34f897d22901f",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/SMRF_Composite_Sections.py",
+      "handoff_sha256": "b2ef19cddaeefa53b69cd98f0ed8725be165073493d56f98ae6bd55677ca329c",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Equilibrium-complete cuts through a planar shell/eccentric-web assembly.\n\nCuts must follow a mesh line between column lines. Native element nodal\nactions are transported to one explicitly stated reference using M+r\u00d7F.\nShell loads allocated to nodes on the cut are subtracted from its native\nresisting actions, because those loads belong to the cut-side free body.\nBeam element body loads are retained in the free-body load ledger.\n\nThis recovers whole-floor sections, not an effective flange or a qualified\nindividual beam design moment. It does not partition shared slab steel.",
+      "top_level_definitions": [
+        "_vector",
+        "_sum",
+        "_cross",
+        "transport_wrench",
+        "recover_planar_cut",
+        "recover_floor_cut"
+      ]
+    },
+    {
+      "relative_path": "Design/SMRF_Coupled_Analysis.py",
+      "handoff_sha256": "8dc07468396a3074ea22bc571b730441f518feb4e650bb575f5022f04b1cf02a",
+      "live_exists": true,
+      "live_sha256": "50a8c9a44183ec4d1295aae8d9993782df2494825a1d02b21c79b280bc78104d",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Coupled_Analysis.py.diff",
+      "diff_lines": 83,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Coupled_Comparison.py",
+      "handoff_sha256": "26fc22d47ce70ccf85568df65f4cb8749f7003c4330b0a7ee24854a3280b0a44",
+      "live_exists": true,
+      "live_sha256": "26fc22d47ce70ccf85568df65f4cb8749f7003c4330b0a7ee24854a3280b0a44",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/SMRF_Cracked_Section.py",
+      "handoff_sha256": "ede3704f49ef38607948cbf6c2afdf11767d47e85df9d00d36aeda22ed3c56f2",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Fully cracked, linear-elastic, pure-bending section diagnostic.\n\nConcrete carries compression only; steel stays elastic. This is the classical\ntransformed-section Icr calculation, not a first-yield secant, nonlinear\nmoment-curvature curve, empirically calibrated member stiffness or IMK input.\nNo tension stiffening, slip, shear, creep or cyclic damage is represented.\nThe matrix retains axial/flexural coupling at the explicit reference.",
+      "top_level_definitions": [
+        "cracked_flexural_rigidity"
+      ]
+    },
+    {
+      "relative_path": "Design/SMRF_Cut_Regions.py",
+      "handoff_sha256": "9070a291e3a883e02e89455d222c1f43838e5cc562288c8b2901ccdb56c03024",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Spatial shell/web cut diagnostics with explicit effective-flange regions.\n\nIntegrates an interpolated Gauss-resultant field, not consistent nodal forces.\nIt retains both recovery faces, unallocated slab regions and all six actions.\nExact partition closure does NOT establish physical equilibrium: both faces\nare compared separately with the independently balanced native nodal cut.\nNo averaging of the faces or undocumented balancing correction is performed.",
+      "top_level_definitions": [
+        "_number",
+        "_sum",
+        "effective_flange_regions",
+        "_shell",
+        "_field",
+        "_traction",
+        "integrate_shell_interval",
+        "recover_floor_regions"
+      ]
+    },
+    {
+      "relative_path": "Design/SMRF_Demands.py",
+      "handoff_sha256": "b642885179c742828189e90e82767fac347e8293928f9ae199c38682f8835f14",
+      "live_exists": true,
+      "live_sha256": "b642885179c742828189e90e82767fac347e8293928f9ae199c38682f8835f14",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/SMRF_Design_Evidence.py",
+      "handoff_sha256": "1bf71c5eeb9b1115c6af17bee8a2c194be495d2e22950449747aca6bee2e5226",
+      "live_exists": true,
+      "live_sha256": "6b5271687ca8f39afdd2b5ca35d312e5457908a633060c23b424a19c7fa0ff2e",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Design_Evidence.py.diff",
+      "diff_lines": 65,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Detailing.py",
+      "handoff_sha256": "033995adf912928c7a8f606f6f55282c6aa8f2ab64413ec5693c5d4df0991a09",
+      "live_exists": true,
+      "live_sha256": "a82232c15699145dcdec715237d42e1e9f1e08d1b8a34f58962dd143f034b29b",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Detailing.py.diff",
+      "diff_lines": 241,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Elastic.py",
+      "handoff_sha256": "ecf8f3694a44aaaaa443cce84184b1c1850156d33cf252d1919fa556b21d10f2",
+      "live_exists": true,
+      "live_sha256": "c7e85d76b3f76a0859eb8d3b0fefa66598093ab95ce19258ad545bf5e526d84e",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Elastic.py.diff",
+      "diff_lines": 40,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Floor_Analysis.py",
+      "handoff_sha256": "559913ff13d20265859f5f75015b4554f0fdda91502b0e6feeaaacdacc5ef9e9",
+      "live_exists": true,
+      "live_sha256": "102fc7c71cbb35e8e0f352e775ea6a6ef8b76f8ef2a1d59d0d306261e9b52ae0",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Floor_Analysis.py.diff",
+      "diff_lines": 55,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Floor_Compatibility.py",
+      "handoff_sha256": "a088a37bd2537254f7df719875cf126729bd7a4e1024770a5240846464506173",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Diagnostic compatible eccentric floor/frame assembly for generated designs.\n\nExplicit inputs only; no Structure_Parameters mutation, file I/O, frozen-case\nimports or borrowed reference displacements. Linear small-displacement\ngravity mechanics. Native shells plus downstand webs occur once in the floor\nmatrix; analytical columns occur once in the building matrix.\n\nThis API does not supply production design demands: shell/web resultants are\nnot automatically the effective-flange beam resultants used by existing\nstrength checks. No P-Delta, seismic/modal solver or cracked composite model\nis qualified here. Input-keyed matrices are local to one immutable instance.",
+      "top_level_definitions": [
+        "transport",
+        "column_stiffness",
+        "CompatibleFloor"
+      ]
+    },
+    {
+      "relative_path": "Design/SMRF_Floor_Mesh.py",
+      "handoff_sha256": "09bcd9440b5aa3848b577fe9565d875b5d377d8133a7586631c71690ae3b75e1",
+      "live_exists": true,
+      "live_sha256": "be1d603aa3e66d129667e37037b83abb2aa5b78fe73c3df7c4fdd6e49443303d",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Floor_Mesh.py.diff",
+      "diff_lines": 121,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Floor_Sections.py",
+      "handoff_sha256": "9c1d4e7c4ca3ec3720c4958681e643613eaf99d3e87a985aad7c1403547de922",
+      "live_exists": true,
+      "live_sha256": "8c8f5ec72427885c93a0ee0c029d9a9db2b5addcde954fdb758aacd4f07aef40",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Floor_Sections.py.diff",
+      "diff_lines": 161,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Floor_Transfer.py",
+      "handoff_sha256": "3342afbdf46d2bd5d532d76baa242b9aa953906dc482471574905d8b52009005",
+      "live_exists": true,
+      "live_sha256": "3342afbdf46d2bd5d532d76baa242b9aa953906dc482471574905d8b52009005",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/SMRF_Generated_Sections.py",
+      "handoff_sha256": "be3bac9c7b594f8fdef7ccf32d5a426a9eee6ac0504781f2397716a2bf900e6d",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Read the current automatic design into diagnostic section mechanics.\n\nNo dimension or reinforcement is selected here. No slab layout is invented.\nThese are local, uniaxial sections: neither a floor force allocation nor a\ndevelopment, biaxial-strength, torsion, joint, or production acceptance check.",
+      "top_level_definitions": [
+        "_positive",
+        "_count",
+        "_cage",
+        "_bars",
+        "_finish",
+        "beam_section_from_design",
+        "column_section_from_design"
+      ]
+    },
+    {
+      "relative_path": "Design/SMRF_Joint_Adapter.py",
+      "handoff_sha256": "ba01570b69b0cb823b793c2ce4d99949b54f7b0bfc4e59c39e8e31df05af4c8e",
+      "live_exists": true,
+      "live_sha256": "ba01570b69b0cb823b793c2ce4d99949b54f7b0bfc4e59c39e8e31df05af4c8e",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/SMRF_Joints.py",
+      "handoff_sha256": "52e438a7f86cfca013d360aa68669ddc48d99d836a1f8e81de1aa665b9685c98",
+      "live_exists": true,
+      "live_sha256": "5cd60bac3fe0722b3fcf62a6d2902c26ef052745c8a1acb04b79cb5463f40368",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Joints.py.diff",
+      "diff_lines": 93,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Nodal_Cuts.py",
+      "handoff_sha256": "7ab8866aa54ea0b3a24ccfa8f8db7236051d655985a339ecd526b521c5c8fc5d",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Native nodal cut actions with an explicit continuous line projection.\n\nEach face retains native resisting actions minus its allocated applied loads.\nThe continuous linear trace is the consistent-mass (L2 dual) representation\nof those nodal actions. Integration conserves the full force and transported\nmoment exactly; local regions still require convergence and independent checks.\nThis is a declared recovery operator, not an empirical equilibrium correction.",
+      "top_level_definitions": [
+        "_validate_inventory",
+        "line_projection",
+        "integrate_line",
+        "recover_shell_trace",
+        "recover_nodal_regions"
+      ]
+    },
+    {
+      "relative_path": "Design/SMRF_Qualification.py",
+      "handoff_sha256": "e3c9deceb4abca42c6ec186a487ad0e27eaa24d7f264dce663959e94446edbed",
+      "live_exists": true,
+      "live_sha256": "e7791f707b3485178fa28e0b7ebf3353371ce48eabba2207c3204dd0898a1799",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Qualification.py.diff",
+      "diff_lines": 90,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Section_Interaction.py",
+      "handoff_sha256": "c063345ea106f6b96c798dcb4fec9152d3871ae9199175e6edd3b7121c4fbc26",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Diagnostic uniaxial nominal N-M section mechanics with explicit force axes.\n\nCoordinates y run from the physical top downward. N is tension positive;\nM is sagging positive about the declared y reference. One concrete strength,\nWhitney block, ecu=.003, EPP steel and lumped reinforcement layers are used.\nThis is not a phi-reduced/code-qualified capacity, biaxial interaction surface,\nhinge backbone, steel-development check or experimental material calibration.\n\nIndependent verification reference: StructurePoint, May 24 2022, Interaction\nDiagram - Tied Reinforced Concrete Column Design Strength (ACI 318-19),\nhttps://structurepoint.org/publication/pdf/Interaction-Diagram-Tied-Reinforced-Concrete-Column-Design-Strength-ACI-318-19.pdf\n\nThe legacy centroid displacement mode can create jumps; ambiguous roots are\nrefused. Generated cages use the explicit circular mode, which subtracts\nonly the bar area inside the block and transports its actual first moment.",
+      "top_level_definitions": [
+        "_number",
+        "_section",
+        "_bar_overlap",
+        "_validate_round_displacement",
+        "section_state",
+        "solve_section_at_axial_force",
+        "demand_from_global_cut"
+      ]
+    },
+    {
+      "relative_path": "Design/SMRF_Shell_Membrane.py",
+      "handoff_sha256": "e0cb7d8a971d72a869678591868eed8121ecebcd8e63753cd2d4a63daf989d84",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Equilibrium kernel for orthogonal reinforcement in a concrete membrane.\n\nThis is the minimum-sum tensile-force solution of a compression-only concrete\nstress field. It is a mechanics kernel, not an ACI strength or detailing check.\nNo strength-reduction factor, concrete softening law, minimum steel, strain\ncompatibility, shear capacity or shell-layer iteration is supplied here.\n\nBasis: Colombo, Della Bella and Bittencourt (2014), section 2.2, cases I-IV,\nhttps://doi.org/10.1590/S1983-41952014000100004 . Actions are per inch of cut.",
+      "top_level_definitions": [
+        "_three",
+        "membrane_equilibrium",
+        "shell_layer_resultants",
+        "correct_steel_depths"
+      ]
+    },
+    {
+      "relative_path": "Design/SMRF_Slab.py",
+      "handoff_sha256": "0419534ef891502ad782a5b869e7c19430484c57b8549d4de565b582179fcbc9",
+      "live_exists": true,
+      "live_sha256": "201cd2e928a6fcf2df0df60f6cff3883d1ac309ab1e8027740370e7967b8306d",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Slab.py.diff",
+      "diff_lines": 29,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Slab_Actions.py",
+      "handoff_sha256": "9415fa0c30f60e50cc120f6d89479e24a1aa5b3225648934845673335e00afc7",
+      "live_exists": true,
+      "live_sha256": "b3442215c6acdc3f7e088cfcca85a31bbdf8574996662f0c62b09a712140b7a8",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Slab_Actions.py.diff",
+      "diff_lines": 28,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/SMRF_Slab_Recovery.py",
+      "handoff_sha256": "009e23769cd9326564438b4987f811f37aee8b6bb0d70ed3b255bf07c0b565f3",
+      "live_exists": true,
+      "live_sha256": "009e23769cd9326564438b4987f811f37aee8b6bb0d70ed3b255bf07c0b565f3",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/SMRF_Slab_Refinement.py",
+      "handoff_sha256": "1dcd06e2209f6e0c73c8046058be052fe434401ec96f25f55e1a5eba5225766e",
+      "live_exists": true,
+      "live_sha256": "1dcd06e2209f6e0c73c8046058be052fe434401ec96f25f55e1a5eba5225766e",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/SMRF_Slab_Reinforcement.py",
+      "handoff_sha256": "03670363631057459fcd1ccd09be00a195c9a37ef9e53f94e8d15fcba61a7893",
+      "live_exists": true,
+      "live_sha256": "03670363631057459fcd1ccd09be00a195c9a37ef9e53f94e8d15fcba61a7893",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/SMRF_Transitions.py",
+      "handoff_sha256": "001114e3c62a4b842a12247036bbfa9e70d77ba6896f693e59278726f701b9a9",
+      "live_exists": true,
+      "live_sha256": "3c5c89fab0e4c29d1c22897524b5b1db6a14f8a092edba3720f26af47010eb2f",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__SMRF_Transitions.py.diff",
+      "diff_lines": 55,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Design/Uniform_Search.py",
+      "handoff_sha256": "b83932b41e49dc6b3abc2e4d781c7f4b8aecc9b60ef42f77c78e6a053e3f45fc",
+      "live_exists": true,
+      "live_sha256": "9f01764be2d8de247b3f1af45b3dac6beb48ea46c5a98687bc5889333c0b544d",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Design__Uniform_Search.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Design/Verification_Integrity.py",
+      "handoff_sha256": "db73336bda8cba307986e7bd2eeeeac4f96fadb85fe4e5942af9453d00c7853b",
+      "live_exists": true,
+      "live_sha256": "db73336bda8cba307986e7bd2eeeeac4f96fadb85fe4e5942af9453d00c7853b",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Design/Verify_Designs.py",
+      "handoff_sha256": "5ffbf60e4c187691020151651b9e5ecc9cd6480d53f919981a073db17e4d6197",
+      "live_exists": true,
+      "live_sha256": "5ffbf60e4c187691020151651b9e5ecc9cd6480d53f919981a073db17e4d6197",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "environment-generation.yml",
+      "handoff_sha256": "f284df243c4418622e94561505bc62656ab583a54bffec67deed36e598f9d18e",
+      "live_exists": true,
+      "live_sha256": "cc0dc310681a51b8783b5b28543a15928e001a34d3e507042112bfc6821accec",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\environment-generation.yml.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Geometry_Overrides.py",
+      "handoff_sha256": "35b5bcb3ea201a5ddbbab02ed03f509412886ee5d76fdb434973124c6d83e154",
+      "live_exists": true,
+      "live_sha256": "418e05e5b003dbd3f4ba9f8959e86108efcfc1acfa11a9a821deb3091fb68e7a",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Geometry_Overrides.py.diff",
+      "diff_lines": 21,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Ground_Motion_Main.py",
+      "handoff_sha256": "f89e6c8fea9ad73760d6a35a3126a7e2b7d60e77d30fd15b739f5fabf658dc55",
+      "live_exists": true,
+      "live_sha256": "d9a17f91acc5154ffd34985e53695f3b58780e6d3af6242ce0258f06f943105b",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Ground_Motion_Main.py.diff",
+      "diff_lines": 31,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Loads/__init__.py",
+      "handoff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "live_exists": true,
+      "live_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Loads/Gravity_Loads.py",
+      "handoff_sha256": "dd216e1bbf67c3fc9bfdef2cfb77c0aa5a177998fa07a55da588925f1d0ebd0f",
+      "live_exists": true,
+      "live_sha256": "dd216e1bbf67c3fc9bfdef2cfb77c0aa5a177998fa07a55da588925f1d0ebd0f",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Loads/Ground_Motion.py",
+      "handoff_sha256": "55861236f826ecf03e1391d77ca31799c9dfd649fd2cd72f18831a0a18c36371",
+      "live_exists": true,
+      "live_sha256": "7220869785e63c876f4c32921a9f197facf15b32af3feb64497b8e53c2c354ab",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Loads__Ground_Motion.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Loads/Seismic_ELF.py",
+      "handoff_sha256": "a0aefe59b8974abd76ff3cda179b7746ae758653e1beb60b003db6f786536374",
+      "live_exists": true,
+      "live_sha256": "a0aefe59b8974abd76ff3cda179b7746ae758653e1beb60b003db6f786536374",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Main.py",
+      "handoff_sha256": "7ea2bf90a6b6336961a3187ff469ec0c24ece6fe704fa69224efa11c415c7cc0",
+      "live_exists": true,
+      "live_sha256": "7ea2bf90a6b6336961a3187ff469ec0c24ece6fe704fa69224efa11c415c7cc0",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Model/__init__.py",
+      "handoff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "live_exists": true,
+      "live_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Model/Analysis_Profile.py",
+      "handoff_sha256": "3ce0e4f623e449d5739e1bd8f440c6a8e909743c4c789ca66a2c22359b5da2d5",
+      "live_exists": true,
+      "live_sha256": "3ce0e4f623e449d5739e1bd8f440c6a8e909743c4c789ca66a2c22359b5da2d5",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Model/Build_Model.py",
+      "handoff_sha256": "f4a478c3c07469bdf6c5e182050d30af62abebe709b9cc45eebc8ea73d16f333",
+      "live_exists": true,
+      "live_sha256": "edbbba3ab2b02beff703ae61c8f3c3a4fc7a0495001f5942d576c047f750456b",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Model__Build_Model.py.diff",
+      "diff_lines": 11,
+      "category": "production_source_or_config",
+      "content_status": "documentation_or_format_only"
+    },
+    {
+      "relative_path": "Model/Deformation_Ownership.py",
+      "handoff_sha256": "81cbd6e1d65f93cb88e21320eaf48414f4447ce2d4f79d17ae7ff63de3cd34e9",
+      "live_exists": true,
+      "live_sha256": "81cbd6e1d65f93cb88e21320eaf48414f4447ce2d4f79d17ae7ff63de3cd34e9",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Model/IMK_Calibration.py",
+      "handoff_sha256": "ec691aa2fcf1c45b806ef0d830c546cc7aa6fb8e913460e290914e1d43cf4f1b",
+      "live_exists": true,
+      "live_sha256": "a032e31b4dd5bf42d3cefc2f5ac5be72331e69c682d1c8ea274f656ca89ba2a4",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Model__IMK_Calibration.py.diff",
+      "diff_lines": 148,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Model/IMK_Hinges.py",
+      "handoff_sha256": "944b865dcc782212bd3c91161a601c4e524733ef51565d1b5f8ce28fb23eacfc",
+      "live_exists": true,
+      "live_sha256": "86a2bc0b05ebce8728ce620649dbadd0d04899fb37334b559dc4eaaed1668e3f",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Model__IMK_Hinges.py.diff",
+      "diff_lines": 183,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Model/IMK_Materials.py",
+      "handoff_sha256": "a2a554eed4eafe8d47a69914d9a32f2aee27a875bfdb2edfef07400ce9b74667",
+      "live_exists": true,
+      "live_sha256": "a2a554eed4eafe8d47a69914d9a32f2aee27a875bfdb2edfef07400ce9b74667",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Model/Joint_Panel.py",
+      "handoff_sha256": "562d6005e98bd8caacad4c53fe6b1df36f5072b94130641eae0a49dd5f5b291a",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "production_source_or_config",
+      "content_status": "handoff_only",
+      "docstring": "Diagnostic 3D scissors panel with two explicitly calibrated IMKPinching laws.\n\nGlobal Z is vertical. This small-rotation, orthogonal joint-shear idealization\nis deliberately separate from the production frame builder. No member slip,\njoint strength, stiffness, mass, or pinching parameters are inferred here.\nSee JOINT_PANEL.md for kinematics, work conjugacy, and applicability limits.",
+      "top_level_definitions": [
+        "_positive",
+        "JointGeometry",
+        "JointTags",
+        "JointShearCalibration",
+        "build_joint_panel",
+        "joint_response",
+        "clear_span_between_panels"
+      ]
+    },
+    {
+      "relative_path": "Model/Joint_Springs.py",
+      "handoff_sha256": "17fb6a04e919d389e984e122811dc3f73420517001b2e0fb1edc0914854c19e7",
+      "live_exists": true,
+      "live_sha256": "17fb6a04e919d389e984e122811dc3f73420517001b2e0fb1edc0914854c19e7",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Model/Member_Bar_Layers.py",
+      "handoff_sha256": "1c324006391f76a61b142e77367962eee43a80e1e7e89bc1016e419b81dbc2d2",
+      "live_exists": true,
+      "live_sha256": "48fd5bc5ff05b772b599ac959478b4fd064d83705360d90599961c63d7adf47f",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Model__Member_Bar_Layers.py.diff",
+      "diff_lines": 174,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Model/Member_Groups.py",
+      "handoff_sha256": "3443dd4ed936d20b1a9e1f99f745dbbc3ca52e549013359125bbc19cf29e145f",
+      "live_exists": true,
+      "live_sha256": "a88727908479e133595e9425d00b591d9605c2e21f3152bfff60b94b1ca3d554",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Model__Member_Groups.py.diff",
+      "diff_lines": 581,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Model/Member_Properties.py",
+      "handoff_sha256": "ab2c2ed6b59d4edb1d4a38576cdf408b11207f9e95ec62d81b5aaaee42396fda",
+      "live_exists": true,
+      "live_sha256": "dfd055b54249e753c12881fd3b8e8de28e39a3c5750108b44aa255ca02ae8b66",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Model__Member_Properties.py.diff",
+      "diff_lines": 16,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Model/Roof_Extension.py",
+      "handoff_sha256": "1c94fe1b3fd93bb7b3ab0212a8aa4403afcda2bd409aa042ad3ce28f43c52ee3",
+      "live_exists": true,
+      "live_sha256": "ac4637f0409a31ffc159239bea2877fa3f0f770432bde6a04e75ec9bdd06ceaf",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Model__Roof_Extension.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "Model/Sections.py",
+      "handoff_sha256": "e60a257cf6770455de801ccc3809acd8fdbb7cb241b7fc8ed2de5b88de74c720",
+      "live_exists": true,
+      "live_sha256": "407690cf181298557510c70faa0a358335b6504aa1a78d6a045e7829c6897687",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Model__Sections.py.diff",
+      "diff_lines": 73,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "pilots/case0041BeamTip/run_connection.py",
+      "handoff_sha256": "fb32eb8aa877833bee0f5b685e5400bfe229adabda090064fae5aa0f3198fe7f",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Case 0041 n=10: bottom pin, column-top X roller, vertical beam-tip actuator.\n\n2D DOFs are (global X translation, global Z translation, in-plane rotation).\nRun directly to verify the revised constraints and write setup evidence.",
+      "top_level_definitions": [
+        "analysis_setup",
+        "build",
+        "snapshot",
+        "verify"
+      ]
+    },
+    {
+      "relative_path": "pilots/case0041Fema461/inputs/fixture.json",
+      "handoff_sha256": "b7e1ca1b271908e3016be3dd8a4fe55e90252b9e7cfd3c6edab62bba93b441f4",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only"
+    },
+    {
+      "relative_path": "pilots/case0041Fema461/inputs/global_parameters.json",
+      "handoff_sha256": "a754902d7f1674fbb5ab3bf2c661433e7b5fb1a6c9507b2ef832a101056b493d",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only"
+    },
+    {
+      "relative_path": "pilots/case0041Fema461/plot_results.py",
+      "handoff_sha256": "8e9417aae18e117744604ba27cedd20b5bf1dc02727e03c9fd2ffa699e5256b8",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Render the frozen joint fixture and the FEMA/CUREE numerical responses.",
+      "top_level_definitions": [
+        "read_series",
+        "setup_figure",
+        "draw_column",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "pilots/case0041Fema461/prepare_inputs.py",
+      "handoff_sha256": "21abc47bbeaf5d0e0aa9cf3d3caae5750c2db289e81ce1e7e42b1177c4b0e13d",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Freeze case 0041 joint 37 source records; never mutate the SSD run.",
+      "top_level_definitions": [
+        "main"
+      ]
+    },
+    {
+      "relative_path": "pilots/case0041Fema461/run_connection.py",
+      "handoff_sha256": "5efcec3458388a2555ed0188af31c1474b53b8992096215379e23841b07e30eb",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Case 0041 joint 37: isolated FEMA 461 and CUREE basic-history diagnostics.\n\nRun in OpPy: python -B pilots/case0041Fema461/run_connection.py --output <new directory>\nThe frozen inputs are sufficient; neither the SSD nor production model is imported.",
+      "top_level_definitions": [
+        "material_command",
+        "build",
+        "snapshot",
+        "run",
+        "cycles_to_targets",
+        "fema_cycles",
+        "curee_cycles",
+        "reference_from_monotonic",
+        "material_checks",
+        "condensed_stiffness",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Plotting/__init__.py",
+      "handoff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "live_exists": true,
+      "live_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Plotting/Plot_Results.py",
+      "handoff_sha256": "9c476d3fe0a8f7eb45bf407b6dbce9aec277f25013d12c22269457e759493ae2",
+      "live_exists": true,
+      "live_sha256": "a1f8253ba382130f397e4ebb627b54e0e2d2961debe6e85a0141b9dc0f1fde0a",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Plotting__Plot_Results.py.diff",
+      "diff_lines": 0,
+      "category": "production_source_or_config",
+      "content_status": "newline_or_bom_only"
+    },
+    {
+      "relative_path": "RC_Design_Check.py",
+      "handoff_sha256": "84bed79672a1421a412558e48892edee2a8c232561fbcc37e237143b1077cf08",
+      "live_exists": true,
+      "live_sha256": "e4ab6437d673d2eb51cb835dc669e30a5749ec604ca4378b7df6ef7be81e7deb",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\RC_Design_Check.py.diff",
+      "diff_lines": 81,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Redesign.py",
+      "handoff_sha256": "e8ead8516ed837d93b4d6f648eb64c7602bcec9a790c72aa63dc64fea1b61941",
+      "live_exists": true,
+      "live_sha256": "2a7179d456f8ad547f2a06c9f39d9079bf6ce1b6ec4060c01c531556545aa1be",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Redesign.py.diff",
+      "diff_lines": 132,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "Reference_Specimens/park_ruitong_1988/digitize_fig16a.py",
+      "handoff_sha256": "1e263063ce755a60879fc80bcfd395f1d77b1352a28d4ac89b9ede27c3c4a276",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "reference_specimen_research",
+      "content_status": "handoff_only",
+      "docstring": "Traceable pixel audit of Fig. 16(a) of Park and Ruitong (1988): axis calibration with skew, tick marks,\nthe loop peaks (reversal points), the zero-force and zero-displacement crossings of every branch, and the\nunloading chords, each with its pixel coordinates (Unit 1 review, 2026-09-28: \"Trace each branch from its\nnumbered reversal through both axis crossings, save pixel coordinates and the axis transformation, and have the\ncrossing identity checked before fitting\").\n\nInput: a crop of the Unit 1 panel from a 400 dpi render of the bulletin's scanned page 267 (pdftoppm). The\nscan is bilevel; dark pixels (< 128) are ink. Nothing in the plotted response is altered.\n\nMethod\n  1. Axes: the row with the longest horizontal ink run is the Delta axis, the column with the longest vertical\n     run the V axis; each is fitted as a line through its ink pixels (least squares), which captures the scan's\n     skew. Their intersection is the origin.\n  2. Ticks: short ink segments perpendicular to an axis, centred on it, with no continuation beyond a few\n     pixels; matched by order to the printed values (-120 .. 120 mm every 30, +-30/60/90 kN). The affine map\n     pixel -> (Delta, V) is a least-squares fit to the ticks and the origin; its residuals are reported.\n  3. Peaks: for each run of the provisional v1 list, the reversal point is the extreme-Delta ink pixel inside\n     a window around the v1 reading (a displacement-controlled reversal is the loop's extreme displacement).\n  4. Branches: from each reversal the unloading branch is followed pixel by pixel toward zero force (a greedy\n     ",
+      "top_level_definitions": [
+        "load",
+        "curve_ink",
+        "longest_run",
+        "find_axes",
+        "_tick_candidates_delta",
+        "_tick_candidates_v",
+        "_consensus_ticks",
+        "find_ticks",
+        "fit_affine",
+        "to_phys",
+        "to_pixel",
+        "axis_crossings",
+        "_runs_in",
+        "find_peak",
+        "_chains",
+        "tip_interval",
+        "trace_branch",
+        "branch_observables",
+        "write_v2",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Reference_Specimens/park_ruitong_1988/make_baseline_report.py",
+      "handoff_sha256": "6283d90e4fee68a8d68646188fbc0457e71e430897f73f316a004f414e993e70",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "reference_specimen_research",
+      "content_status": "handoff_only",
+      "docstring": "Write UNIT1_BASELINE_REPORT.md: the baseline reproduction against the digitized observations, the\nnumerical checks and the discrepancy list (next-calibration package, first delivery).\n\nusage: python make_baseline_report.py <output root with example_protocol/ and paper_protocol/>",
+      "top_level_definitions": []
+    },
+    {
+      "relative_path": "Reference_Specimens/park_ruitong_1988/make_comparison_report.py",
+      "handoff_sha256": "a73fe41736837569d3ae3ee5e516e7b3df5c26973a3ad1f8e2477d8ec276f583",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "reference_specimen_research",
+      "content_status": "handoff_only",
+      "docstring": "Write UNIT1_COMPARISON_REPORT.md: the four-case untuned input comparison against the version-2 observations\nunder the fit criteria (2026-09-28), with the observation and drawing audits, the coupon check, the\nnumerical acceptance and the completeness status of every run. No parameter is fitted here.\n\nusage: python make_comparison_report.py <output root> [<coupon dir>] [<observation audit dir>]",
+      "top_level_definitions": [
+        "load_run",
+        "cycle_runs",
+        "observed_peak",
+        "peak_errors",
+        "metrics"
+      ]
+    },
+    {
+      "relative_path": "Reference_Specimens/park_ruitong_1988/pr1_unit1.py",
+      "handoff_sha256": "11a69d015e76d5935702d434003af513106de03c9052f6c8a62b0c83ecfce4f3",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "reference_specimen_research",
+      "content_status": "handoff_only",
+      "docstring": "Park and Ruitong (1988) Unit 1: OpenSeesPy port of the OpenSees PR1 example, its checks, the fixed\nexperimental-history mode and the untuned input-correction cases (2026-09-27; revised 2026-09-29 after\nthe Unit 1 review of 2026-09-28).\n\nIsolated reference-specimen diagnostic. Nothing here touches the project frame. The model is the official\nOpenSees example PR1.tcl (N. Mitra, 16 Feb 2003, opensees.berkeley.edu/OpenSees/manuals/usermanual/1178.htm)\nwith its helper procedures procMKPC.tcl, procUniaxialPinching.tcl and procRC.tcl (pages 1179-1181) ported\nline for line; every input is listed in UNIT1_INPUT_MANIFEST.md with its source and status. Units: N, mm,\nMPa (the example's). Forces are reported in kN.\n\nLoading protocols:\n  example     procRC: displacement cycles 0 -> +y -> -y -> 0 at 0.1, 10, 10, 30, 30, ... 105, 105 mm (frozen control)\n  paper       one load-controlled cycle to +-0.75 V2, Delta_y = 4/3 x the mean displacement reached, then two\n              cycles at each of mu = 2 .. 7 x that model-derived Delta_y: SELF-SCALED, a diagnostic only, not an\n              experiment-matched comparison (each model reaches a different demand)\n  experiment  the load-controlled +-0.75 V2 = +-54.45 kN cycle, then FIXED displacement amplitudes reconstructed\n              from the test (EXPERIMENT_AMPLITUDES_MM); the model's own yield displacement is reported, never used\n              to rescale the history; --amplitude-shift applies the +-3 mm reading bound coherently to every peak\n\nInput cases (review: no bond, pinching, damage or stiffness parameter is fitted in this matrix):\n  e",
+      "top_level_definitions": [
+        "mkpc",
+        "interface_shear_material",
+        "beam_steel_material",
+        "beam_confinement",
+        "_beam_section",
+        "build",
+        "_reactions",
+        "example_targets",
+        "AnalysisFailure",
+        "Recorder",
+        "_residual_from",
+        "_polish",
+        "_record_step",
+        "_analyze_step",
+        "_failure_record",
+        "run_displacement_cycles",
+        "_load_control_cycle",
+        "run_example_protocol",
+        "run_paper_protocol",
+        "run_experiment_protocol",
+        "_cycles_from_phases",
+        "_interp_crossing",
+        "_branch_metrics",
+        "evaluate",
+        "observed_file",
+        "export",
+        "run",
+        "reflection_map",
+        "compare",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Reference_Specimens/park_ruitong_1988/steel_coupon_check.py",
+      "handoff_sha256": "4fc3f324fc9ecd119076664bb12d1ac93b8a071c24da3148a5618317c7387338",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "reference_specimen_research",
+      "content_status": "handoff_only",
+      "docstring": "Coupon check of the beam-steel materials against the measured D16 properties (paper Table 2(b), Fig. 5),\nindependent of the specimen model (Unit 1 review, 2026-09-28: \"implement and independently check the\nmeasured yield plateau and subsequent hardening, not just a larger Steel02 ratio\").\n\nMaterials checked: the example's Steel02 (bilinear, b E = 488.5 MPa, no plateau); ReinforcingSteel with the\nmeasured fy, fsu, Es, Esh, eps_sh and eps_su at the centre and the bounds of its declared uncertainty (Fig. 5\nends at 0.055 strain, so the strain at fsu is not measured; 0.288 is the fracture strain); Dodd_Restrepo as a\nsecond candidate with the same measured inputs and the Fig. 5 reading at 0.05 strain as its intermediate point.\nMonotonic checks: plateau stress at 0.012 (the measured face-bar strain at mu = 6, Fig. 20a), hardening onset,\ninitial hardening tangent, stress at 0.05 against the Fig. 5 reading, sensitivity to eps_su. A cyclic history\nis exported for review; the cyclic plateau shortening and reversal rules are the material's own assumptions and\nno coupon test of them exists in the paper.\n\nusage: python steel_coupon_check.py <output dir>",
+      "top_level_definitions": [
+        "materials",
+        "trace",
+        "cyclic_strains",
+        "at",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "Run_Naming.py",
+      "handoff_sha256": "fae376b64c9b93463be6eae42be1fab3c83d62e3ca21d2ea0f452066597bb8a6",
+      "live_exists": true,
+      "live_sha256": "fae376b64c9b93463be6eae42be1fab3c83d62e3ca21d2ea0f452066597bb8a6",
+      "status": "identical",
+      "category": "production_source_or_config",
+      "content_status": "identical"
+    },
+    {
+      "relative_path": "Structure_Parameters.py",
+      "handoff_sha256": "b1e9eac637bd168179ee15e38ce31a82a851c5eeca24ee895a86804b18111e4e",
+      "live_exists": true,
+      "live_sha256": "499041f9f6406504b33e535ab6026905ef6b873ecb2341fe5221a1bf79309bd0",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\Structure_Parameters.py.diff",
+      "diff_lines": 365,
+      "category": "production_source_or_config",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "tools/_story_strength_reference.py",
+      "handoff_sha256": "ae95cc0b2d085e8e8b1b4cb2f3c33e89fbf290d8b555592787a94e60e02a0ab0",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Independent first-order plastic-limit reference with a kinematic dual.\n\nNo repository imports. Member nominal capacities are frozen observations, not\nindependently calibrated properties. Planar lines are directional checks of the\n3D candidate. Column axial redistribution is recovered and screened explicitly.",
+      "top_level_definitions": [
+        "column_interaction",
+        "end_map",
+        "local_statics",
+        "solve_pair",
+        "benchmark",
+        "Reference"
+      ]
+    },
+    {
+      "relative_path": "tools/assert_torsional_strength.py",
+      "handoff_sha256": "3514e8a1d0d66ce52a1a982ee5fd94de16d0ddcc797eb09a4d941e0469b6fef9",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Apply an explicitly adopted M1 research method to a completed per-design review.\n\nWrites a qualification ADDENDUM in a new directory. It never rewrites the\nhistorical design, its input identity, or its PROBE assertions. The legacy\nbeam-proxy verification Boolean is not the assertion adopted here.",
+      "top_level_definitions": [
+        "digest",
+        "read",
+        "validate_assertion",
+        "checked_fraction_rows",
+        "replace_m1",
+        "apply_assertion"
+      ]
+    },
+    {
+      "relative_path": "tools/audit_case0041_beam_rotations.py",
+      "handoff_sha256": "bc9fcee00dd1f4abd45ecbde5c55b2c816cce19c92308da44bd19c63f387639f",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Recalibrate the retained case 0041 hinge without changing frozen run evidence.",
+      "top_level_definitions": [
+        "parameters_for"
+      ]
+    },
+    {
+      "relative_path": "tools/audit_case0041_coordinates.py",
+      "handoff_sha256": "ba9b32fff4e0ac71477d5ae87892a0cf80b38e27eecdca9fae2466b38d77bb64",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Read-only production audit; OpenSees probes write evidence under outputs.",
+      "top_level_definitions": [
+        "build3d"
+      ]
+    },
+    {
+      "relative_path": "tools/audit_case0041_rotation_capacity.py",
+      "handoff_sha256": "3b25eaac9b95b4b76fd66f572642215004b835f7a563882cbd39fcc3816c468d",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Reproduce beam 103 rotation regression and diagnose capping displacement.\n\nDiagnostic variants are isolated in memory; production calibration is not changed.",
+      "top_level_definitions": [
+        "solve_to_cap",
+        "table"
+      ]
+    },
+    {
+      "relative_path": "tools/build_lhs_pilot.py",
+      "handoff_sha256": "f22125df16caa53672546bed8aef3aa5bacb8c5c0f04c0e0734d43e0ed2b17af",
+      "live_exists": true,
+      "live_sha256": "ecc713444de0f3fdbba680e68e917fff24dcadffce53e1c74a968bba49ccd1f1",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\tools__build_lhs_pilot.py.diff",
+      "diff_lines": 145,
+      "category": "research_tool_or_pilot",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "tools/calculate_case0041_chord_rotations.py",
+      "handoff_sha256": "39ee1e6a6642219c3537911d72f40e8fb33f428c063ee162104912f7c3159712",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Member chord rotations at spring yield/cap in the n=10 connection fixture.",
+      "top_level_definitions": [
+        "snapshot"
+      ]
+    },
+    {
+      "relative_path": "tools/calibrate_case0041_separate_deterioration.py",
+      "handoff_sha256": "977be1babb58562470d3559da5135aa311b36875ee743011c23a932044d89fc5",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Separate conditional monotonic and cyclic fits, with identifiability checks.\n\nThis produces a partial parameter set, not an installable production calibration.\nThe monotonic target is a synthetic section analysis. Two cyclic features are\nborrowed from another specimen and do not identify all cyclic deterioration modes.",
+      "top_level_definitions": [
+        "monotonic_fits",
+        "command",
+        "simulate",
+        "fit_strength",
+        "identifiability",
+        "main",
+        "render"
+      ]
+    },
+    {
+      "relative_path": "tools/case0041_l_section_mechanics.py",
+      "handoff_sha256": "cc3d9130cf30c828b77e07855b26b2384e5ea73691e3d939f66a5a45ed4a03f1",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Provisional monotonic, uniaxial L-section mechanics; kip-inch units.\n\nGeometry and steel layers come from case 0041. Material envelopes, effective\nconfinement, and a finite hinge length are explicit assumptions, not test fits.",
+      "top_level_definitions": [
+        "confinement",
+        "concrete",
+        "make_fibers",
+        "section_curve"
+      ]
+    },
+    {
+      "relative_path": "tools/check_case0041_cyclic_trial_material.py",
+      "handoff_sha256": "947194d98b4ee30469084d44a28a3205144e24ec588ba89aad5a21af29968957",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Replay saved spring rotations to distinguish material-domain failure from FE convergence.",
+      "top_level_definitions": [
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/check_case0041_paper_links.py",
+      "handoff_sha256": "289db01284de881ebcbe20e13d14c588d553e04d13a388e66d7c2df2c2cdb07e",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "",
+      "top_level_definitions": [
+        "Links"
+      ]
+    },
+    {
+      "relative_path": "tools/estimate_case0041_literature_parameters.py",
+      "handoff_sha256": "ec5bbbdae0810a355c618815f002daad8511c1d19c2ab795f6fda2e15a4f8e36",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Literature screening and explicitly conditional IMK strength-deterioration study.\n\nThis is not a full specimen fit, experimental validation, or production material.\nThe borrowed repeated-cycle loss is an approximate reading of a published plot.",
+      "top_level_definitions": [
+        "simulation",
+        "conditional_fit",
+        "two_feature_fit",
+        "main",
+        "plot",
+        "render_report"
+      ]
+    },
+    {
+      "relative_path": "tools/extract_imk_backbone.py",
+      "handoff_sha256": "fd7597a432de4b625b40f499a9dab98c856aa9383af2c28cc26e5a016a0fe1eb",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Fit asymmetric pre-capping IMK branches from paired monotonic spring recorders.\n\nColumn 0 is domain time, column 1 is rotation (rad) or moment (kip-in).\nStatic domain time can reverse: rows are paired without sorting by time.\nThis identifies an equivalent simulated backbone, not an experimental calibration.",
+      "top_level_definitions": [
+        "read_branch",
+        "fit_branch",
+        "command_from_parameters",
+        "extract",
+        "write_report",
+        "plot_fits",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/finalize_case0041_paper_catalog.py",
+      "handoff_sha256": "89ec077e47ebe42299a7de0ba5cd45a7d40f83987bc9452879f3c5d914ac6063",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "",
+      "top_level_definitions": []
+    },
+    {
+      "relative_path": "tools/gather_case0041_calibration_papers.py",
+      "handoff_sha256": "6325b0e449422f8aebf296a12b968543514e4cdd0c8697ba173cd8da1e6a4c6e",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Collect verified literature leads only; does not modify or calibrate models.",
+      "top_level_definitions": [
+        "fetch"
+      ]
+    },
+    {
+      "relative_path": "tools/package_case0041_research_handoff.py",
+      "handoff_sha256": "39229749157acd0bfff58f801fb27f47cfcdb03967a676078b13a549d0c227a9",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Build an additive research handoff outside the repo and verify its SSD copy.",
+      "top_level_definitions": [
+        "LocalLinks",
+        "digest"
+      ]
+    },
+    {
+      "relative_path": "tools/package_hysteresis_review.py",
+      "handoff_sha256": "dc346f967b1a65dbd2b93592fc25a668f349dfad8b9721e03b2f5f64b70ef579",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Package an already-generated hinge review as a PDF and a portable ZIP.",
+      "top_level_definitions": [
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/plot_case0001_beam_shear.py",
+      "handoff_sha256": "82a997d1a558a4895d322479a3abcb727ce09cb71e85177c88d94f51020a8b05",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Recover beam 89's shear envelope from frozen member loads and end extrema.\n\nNo analysis rerun. Since element transverse loads are constant during NTHA,\nV(x,t)=V_i(t)-W(x); spatial extrema follow the end-i extrema exactly if the\nother end satisfies the same equilibrium. These are envelopes, not one instant.",
+      "top_level_definitions": [
+        "read",
+        "digest"
+      ]
+    },
+    {
+      "relative_path": "tools/plot_case0041_backbone.py",
+      "handoff_sha256": "75542bd26c61cfee8730305ea742ac05587f4209a59bb6ff9abccb0f4502aa1e",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Plot the actual installed, virgin local-y IMK backbone of case 0041.\n\nEvaluate each monotonic direction independently from its original material\ncommand; this is an isolated constitutive evaluation, not a building NTHA.",
+      "top_level_definitions": [
+        "find"
+      ]
+    },
+    {
+      "relative_path": "tools/plot_case0041_beam_tip_setup.py",
+      "handoff_sha256": "dcccd684216ed8389ff71a4b77f5775460ffa65a24165d0471cbd9a681e6fcda",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Draw the revised connection boundary conditions using matplotlib.",
+      "top_level_definitions": []
+    },
+    {
+      "relative_path": "tools/plot_case0041_section.py",
+      "handoff_sha256": "d65a2b02204db76544c5cbb6281113acc1deb5c73406bf124b053a2f13659b3e",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Dimensioned effective concrete section of case 0041 beam 103.",
+      "top_level_definitions": [
+        "horizontal",
+        "vertical"
+      ]
+    },
+    {
+      "relative_path": "tools/plot_case0041_stiffness_zoom.py",
+      "handoff_sha256": "0ce5fe45b64e3f7bd19ec38ec167c38c5ad8b84028f947cca5fda178e588219b",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Compare full IMK-backbone scale with the actual spring elastic range.",
+      "top_level_definitions": []
+    },
+    {
+      "relative_path": "tools/plot_case0041_structure_and_backbone.py",
+      "handoff_sha256": "a1dd6c9d60c52c5f86d02c8b50a5cee1bd1acf597665e06e2696b03a2ea61314",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Place saved global earthquake response beside the local IMK backbone.",
+      "top_level_definitions": [
+        "digest"
+      ]
+    },
+    {
+      "relative_path": "tools/plot_case0041_translational_backbone.py",
+      "handoff_sha256": "8ad655abbcd8eef170485f84d8231543ccabf13264d2d22f72ec2069eaae0b27",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Transform the local hinge backbone by F=M/L, displacement=L*rotation.\n\nThe constant coordinate transform preserves incremental work. It is an\nequivalent hinge curve, not a simulated beam-tip or building response.",
+      "top_level_definitions": []
+    },
+    {
+      "relative_path": "tools/render_case0041_l_section_report.py",
+      "handoff_sha256": "37242ded65bfba6ea33e2e57e8762160ae80b2d0993c23309aba003511b26e0a",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Readable HTML report for the provisional L-section calculation.",
+      "top_level_definitions": [
+        "table"
+      ]
+    },
+    {
+      "relative_path": "tools/render_case0041_n10_report.py",
+      "handoff_sha256": "7776207e46a7aee95f72fd9fe2d34b599f7d6570c2270ed5d3ed4bd3d53d13c0",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Render the verified calculation JSON with bundled Python/reportlab.",
+      "top_level_definitions": [
+        "p",
+        "title",
+        "calc",
+        "fmt",
+        "table",
+        "footer"
+      ]
+    },
+    {
+      "relative_path": "tools/replay_slab_refinement_failure.py",
+      "handoff_sha256": "ea91f2a36c1a064d2691749d3a74a7587ef418cbbf8710c411a6e41a104406d6",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Replay one saved slab-refinement failure at its exact sections and thickness.",
+      "top_level_definitions": [
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/report_case0041_n10.py",
+      "handoff_sha256": "2a8a4169e4d1e53f9ec25dc60467b92c394e0672eb320f6ef2bfe2413acdbeea",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Reproduce case 0041 beam 103 backbone at n=10; run with OpPy, python -B.",
+      "top_level_definitions": [
+        "parameters"
+      ]
+    },
+    {
+      "relative_path": "tools/review_cage_geometry.py",
+      "handoff_sha256": "77178dd63480a94fa3d113be62a948986ed1f43bc9d4af5b0cc1d58f29f843f3",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Cage geometry and joint assembly review of one design record (2026-09-27 detailing review, items 1-2).\n\n    python -m tools.review_cage_geometry --design <case>/design.json --output-root <folder>\n\nWrites cage_geometry.json, cage_geometry.md and three drawings: the column and beam cages with their\nhoops, crossties and hook orientations for two successive sets; the joint plan with the beam bars threaded\nbetween the column bars; and the joint elevation with the stacked orthogonal layers and the slab mats.\nRead-only on the record. Everything comes from Design/SMRF_Cage_Geometry.",
+      "top_level_definitions": [
+        "markdown",
+        "draw",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/review_calibration_hysteresis.py",
+      "handoff_sha256": "5aaae7c6bc5b9c8ee0b3809892ff980a9751d9379f7e4c4f97caf89a1f739738",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Read-only SSD review: one maximum-damage hinge per retained calibration case.\n\nUses the selected passing calibration trial. Where none exists, the highest-scale\nusable trial is shown as diagnostic evidence, never as a successful calibration.\nOriginal analysis trees are never written. No structural analyses are launched.",
+      "top_level_definitions": [
+        "read",
+        "write",
+        "inventory",
+        "render",
+        "gallery",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/review_composite_sections.py",
+      "handoff_sha256": "e66af3190a81a79009e798d7079cab75fcb56435b8b8b477b08f70d576bb4f6a",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Reproducible composite-section benchmark and fixed-candidate gravity review.\n\nThis exports diagnostic evidence only; it does not change a design or qualify\nmember reinforcement. Run in a dedicated process with an empty OpenSees domain.",
+      "top_level_definitions": [
+        "save",
+        "sha",
+        "analytical_cantilever",
+        "run_review"
+      ]
+    },
+    {
+      "relative_path": "tools/review_coupled_gravity.py",
+      "handoff_sha256": "63bfa84e861d98ba9a923f2e72189bae7c9497ac474ab317a4d16c17e10be597",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Run bounded coupled gravity diagnostics from a saved design in a NEW folder.\n\nDoes not resize, qualify, modify or resume the source design or any dataset.\nExample (from project root):\n  python 'RC Structure/tools/review_coupled_gravity.py' --design-file ... --output-dir ...",
+      "top_level_definitions": [
+        "run_review",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/review_coupled_inplane_restraint.py",
+      "handoff_sha256": "da78f1548f5448e1bfc80e5ff415710daa2eadad1182d55d8fe334d6db9a0ce6",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Matched in-plane restraint comparison inside the coupled shell/web/column assembly.\n\nThe bare-frame variants of 2026-09-24 showed that releasing the frame's\nrigid diaphragm moves column-end moments by about a third of the governing\ndemand. This review asks the converse question in the coupled model itself:\nwith the same webs, offsets, columns, materials and loads, what does a\ndeclared rigid in-plane restraint do to the column actions, to the\nwhole-floor composite section actions and to the floor deformation?\n\nEvery run is a fresh coupled solve. The finite-membrane Transformation run\nmust reproduce the saved coupled reference column forces exactly; the\nfinite-membrane Lagrange run measures the handler alone; the restrained runs\nuse the same handler. Signed column-end moments are compared at both ends\nof every column against the anchor and against the saved bare-frame\nsolution, each normalized by the saved governing design moment at that end\n(not by the changed moment and not a capacity check). Whole-floor cuts are\nrecovered where the free bodies are defined (a cut cannot pass through a\nconstrained node, so the rigid-floor cuts are recorded as undefined).\n\nThese are attribution experiments only; nothing here corrects a demand or\nselects a floor idealization.\n\n``--summarize`` post-processes a finished ``--output`` folder instead of\nsolving: it reads the saved per-variant column-end and cut rows, writes\n``metrics.json`` (paired effects, gap distributions, worst ends, mesh\nsensitivity of every effect between the solved meshes, floor rigid-motion\nfits, cut resultants) and prints ",
+      "top_level_definitions": [
+        "sha",
+        "save",
+        "rigid_fit",
+        "governing_moments",
+        "column_rows",
+        "floor_fits",
+        "all_cuts",
+        "cut_rows",
+        "run_review",
+        "percentiles",
+        "load_rows",
+        "summarize"
+      ]
+    },
+    {
+      "relative_path": "tools/review_floor_frame_assumptions.py",
+      "handoff_sha256": "a051f29ca84f631d8c0ff5b1e855f9e82a64b7747f567a4e8bbfe1c121186b3d",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Controlled bare-frame assumption checks for the fixed wider diagnostic.\n\nThese are sensitivity experiments, not alternative approved design choices.\nAll variants retain the same saved loads and are compared at every column end.",
+      "top_level_definitions": [
+        "sha",
+        "save",
+        "frame",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/review_gravity_transform_sensitivity.py",
+      "handoff_sha256": "0110338063f4f9b026a94e754811f6345172ef2c12c0d234360164ea3e70e1a7",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Isolate column PDelta versus Linear in the unchanged wider bare frame.\n\nAn isolated diagnostic process substitutes only the requested column transform\nwhile retaining the saved transfer, diaphragm and gross stiffness. No coupled\nforces are transplanted, no design demand is corrected, and no gate is set.",
+      "top_level_definitions": [
+        "sha",
+        "write",
+        "frame",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/review_slab_refinement.py",
+      "handoff_sha256": "b5f31fcf50f1f9e24ecdd6d5d1196ae42c227c2220f567af1e42d459b55ad7a8",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Reproduce the fixed desktop candidate through the integrated refinement path.\n\nAll loads are solved separately. Original designs and benchmark arrays are\nread-only; raw solutions, failed attempts and source hashes go to a new folder.",
+      "top_level_definitions": [
+        "sha",
+        "write",
+        "main"
+      ]
+    },
+    {
+      "relative_path": "tools/review_torsional_strength.py",
+      "handoff_sha256": "39919d69548a210569b392657af41888f26776ad101eecec9042017782d59dfe",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Review M1 on a saved uniform design, without changing qualification flags.\n\nRun from RC Structure:\n  python tools/review_torsional_strength.py outputs/CASE/design.json NEW_OUTPUT\n\nBoth 65- and 129-point column P-M approximations are solved. The sidecar is\nbound to the exact input bytes and reviewer source. A completed calculation is\nsupporting evidence for a scoped research-method decision, not a person's\napplicability assertion or production release. Outputs must be new directories.",
+      "top_level_definitions": [
+        "validate_input",
+        "run",
+        "compare_refinement",
+        "review"
+      ]
+    },
+    {
+      "relative_path": "tools/run_case0041_beam_tip_pushover.py",
+      "handoff_sha256": "ad64c8f2f86707604b9bc2cdb2660366298f7c887a40ad8781c7f81bc983ff0e",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Separate vertical beam-tip pushovers with the column-top X roller, n=10.",
+      "top_level_definitions": [
+        "record",
+        "run"
+      ]
+    },
+    {
+      "relative_path": "tools/run_case0041_l_section_backbone.py",
+      "handoff_sha256": "d68c9672d23f8337b137d5fea34973e11cc013be961c8184902a4169f7d6e51a",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Calculate and plot provisional L-section backbones and n=10 monotonic pushes.",
+      "top_level_definitions": [
+        "map_curve",
+        "setup_curves",
+        "push",
+        "write_rows"
+      ]
+    },
+    {
+      "relative_path": "tools/run_case0041_literature_cyclic_trial.py",
+      "handoff_sha256": "de05aa3c62aeab944482abe3fc86fbfb20e05d90ff7bc4fea3938aa64588a836",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Isolated n=10 beam-tip cyclic comparison; no production material edits.\n\nRun with OpPy Python. --plot-only regenerates the report from saved results.\nThe same reference and displacement history are used for all three variants.",
+      "top_level_definitions": [
+        "module",
+        "record",
+        "run",
+        "target",
+        "calculate",
+        "load_history",
+        "figures"
+      ]
+    },
+    {
+      "relative_path": "tools/run_case0041_n10_force_displacement.py",
+      "handoff_sha256": "fd78459abfc7888ab24d2ae7ae36ffd9acb217fcb445be1ba065664d7ed8a9eb",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Actual top-actuator force/displacement of the retained case 0041 connection.",
+      "top_level_definitions": []
+    },
+    {
+      "relative_path": "tools/source_fingerprint.py",
+      "handoff_sha256": "333a69e49d5ebd73d44c182c17e15f77babfc720b0490dd207bc66565a4429d3",
+      "live_exists": true,
+      "live_sha256": "5f411494fbf61d495e198ea19322c9bb9dcfac4793d1795cfdaa8ad724b96fcb",
+      "status": "changed",
+      "diff_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\source_diffs\\tools__source_fingerprint.py.diff",
+      "diff_lines": 18,
+      "category": "research_tool_or_pilot",
+      "content_status": "implementation_or_config_changed"
+    },
+    {
+      "relative_path": "tools/subset_manifest.py",
+      "handoff_sha256": "bcfa1cf02798a51ebfce4de341600e00381c66eeb5d6d944f9df641038c2e3f5",
+      "live_exists": false,
+      "status": "handoff_only",
+      "category": "research_tool_or_pilot",
+      "content_status": "handoff_only",
+      "docstring": "Write a screening manifest holding only the named cases of an existing one (for an end-to-end check).\n\n  python tools/subset_manifest.py pilots/X/screening_plan.json pilots/X/check5_screening_plan.json --name v2ResearchCheck5 \\\n         --case-ids case_0090 case_0099 case_0066 case_0001 case_0048\n\nThe first id named is the initial case. Everything else of the source manifest (profile, design basis, budget)\nis kept, so the cases are designed exactly as they would be in the full run.",
+      "top_level_definitions": [
+        "main"
+      ]
+    }
+  ],
+  "live_source_pin": {
+    "repo_commit": "d2f6ed2aaa917e4001c77d0cf279a213c328a610",
+    "branch": "Verification1",
+    "warning": "Working-tree file hashes are authoritative for this audit; HEAD alone does not include local changes.",
+    "source_file_count": 231,
+    "source_manifest_sha256": "9dedc38dd38064d6e1d92fc474f290e710a53421971bb144a4ae1d570bf6d10a",
+    "source_manifest_path": "C:\\Users\\andro\\.codex\\visualizations\\2026\\10\\03\\01a10075-1a4f-7c41-a154-d3938202e151\\day1_scope_reconciliation_20261020\\live_rc_source_at_audit.sha256"
+  },
+  "source_line_references": [
+    {
+      "root": "live",
+      "file": "Structure_Parameters.py",
+      "lines": {
+        "FYT_KSI": 50,
+        "SLAB_FY_KSI": 55,
+        "grade_height_rule": 60,
+        "bar_grid": 142,
+        "lateral_design_model": 623,
+        "n": 702,
+        "ASCE_CD": 935
+      }
+    },
+    {
+      "root": "live",
+      "file": "Data_Generation/Generate_Parameterized_Dataset.py",
+      "lines": {
+        "population_basis": 59,
+        "aspect_limit": 73
+      }
+    },
+    {
+      "root": "live",
+      "file": "Design/SMRF_Floor_Sections.py",
+      "lines": {
+        "SPAN_SCHEMA": 31
+      }
+    },
+    {
+      "root": "live",
+      "file": "Design/SMRF_Floor_Mesh.py",
+      "lines": {
+        "graded_mixed_face_levels": 239
+      }
+    },
+    {
+      "root": "handoff",
+      "file": "Structure_Parameters.py",
+      "lines": {
+        "n": 504
+      }
+    },
+    {
+      "root": "handoff",
+      "file": "Model/IMK_Calibration.py",
+      "lines": {
+        "directional_formula": 283,
+        "beam_rotation_capacities": 326,
+        "stem_only_scope": 333
+      }
+    },
+    {
+      "root": "handoff",
+      "file": "Analysis/Hinge_Moment_Rotation.py",
+      "lines": {
+        "directional_rotation_damage": 90,
+        "valid_directional_rotation_row": 123
+      }
+    }
+  ]
+}

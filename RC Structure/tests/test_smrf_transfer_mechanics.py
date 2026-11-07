@@ -230,8 +230,10 @@ class FrameReferenceTests(unittest.TestCase):
         with driver._quiet():
             ops.wipe()
             build_design_model()
+            # The reference carries the transfer's own loads; the perimeter strip outside the centreline plate
+            # (2026-11-05) is a separate frame load and is left out of this comparison of the transfer mechanics.
             loads.apply_gravity_loads(floor_factor=1.0, self_weight_factor=0.0, dead_factor=dead_factor,
-                                      live_factor=live_factor, live_pattern=live_pattern)
+                                      live_factor=live_factor, live_pattern=live_pattern, perimeter_strip=False)
             run_gravity_analysis()
             ops.reactions()
 

@@ -57,9 +57,11 @@ def _frame_base_reactions(live_pattern="all"):
         with contextlib.redirect_stdout(io.StringIO()):
             build_design_model()
             # The comparison is of the slab-to-frame load path: both models carry the slab pressure and the
-            # framed members. The column extensions above the roof are a direct column load outside it.
+            # framed members. The column extensions above the roof are a direct column load outside it, and so
+            # is the perimeter strip outside the centreline plate both models' slabs cover (2026-11-05).
             apply_gravity_loads(floor_factor=1.0, self_weight_factor=DEAD_FACTOR, dead_factor=DEAD_FACTOR,
-                                live_factor=LIVE_FACTOR, live_pattern=live_pattern, roof_extension=False)
+                                live_factor=LIVE_FACTOR, live_pattern=live_pattern, roof_extension=False,
+                                perimeter_strip=False)
             run_gravity_analysis()
             ops.reactions()
         reactions = {}

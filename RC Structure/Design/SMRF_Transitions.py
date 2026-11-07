@@ -1,83 +1,27 @@
-"""Column transitions at a floor where the column above differs from the column below (2026-10-02).
+"""Column transition paths and physical closure, ACI 318-19.
 
-A grouped design lets the column of story k + 1 have another section or cage than the column of story k.
-Passing each column's own checks does not make the change buildable: the bars of the lower column have
-to go somewhere, the bars of the upper column have to come from somewhere, and the joint between them
-has to be one piece of concrete with one set of hoops. This module places every longitudinal bar of both
-columns at its declared coordinates, gives every bar one path through the joint, checks the paths
-against the declared rule set, and says what the transition means for the joint's Table 18.8.4.3
-column-continuity input. Everything else is ``unsupported`` and fails; nothing is qualified by the two
-columns passing separately.
+The fast path assigns straight, finite-offset, lap, mechanical or terminated
+longitudinal paths and preserves all proposal catalogs. Identical cages are
+straight. Intersecting lap cylinders are refused; they are never silently
+moved. ``geometry_supported`` is preliminary search admissibility, not final
+physical acceptance. With ``physical_context``, SMRF_Transition_Physical
+checks the actual beam segments, rounded hoop/crosstie geometry, bend radii,
+clear spacing, endpoint ownership and published coupler envelopes. Final
+acceptance requires ``physically_verified``; missing evidence is distinct
+from computed failure. Without context the preliminary path remains usable
+by the search but physical status is explicitly not_evaluated.
 
-Declared rule set ``column_transition_rules_v2`` (ACI 318-19; written down so it can be reviewed, not
-independently verified). Centerlines are aligned and the columns share one concrete grade. The rule set
-is the supported scope of this implementation. It is not a statement that no other detail can be built.
-
-Bar coordinates. A bar's centroid sits at clear cover + hoop diameter + half its own diameter from the
-face (the convention every strength routine uses), so the coordinates of a column's bars depend on its
-section, its bar size AND its hoop bar size. Two columns of one section and one cage whose hoops differ
-in size do not have the same bar coordinates, and the difference is not rounded away.
-
-Paths. Every bar of the upper column is paired with one bar of the lower column on the same face, in
-order along the face (the pairing of least total distance). Each lower bar then has exactly one path:
-
-  straight             same bar size, the same coordinates above and below: the bar runs through.
-  offset               the bar continues but its coordinates above differ from those below: it is offset
-                       bent inside the joint. All offset bars of a transition are bent between the same
-                       two elevations; the inclined length is 6 times the largest bar offset, so the
-                       steepest bar is at 1 in 6 (10.7.4.1). The inclined length must fit in the joint
-                       depth. A column face that steps in 3 in or more takes no offset bends (10.7.4.2).
-  lap spliced          a smaller bar above, or an upper bar on a face that carries fewer bars above than
-                       below (it is then another bar, not the continuation of one): the lower bar runs
-                       straight into the upper story and the upper bar
-                       laps it in the center half of the clear height (18.7.4.4) at a transverse distance
-                       of at most min(lap / 5, 6 in) (25.5.1.3). Lap = max(ld of the larger bar, 1.3 ld of
-                       the smaller) (25.5.2.2); no lap above No. 11 (25.5.1.1) or where it does not fit in
-                       the center half.
-  mechanically spliced a smaller bar above where a lap is not available: Type 2 (18.2.7), coaxial, so the
-                       lower bar is first offset to the upper bar's coordinates when they differ. Equal
-                       bars on a face with fewer bars above, where a lap is not available, are one bar
-                       offset to the upper position.
-  terminated           a lower bar without a partner runs to the middle of the upper story and stops
-                       there; it must lie inside the upper cage without an offset.
-
-A lower bar that runs straight into the upper story must lie inside the upper column's hoops; where it
-does not, it is offset to the nearest position that does and counts as an offset bar.
-
-Ties at offset bends (10.7.6.4). The horizontal component of each offset bar's force is Ab fy times its
-offset over the common inclined length. Per direction, the hoop legs that cross the section in that
-direction must carry 1.5 times the sum on the more heavily loaded side. The hoop sets are those of the
-lower column (its bar and its legs, which continue through the joint, 18.8.3.1), placed at the stated
-stations within 6 in of each of the two bend points; where the lower column's spacing puts too few
-there, additional sets are added down to OFFSET_TIE_MIN_SPACING_IN. That minimum is a declared
-restriction of this search, not an ACI minimum. The count of additional sets is reported and priced.
-
-Development length. Table 25.4.2.3 of ACI 318-19 (the simplified expressions), with the case decided
-from each cage: clear spacing of the bars at least db, clear cover to the bar at least db, and the
-column hoops as ties not less than the Code minimum give the first row; otherwise the "other cases"
-row applies. psi_t = psi_e = 1 (vertical uncoated bars), psi_g from the grade, lambda = 1.
-
-What this module does not establish, and reports as such under ``not_established``: which hoop legs
-engage which offset bar and how they are anchored at the bend; the placement of the bend ties among
-the beam bars of the joint; the congestion of the lap zone (two bars side by side at every splice);
-and, above a reduced column, the physical detail that makes the column above an actual continuing
-column. Table 18.8.4.3 has two continuity branches: an actual continuing column, and an extension that
-satisfies 15.2.6 (2025: 15.5.2.3), whose item (b) continues the lower column's reinforcement through the
-extension. The declared reading (code-book review 2026-10-02) takes a supported transition as the
-continuing-column branch; the extension branch is not claimed, so 15.2.6(b) is not the test applied here.
-``column_reinforcement_continuous`` is True for a supported transition under that reading; the drawn
-transition detail remains an engineering decision.
-
-Kinds, for reports: ``same_cage`` (every bar straight), ``offset_bends`` (offset bars, no bar stops),
-``bar_size_reduction`` (splices, no bar stops, no change of section), ``bar_count_reduction`` (bars
-stop), ``unsupported`` (outside the declared scope: a larger column above, a face step of 3 in or more,
-more or larger bars above, different concrete grades).
+Coordinates use shared hoop_corner_containment_v1. Tie-force demand uses
+longitudinal fy / transverse fyt, including Grade80/Grade60 combinations.
+A reduced section always uses the conservative Other column-continuity
+branch of Table 18.8.4.3; no larger lower hoop continuation is invented.
+Development/lap lengths use 25.4.2.3/25.5.2.2 with no excess-steel reduction.
 """
 from __future__ import annotations
 
 import math
 
-RULES_ID = "column_transition_rules_v2"
+RULES_ID = "column_transition_rules_v4_physical_details"
 OFFSET_BEND_FACE_STEP_LIMIT_IN = 3.0       # ACI 318-19 10.7.4.2
 OFFSET_BEND_SLOPE = 6.0                    # 10.7.4.1: 1 in 6
 OFFSET_TIE_FORCE_FACTOR = 1.5              # 10.7.6.4.1
@@ -209,9 +153,64 @@ def _item(rule, clause, passes, detail):
     return {"rule": rule, "clause": clause, "passes": bool(passes), "detail": detail}
 
 
+def transition_bar_clearance(paths, lower_diameter_in, upper_diameter_in):
+    """Check the volumes of the declared longitudinal bars, without inventing new paths.
+
+    A lap contains two distinct bars simultaneously. Mechanical splices and a
+    continuous bar have one longitudinal centerline at a given elevation, so
+    they are not treated as two overlapping lap bars. Terminated lower tails
+    remain present through the lower half of the declared lap region.
+
+    For offset bends, all bars use the common inclined run. At each horizontal
+    section the inclined cylinder fits within a circle of radius r/cos(theta).
+    The minimum distance of each pair of linear paths is found analytically.
+    This conservative non-intersection test does not establish code minimum
+    clear spacing, coupler size, bend radius, or engagement by transverse bars.
+    """
+    run = OFFSET_BEND_SLOPE * max((p["offset_in"] for p in paths), default=0.0)
+    joint, lap = [], []
+    for i, path in enumerate(paths):
+        radius = lower_diameter_in / 2.0
+        projected = radius * math.sqrt(1.0 + (path["offset_in"] / run) ** 2) if run else radius
+        joint.append((f"lower_{i}", path["lower_xy_in"], path["target_xy_in"], projected))
+        if path["path"] in ("lap_spliced", "terminated"):
+            lap.append((f"lower_tail_{i}", path["target_xy_in"], radius))
+        if path["upper_xy_in"] is not None:
+            lap.append((f"upper_{i}", path["upper_xy_in"], upper_diameter_in / 2.0))
+    minima, collisions = {}, []
+    for region, bars in (("joint", joint), ("upper_overlap_zone", lap)):
+        minimum = None
+        for i, first in enumerate(bars):
+            for second in bars[i + 1:]:
+                if region == "joint":
+                    name_a, start_a, end_a, radius_a = first
+                    name_b, start_b, end_b, radius_b = second
+                    delta = [start_a[k] - start_b[k] for k in (0, 1)]
+                    slope = [(end_a[k] - start_a[k]) - (end_b[k] - start_b[k]) for k in (0, 1)]
+                    square = sum(v*v for v in slope)
+                    u = max(0.0, min(1.0, -sum(a*b for a, b in zip(delta, slope)) / square)) if square else 0.0
+                    distance = math.hypot(*(delta[k] + u * slope[k] for k in (0, 1)))
+                else:
+                    name_a, xy_a, radius_a = first
+                    name_b, xy_b, radius_b = second
+                    distance = math.dist(xy_a, xy_b)
+                    u = None
+                clearance = distance - radius_a - radius_b
+                entry = {"region": region, "bars": [name_a, name_b], "clearance_in": clearance,
+                         "fraction_through_inclined_run": u}
+                if minimum is None or clearance < minimum["clearance_in"]:
+                    minimum = entry
+                if clearance < -COORDINATE_TOLERANCE_IN:
+                    collisions.append(entry)
+        minima[region] = minimum
+    return {"method": "declared_bar_cylinder_clearance_v1", "passes": not collisions,
+            "minimum_by_region": minima, "collisions": collisions,
+            "limits": "longitudinal bar non-intersection only; code spacing, couplers, bend radii and transverse engagement remain separate"}
+
+
 # ---- the transition -------------------------------------------------------------------------------------------
 def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_height_in, joint_depth_in,
-                      lower_hoop_spacing_in=None):
+                      lower_hoop_spacing_in=None, physical_context=None, lap_allowed=True):
     """Place, pair and check the bars of the transition from ``lower`` (story k) to ``upper`` (story k + 1).
 
     ``lower`` and ``upper`` are Model.Member_Groups.MemberDesign columns. ``upper_clear_height_in`` is the
@@ -238,8 +237,8 @@ def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_heigh
               "upper": {"b_in": upper.b_in, "h_in": upper.h_in, "bar_size": upper.bar_size, "top_bars": upper.top_bars,
                         "bot_bars": upper.bot_bars, "side_bars": upper.side_bars, "stirrup_bar_size": upper.stirrup_bar_size},
               "continuity_branch": "continuing_column",
-              "continuity_basis": ("Table 18.8.4.3 continuous-column branch under the declared reading; the extension branch "
-                                   "(15.2.6, 2025: 15.5.2.3) is not claimed"),
+              "continuity_basis": ("Table 18.8.4.3: an unchanged physical section may continue; reduced sections use Other. "
+                                   "No extension under 15.2.6 is inferred from a passing longitudinal path."),
               "confinement": {
                   "joint": "the hoops of the column below continue through the joint depth (18.8.3.1)",
                   "above_joint": ("the hoops of the column below continue for one column depth above the joint (priced as "
@@ -262,11 +261,38 @@ def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_heigh
     def finish(kind, detail):
         result["kind"] = kind
         result["supported"] = kind != "unsupported" and all(item["passes"] for item in items)
-        result["column_reinforcement_continuous"] = result["supported"]
+        result["geometry_supported"] = result["supported"]
+        # A smaller upper section cannot contain the larger lower hoops.
+        # Use the conservative Other table branch, independently of whether
+        # individual longitudinal paths can be detailed successfully.
+        result["column_reinforcement_continuous"] = result["supported"] and same_section
+        result["continuity_branch"] = "continuing_column" if same_section else "other_conservative_reduced_column"
+        result["coordinate_basis"] = "hoop_corner_containment_v1"
         result["detail"] = detail
         if not result["supported"] and kind != "unsupported":
             result["detail"] += "; not every rule of this transition is met: " + "; ".join(
                 f"{item['rule']} ({item['detail']})" for item in items if not item["passes"])
+        if physical_context is not None:
+            if physical_context.get("conventional"):
+                from Design.SMRF_Conventional_Detail import transition_detail as verify_transition
+            else:
+                from Design.SMRF_Transition_Physical import verify_transition
+            result["physical_detail"] = verify_transition(
+                result,lower,upper,fy_ksi=fy_ksi,clear_cover_in=clear_cover_in,
+                upper_clear_height_in=upper_clear_height_in,joint_depth_in=joint_depth_in,
+                lower_hoop_spacing_in=lower_hoop_spacing_in,physical_context=physical_context)
+            result["physically_verified"] = result["physical_detail"]["status"] == "pass"
+            if result["terminated_lower_bars"] and "terminated_tail_length_above_joint_in" in result["physical_detail"]:
+                result["extra_bar_length_in"] = result["terminated_lower_bars"]*result["physical_detail"]["terminated_tail_length_above_joint_in"]
+            result["not_established"] = result["physical_detail"]["unknown_rules"]
+            if result["physical_detail"]["status"] == "fail":
+                result["supported"] = False
+                result["column_reinforcement_continuous"] = False
+        else:
+            result["physically_verified"] = False
+            result["physical_detail"] = {"method":"column_transition_physical_v1","status":"not_evaluated",
+                                         "checks":[],"unknown_rules":["actual beam-bar and transverse placement context not supplied"]}
+            result["not_established"] = ["actual beam-bar and transverse placement context not supplied"]
         return result
 
     # ---- the declared scope ----
@@ -304,7 +330,7 @@ def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_heigh
     lap = lap_length_in(lower.bar_size, upper.bar_size, fc, fy_ksi, favourable)
     center_half = 0.5 * upper_clear_height_in
     lap_permitted = max(lower.bar_size, upper.bar_size) <= LAP_MAX_BAR_SIZE
-    lap_fits = lap_permitted and lap <= center_half
+    lap_fits = lap_permitted and lap <= center_half and lap_allowed
     non_contact = min(lap / 5.0, NON_CONTACT_LAP_MAX_IN)
     splice = {"class_b_lap_in": lap, "center_half_clear_height_in": center_half,
               "lap_splice_permitted_25_5_1_1": lap_permitted, "lap_splice_feasible": lap_fits,
@@ -347,15 +373,24 @@ def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_heigh
                 entry.update(upper_index=mate["index"], upper_xy_in=list(goal))
                 distance = math.hypot(goal[0] - origin[0], goal[1] - origin[1])
                 same_bar = upper.bar_size == lower.bar_size
+                lap_target = clipped(bar)
+                lap_distance = math.dist(goal, lap_target)
+                lap_geometry_fits = lap_distance >= 0.5 * (lower_db + upper_db) - COORDINATE_TOLERANCE_IN
+                usable_lap = lap_fits and lap_geometry_fits
+                if lap_fits and not lap_geometry_fits and not (same_bar and distance <= COORDINATE_TOLERANCE_IN):
+                    entry["lap_geometry_refusal"] = {
+                        "center_separation_in": lap_distance,
+                        "minimum_nonintersecting_center_separation_in": 0.5 * (lower_db + upper_db),
+                        "reason": "the distinct lap bars would occupy overlapping volumes"}
                 # A bar keeps its place in the cage only where the face carries the same number of bars above and
                 # below; otherwise the upper bar is another bar and is spliced to this one.
                 same_place = len(below) == len(above)
                 if same_bar and distance <= COORDINATE_TOLERANCE_IN:
                     target, path = goal, "straight"
-                elif same_bar and (same_place or not lap_fits):
+                elif same_bar and (same_place or not usable_lap):
                     target, path = goal, "offset"                    # one continuous bar, bent to its upper position
-                elif lap_fits:
-                    target, path = clipped(bar), "lap_spliced"
+                elif usable_lap:
+                    target, path = lap_target, "lap_spliced"
                     entry["splice_distance_in"] = math.hypot(goal[0] - target[0], goal[1] - target[1])
                 else:
                     target, path = goal, "mechanically_spliced"      # coaxial: the lower bar goes to the upper position
@@ -369,7 +404,17 @@ def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_heigh
     counts = {path: sum(1 for p in paths if p["path"] == path) for path in PATHS}
     bent = [p for p in paths if p["bent"]]
     result.update(paths=paths, path_counts=counts, bars_bent=len(bent))
+    physical = transition_bar_clearance(paths, lower_db, upper_db)
+    result["physical_bar_clearance"] = physical
+    items.append(_item("declared longitudinal bar paths do not occupy overlapping volumes",
+                       "physical geometry of the declared transition", physical["passes"],
+                       (f"{len(physical['collisions'])} intersecting bar pair(s); no undeclared relocation or splice substituted"
+                        if not physical["passes"] else "the declared longitudinal bar cylinders do not intersect")))
     spliced = counts["lap_spliced"] + counts["mechanically_spliced"]
+    splice["splice_type"] = ("mixed_class_B_lap_and_type_2_mechanical" if counts["lap_spliced"] and counts["mechanically_spliced"]
+                             else "type_2_mechanical_18.2.7" if counts["mechanically_spliced"]
+                             else "class_B_lap_center_half" if counts["lap_spliced"] else "none")
+    splice["lap_geometry_refusals"] = sum("lap_geometry_refusal" in p for p in paths)
     if spliced or counts["terminated"]:
         result["splice"] = splice
     if counts["lap_spliced"]:
@@ -407,7 +452,9 @@ def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_heigh
         for axis, component, coordinate, leg_count in (("x", 0, "x_in", legs[1]), ("y", 1, "y_in", legs[0])):
             sides = [sum(bar_area * abs(p["offset_xy_in"][component]) for p in bent if sign * p["lower_xy_in"][component] > 0.0)
                      for sign in (1.0, -1.0)]
-            required[axis] = OFFSET_TIE_FORCE_FACTOR * max(sides) / run          # in2 of tie steel at fy
+            import Structure_Parameters as sp
+            transverse_fy = float((physical_context or {}).get("transverse_fy_ksi",sp.FYT_KSI))
+            required[axis] = OFFSET_TIE_FORCE_FACTOR * max(sides) / run * fy_ksi / transverse_fy
             per_set[axis] = leg_count * hoop_area
         sets_required = max(1, max(int(math.ceil(required[a] / per_set[a] - 1e-9)) for a in required))
         sets_at_spacing = 1 + int(math.floor(OFFSET_TIE_DISTANCE_IN / spacing + 1e-9))
@@ -427,6 +474,7 @@ def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_heigh
             "slope_of_steepest_bar": f"1 in {OFFSET_BEND_SLOPE:g}",
             "bend_points_below_joint_top_in": [0.0, run],
             "tie_area_required_in2": required, "tie_area_per_hoop_set_in2": per_set,
+            "longitudinal_fy_ksi": fy_ksi, "transverse_fy_ksi": transverse_fy,
             "tie_area_provided_in2": {axis: sets * per_set[axis] for axis in per_set},
             "hoop_sets_required": sets_required, "hoop_sets_at_hoop_spacing": sets_at_spacing,
             "hoop_sets_that_fit": sets_that_fit, "hoop_sets_within_6in": sets,
@@ -450,6 +498,16 @@ def column_transition(lower, upper, *, fy_ksi, clear_cover_in, upper_clear_heigh
     else:
         kind = "same_cage"
     described = ", ".join(f"{counts[path]} {path.replace('_', ' ')}" for path in PATHS if counts[path])
-    return finish(kind, f"{len(paths)} lower bars: {described}"
-                  + (f"; {len(bent)} offset bent inside the joint" if bent and not counts["offset"] == len(bent) else "")
-                  + (f"; splices in the center half of the upper story ({splice['splice_type']})" if spliced else ""))
+    finished = finish(kind, f"{len(paths)} lower bars: {described}"
+                      + (f"; {len(bent)} offset bent inside the joint" if bent and not counts["offset"] == len(bent) else "")
+                      + (f"; splices in the center half of the upper story ({splice['splice_type']})" if spliced else ""))
+    if (lap_allowed and counts["lap_spliced"] and (physical_context or {}).get("conventional")
+            and finished["physical_detail"]["status"] != "pass"):
+        # Laps that do not keep their spacing: the same pairs with Type 2 couplers, when that detail is supported.
+        alternative = column_transition(lower, upper, fy_ksi=fy_ksi, clear_cover_in=clear_cover_in,
+                                        upper_clear_height_in=upper_clear_height_in, joint_depth_in=joint_depth_in,
+                                        lower_hoop_spacing_in=lower_hoop_spacing_in, physical_context=physical_context,
+                                        lap_allowed=False)
+        if alternative["physical_detail"]["status"] == "pass":
+            return alternative
+    return finished

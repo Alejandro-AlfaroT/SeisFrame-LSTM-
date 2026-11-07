@@ -1,0 +1,225 @@
+{
+  "artifact_type": "read_only_modeling_scope_audit",
+  "date_local": "2026-10-20",
+  "repository": "C:/Users/andro/Documents/GitHub/StructGNN-OpenSeesPy-Integrated",
+  "audit_limit": "Static source inspection only; no structural analyses, tests or source edits. Current comments are evidence of intent, not independent engineering verification.",
+  "release_status": {
+    "generation_release_ready": false,
+    "references": [
+      "RC Structure/Design/SMRF_Qualification.py:22",
+      "RC Structure/Design/SMRF_Qualification.py:539",
+      "RC Structure/Design/Screening_Manifest.py:305"
+    ],
+    "named_profiles": [
+      "v2_nonlinear_flexure_screening_v1",
+      "v2_nonlinear_flexure_anchored_energy_research_v1"
+    ],
+    "profile_status": "Both existing named profiles are diagnostic/research, not production acceptance.",
+    "profile_reference": "RC Structure/Model/Analysis_Profile.py:12",
+    "recommended_day1_decision": "Freeze the intended production scope and gate evidence; do not set the release flag or relabel PROBE assertions. Build a separately named reviewed production profile only after calibration/applicability evidence closes."
+  },
+  "scope_matrix": [
+    {
+      "topic": "Population and seismic design basis",
+      "implemented": "Regular rectangular grids, 3-7 bays each direction, 4-9 floors, bay widths 18-30 ft independently, one story height per building 12-18 ft, half-foot increments, height/minimum plan width <=2.25. SDC C/D presets, Site Class C, Risk III, R=8, Cd=5.5, Ie=1.25.",
+      "references": [
+        "RC Structure/Data_Generation/Generate_Parameterized_Dataset.py:50",
+        "RC Structure/Data_Generation/Generate_Parameterized_Dataset.py:59",
+        "RC Structure/Data_Generation/Generate_Parameterized_Dataset.py:177",
+        "RC Structure/Structure_Parameters.py:934",
+        "RC Structure/Structure_Parameters.py:947",
+        "RC Structure/Structure_Parameters.py:961"
+      ],
+      "required_acceptance": "Manifest must pin exact sampled population, seed, hazard and motion scaling; distinguish design-force reduction by R from physical input motion scaling. No unscheduled expansion to irregular/tall/shear-wall/dual-system geometries."
+    },
+    {
+      "topic": "SFRS layout and section bands",
+      "implemented": "Perimeter -> perimeter plus core ring -> perimeter plus full core lines. Current column cap is 36 in in every layout. Default system policy has three-story bands and both width and depth nonincreasing upward; invalid state imports/installs are refused. Core means additional moment frames, not shear walls.",
+      "references": [
+        "RC Structure/Design/Section_Design.py:49",
+        "RC Structure/Model/Member_Groups.py:70",
+        "RC Structure/Model/Member_Groups.py:134",
+        "RC Structure/Model/Member_Groups.py:169",
+        "RC Structure/Model/Member_Groups.py:226",
+        "RC Structure/Model/Member_Groups.py:866"
+      ],
+      "required_acceptance": "All selected assignments, caps, vertical dimensions, memberships, clearances, transitions and slab convergence independently checked on final states; failed or partial search is not physical infeasibility."
+    },
+    {
+      "topic": "Reinforcing and concrete materials",
+      "implemented": "Longitudinal ASTM A706 Grade60 below 16-ft story height; Grade80 at >=16 ft. Failed Grade60 searches can retry Grade80 only with terminal strength/congestion evidence. Hoops and slab mats remain Grade60. Column concrete 6/7/8/9/10 ksi, beams/slab 5/6/8 ksi. One column and one beam concrete grade for the whole frame, not independent grades per band.",
+      "references": [
+        "RC Structure/Structure_Parameters.py:47",
+        "RC Structure/Structure_Parameters.py:57",
+        "RC Structure/Structure_Parameters.py:1014",
+        "RC Structure/Design/Grouped_Search.py:98",
+        "RC Structure/Design/Section_Design.py:74",
+        "RC Structure/Design/Grouped_Design.py:971"
+      ],
+      "status": "Design policies implemented; nonlinear experimental applicability not established by specifying nominal grades.",
+      "required_acceptance": "Separate calibration/applicability rows for Grade60/80, fc, confinement, reinforcement and slenderness. Grade60 Beam103 does not validate Grade80 or other concrete ranges."
+    },
+    {
+      "topic": "T/L/rectangular beam nonlinear flexure",
+      "implemented": "Elastic spines plus IMKPeakOriented end hinges; T/L stiffness and directional composite strength include developed slab bars. Capping regression uses tension-side stem bar ratio max(top,bottom)*bar_area/(b*d); both directions use the same Haselton theta_p absent explicitly separate backbone inputs.",
+      "references": [
+        "RC Structure/Model/IMK_Hinges.py:82",
+        "RC Structure/Model/IMK_Hinges.py:124",
+        "RC Structure/Model/IMK_Calibration.py:262",
+        "RC Structure/Model/IMK_Calibration.py:282",
+        "RC Structure/Model/IMK_Calibration.py:402"
+      ],
+      "status": "Directional strength exists; directional capping and cyclic calibration remain provisional. Slab-aware reinforcement-ratio and bar-depth treatment need reconciliation with the NIST beam adjustment before release.",
+      "required_acceptance": "Positive and negative moment-rotation, yield, cap, postcap, residual, failure definitions; documented conversion from test chord/curvature/slip coordinates to numerical spring. Measured local curves or defensible parameter applicability; separate Grade60/80 and interior T/edge L or explicit justified transfer. Do not install the provisional Beam103 0.030-rad trial as a measured capacity."
+    },
+    {
+      "topic": "Rectangular column nonlinear flexure",
+      "implemented": "IMK hinges at both ends, gravity-axial-dependent nominal strengths fixed at build time; two independent bending directions. No changing-axial coupled P-M-M response during NTHA.",
+      "references": [
+        "RC Structure/Model/Analysis_Profile.py:97",
+        "RC Structure/Model/IMK_Hinges.py:233",
+        "RC Structure/Model/IMK_Hinges.py:643",
+        "RC Structure/Model/IMK_Calibration.py:369"
+      ],
+      "status": "Deliberate simplification requiring applicability review; gravity-axial estimates are not dynamic histories.",
+      "required_acceptance": "Validate fixed-axial approximation over proposed domain using diagnostic axial variation and biaxial demand; define out-of-domain rejection or implement supported alternative. Validate Grade80 and confinement ranges separately; report clamps."
+    },
+    {
+      "topic": "Spring stiffness, yield and global elasticity",
+      "implemented": "Ke=n*6EI/L, n=20 repository default; spine inertia factor (n+1)/n, cracked modifiers 0.35 beams /0.70 columns. Spring yield My/Ke is not whole-member or whole-building yield. Nominal 0.005 beam/0.004 column angles remain assumptions in the energy regression.",
+      "references": [
+        "RC Structure/Model/IMK_Hinges.py:294",
+        "RC Structure/Model/IMK_Hinges.py:355",
+        "RC Structure/Structure_Parameters.py:701",
+        "RC Structure/Structure_Parameters.py:783",
+        "RC Structure/Model/IMK_Calibration.py:327"
+      ],
+      "required_acceptance": "Pin n, EI and rotation definitions; verify assembled elastic flexibility and global/modal response independently, not by fitting only local spring yield. n=10 SSD test is a controlled alternative unless adopted with stiffness and invariance evidence."
+    },
+    {
+      "topic": "Cyclic energy and deterioration",
+      "implemented": "Default legacy_unmapped energy; alternative research profile anchors mode energies to smaller physical yield moment. Haselton column regression extends to beams, uses nominal member yield angles; S/C active and A/K suppressed at 1e12. Corrected explicit-reference adapter requires experimentally_supported profiles with source/specimen IDs, deformation scope, applicability, review provenance and positive per-mode energies.",
+      "references": [
+        "RC Structure/Structure_Parameters.py:678",
+        "RC Structure/Model/Analysis_Profile.py:84",
+        "RC Structure/Model/IMK_Calibration.py:327",
+        "RC Structure/Model/IMK_Materials.py:36"
+      ],
+      "status": "Release blocker; adapter provenance validation is not experimental truth.",
+      "required_acceptance": "Mode-by-mode derivation plus held-out cyclic histories, orientation/sign invariance, hysteretic work agreement, unloading/reloading/deterioration validation. A/K suppression needs explicit reviewed scope, not a guessed fitted value."
+    },
+    {
+      "topic": "Joint, slip and shear ownership",
+      "implemented": "Grouped models require rigid centerline joints; no finite joint offsets, nonlinear joint panel springs or face slip interfaces. Member hinges retain Haselton bar-slip share. Joint design checks still active. Member elastic spines + flexural hinges do not model nonlinear member shear failure.",
+      "references": [
+        "RC Structure/Model/Build_Model.py:239",
+        "RC Structure/Model/Build_Model.py:274",
+        "RC Structure/Model/Analysis_Profile.py:18",
+        "RC Structure/Analysis/Pushover_Diagnostic.py:371"
+      ],
+      "required_acceptance": "State exclusions explicitly and define modeled-domain ceiling. Joint/shear checks must be evidence-backed; demonstrate omitted mechanisms do not govern intended response range, or classify those histories as out-of-scope. Cannot claim physically calibrated joint failure/collapse."
+    },
+    {
+      "topic": "Global boundary conditions and dynamics",
+      "implemented": "Fixed base, rigid diaphragm, no soil-foundation flexibility; PDelta columns, Linear beam transformations. Design lateral model can release gravity beams while NTHA all actual frames participate. Biaxial uniform horizontal excitation; 5% mass+initial-stiffness Rayleigh at modes1/3 default; Newmark(0.5,0.25).",
+      "references": [
+        "RC Structure/Model/Build_Model.py:72",
+        "RC Structure/Model/Build_Model.py:77",
+        "RC Structure/Model/Build_Model.py:196",
+        "RC Structure/Structure_Parameters.py:620",
+        "RC Structure/Structure_Parameters.py:1200",
+        "RC Structure/Analysis/NTHA.py:644",
+        "RC Structure/Analysis/NTHA.py:663"
+      ],
+      "required_acceptance": "Gravity/mass ledger, equilibrium and modal checks; explicit damping and timestep sensitivity for representative cases; no hidden fallback periods for production; retain constraints, motions, scaling and solver recovery metadata."
+    },
+    {
+      "topic": "Data products and surrogate ingestion",
+      "implemented": "hybrid_gnn_lstm_v3 exporter; displacement/drift, force and hinge histories, moment-rotation metadata; diagnostic validation checks full duration, finite shapes, monotonic times/commit counts, installed design/topology and full-rate recorder agreement. Training loader uses response_time_history first2 columns as response target; record-pair isolated splits and train-only normalization.",
+      "references": [
+        "RC Structure/Data_Generation/Hybrid_Exporter.py:844",
+        "RC Structure/Data_Generation/Run_Weighted_Seismic_Calibration.py:353",
+        "RC Hybrid Surrogate Model/rc_hybrid_surrogate/data.py:359",
+        "RC Hybrid Surrogate Model/README.md:23"
+      ],
+      "required_acceptance": "Versioned V6 member-specific feature/schema contract, exact units/signs/timestamps/entity ordering, failed/truncated/out-of-domain quarantine, end-to-end new-sample load and forward/backward smoke. Existing code damage and collapse flags are screening proxies, not calibrated physical failure labels."
+    }
+  ],
+  "existing_numerical_values_not_new_acceptance_standards": [
+    {
+      "name": "NTHA NormDispIncr primary/fallback",
+      "value": "1e-6/25 iterations; 1e-4/50 iterations; last recovery dt/10",
+      "reference": "RC Structure/Analysis/NTHA.py:79",
+      "caveat": "Solver convergence settings, not experimental accuracy."
+    },
+    {
+      "name": "PROBE slab final-pair refinement",
+      "value": "moment and shear 0.05;130000 shells;4 levels+at most2local extensions",
+      "reference": "RC Structure/Design/Config.py:494",
+      "caveat": "Declared investigation screen, not an ACI limit nor production approval."
+    },
+    {
+      "name": "Full-rate diagnostic recorder comparison",
+      "value": "relative1e-9;moment absolute1e-7 kip-in;rotation absolute1e-11 rad;time absolute1e-7 sec",
+      "reference": "RC Structure/Data_Generation/Run_Weighted_Seismic_Calibration.py:41",
+      "caveat": "Float64 export consistency, not physics accuracy."
+    },
+    {
+      "name": "Pushover diagnostic equilibrium",
+      "value": "1e-4 kip absolute;1e-4 joint moment relative;gravity1e-6 relative",
+      "reference": "RC Structure/Analysis/Pushover_Diagnostic.py:125",
+      "caveat": "Existing diagnostic defaults only."
+    },
+    {
+      "name": "Current inelastic screen",
+      "value": "interstory0.010 and roof0.00775 and plastic_rotation/theta_p>=0.25 and yielded fraction>=0.10",
+      "reference": "RC Structure/Data_Generation/Hybrid_Exporter.py:235",
+      "caveat": "Dataset classification convention, not physical material validation."
+    },
+    {
+      "name": "Current collapse/divergence screening",
+      "value": "collapse>=0.10 interstory or failed solver with>=0.010;physical-drift filtering0.20;damage proxy ceiling20",
+      "reference": "RC Structure/Data_Generation/Hybrid_Exporter.py:239",
+      "caveat": "Heuristic screen; numerical failure is not established physical collapse. Production must retain failed/out-of-domain evidence, not clean it into accepted labels."
+    }
+  ],
+  "proposed_gates_without_invented_numeric_limits": [
+    "Evidence-backed, reviewed deformation definitions and calibration applicability for all included member/material families.",
+    "All required design checks pass with no unevaluated production items and no PROBE substitutions; provenance is complete.",
+    "Full-duration NTHA successful with exact source/profile/design/motion identities; numerical and timestep/damping sensitivity thresholds must be declared before pilot evaluation.",
+    "Experimental fit and holdout error tolerances to be agreed before fitting and recorded as research acceptance policy, not code requirements.",
+    "No physically unsupported capacity, fixed-axial approximation or omitted mechanism silently accepted; bound response domain or close the evidence gap.",
+    "Data schema passes real loader/forward-backward checks and split policy prevents motion-pair leakage."
+  ],
+  "notable_stale_metadata": [
+    {
+      "reference": "RC Structure/Design/SMRF_Qualification.py:23",
+      "issue": "Uniform qualification SCOPE still says every gridline in X/Y and shared families; should not be copied verbatim as the current grouped perimeter/core production scope."
+    },
+    {
+      "reference": "RC Structure/Structure_Parameters.py:737",
+      "issue": "Old header says joint shear and slip, but active JOINT_DEFORMATION_SCOPE is joint_shear_only and grouped profiles install neither joint nor slip springs."
+    },
+    {
+      "reference": "RC Structure/Model/Member_Groups.py:48",
+      "issue": "Generic STORIES_PER_BAND=2 remains for old policy; selected system_three_story policy explicitly returns3. Audit policy ID, not one constant."
+    }
+  ],
+  "proposed_acceptance_review": {
+    "overall": "These may be adopted as predeclared project targets, not literature-derived universal or code requirements. Their reasonableness does not establish actual model qualification.",
+    "experimental": {
+      "strength_error": "My and Mpeak absolute relative error <=10% on each observed direction: sensible provisional target only after matched yield and peak extraction definitions, loading-history alignment and material/geometry provenance.",
+      "rotation_error": "Yield/cap error <=20% per observed direction: require consistent deformation coordinate, cap definition and independently observed cap; a test ending while hardening or a shallow numerical peak cannot pass by censored endpoint fitting.",
+      "stiffness_error": "Secant/unloading <=20%: define secant displacement levels and unloading windows before fitting. Exclude fixture compliance only with recorded correction; label slip and joint contributions.",
+      "energy_error": "Per-loop and cumulative <=20%: define cycle segmentation and work convention, include reversals, baseline corrections and initial/final elastic storage treatment. Relative error not meaningful near zero; predeclare a measurement-informed measurable-energy floor/absolute criterion. Do not let cumulative agreement hide one bad cycle.",
+      "history_error": "Force-history NRMSE<=0.20: explicitly define normalization (e.g. maximum absolute measured force for the matched protocol), sample alignment and weighting. Report errors on original loading sequence; do not independently shift or rescale cycles to pass.",
+      "holdout": "Independent means specimens/protocols not used to fit parameters, beyond merely different rows of same loop. Report each applicable family and worst direction; pooled averages cannot mask failed families.",
+      "applicability": "Passing these targets on Grade60 rectangular beams does not validate Grade80, T/L composite sections or dynamic axial/biaxial columns. Either justify transfer with applicability evidence or exclude unsupported domains."
+    },
+    "numerical": {
+      "dt_halving": "<=5% peak drift, acceleration and base-shear change may be declared a project convergence target. Compare the same complete record, source/model/design/damping and physical outputs; original and half-step exports must have matching units and response definitions. Peak acceleration needs full-rate extraction; recorder decimation is not timestep convergence.",
+      "residual_drift": "Absolute difference <=0.001 rad/ratio (0.1% story drift) should not alone accept a poor residual prediction near zero. Define a common post-motion settling window and residual statistic, plus a relative criterion where residual magnitude is reliably above a predeclared floor. Current request's 'relative where meaningful' remains underspecified until that floor/criterion is fixed.",
+      "preserve_existing": "Do not replace tight export/identity/equilibrium checks with 5% physics targets; they serve different purposes. Neither satisfying solver NormDispIncr nor fitting a local hinge proves timestep convergence/global validation."
+    }
+  }
+}

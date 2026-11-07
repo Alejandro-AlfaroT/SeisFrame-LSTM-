@@ -28,6 +28,8 @@ Unit system: kip, inch, ksi.
 
 from __future__ import annotations
 
+from Design.Config import validate_beam_practical_ceiling
+
 import contextlib
 import copy
 from dataclasses import asdict
@@ -558,7 +560,7 @@ def _model_period():
         with _quiet():
             ops.wipe()
             build_model()
-            modes = run_modal_analysis()
+            modes = run_modal_analysis(constraint_handler='Transformation')
     finally:
         sp.LATERAL_DESIGN_MODEL = saved
     for mode in modes:
@@ -577,7 +579,7 @@ def _analyze_combination(combination, model_period_sec, torsion=None):
     """
     elf = _apply_combination_loads(combination, model_period_sec, torsion)
     with _quiet():
-        run_gravity_analysis()
+        run_gravity_analysis(constraint_handler='Transformation')
     return elf
 
 
@@ -672,7 +674,8 @@ def _torsion_assessment(model_period_sec, cfg, strength=None):
     # A grouped design supplies its own story-by-story strength distribution (Design.Grouped_Design).
     strength = _lateral_strength_distribution(cfg) if strength is None else strength
     classification = classify_torsional_irregularity(worst, strength["one_side_fraction"],
-                                                     strength_model_verified=_strength_model_verified(cfg))
+                                                     strength_model_verified=_strength_model_verified(cfg),
+                                                     independent_distribution_bound=strength.get("independent_distribution_bound"))
     envelope = max(ax_by_level.values())
     required = envelope if classification["type_1"] else 1.0
     return {"ratio": ratio, "assessment_amplification": 1.0, "base": "fixed",
@@ -696,8 +699,13 @@ def _torsion_assessment(model_period_sec, cfg, strength=None):
                       "Ax per 12.8.4.3 from the level displacements of the same runs")}
 
 
-def _strength_model_verified(cfg):
-    """Has a person asserted the story-strength model (IndependentVerification.story_strength_model_verified)?"""
+def _strength_model_verified(cfg, strength=None):
+    """Recognize current computed certificates, otherwise retain the legacy assertion gate."""
+    if strength is not None:
+        from Design.SMRF_Story_Adapter import computed_verification_valid, ADAPTER_METHOD
+        if strength.get('adapter_method') == ADAPTER_METHOD:
+            # A legacy assertion cannot override a failed/stale computed proof.
+            return computed_verification_valid(strength)
     from Design.SMRF_Common import assertion_provenance_valid
     verification = getattr(cfg, "verification", None)
     if verification is None:
@@ -718,8 +726,8 @@ def _strength_model_applicability(cfg):
             "assertion_basis": policy.get("assertion_basis") if verified else None,
             "consequence": ("a verified model resolves the Table 12.3-1 strength criterion both ways" if verified else
                             "a provisional model can establish Type 1 (more than 75% on one side) but cannot certify its "
-                            "absence; with TIR <= 1.2 the classification is 'unresolved' and qualification keeps "
-                            "demands.torsional_irregularity open"),
+                            "absence; without an independent computed distribution bound, TIR <= 1.2 leaves the "
+                            "classification unresolved and qualification keeps demands.torsional_irregularity open"),
             "basis": ("the frame-line story-strength model (bays x (Mn- + Mn+) / h per line) is a declared approximation "
                       "whose scientific applicability -- base, roof and column-limited mechanisms, gravity transfer, axial "
                       "redistribution, shear limits -- is the reviewers' decision, asserted through "
@@ -816,7 +824,8 @@ def _demand_basis(cfg, torsion, elf, drift_screen, strength=None, regularity=Non
     strength = _lateral_strength_distribution(cfg) if strength is None else strength
     if torsion is not None:
         classification = classify_torsional_irregularity(torsion["tir"], strength["one_side_fraction"],
-                                                         strength_model_verified=_strength_model_verified(cfg))
+                                                         strength_model_verified=_strength_model_verified(cfg, strength),
+                                                         independent_distribution_bound=strength.get("independent_distribution_bound"))
         torsion = {**torsion, "classification": classification, "torsional_irregularity": classification["label"],
                    "strength_distribution": strength,
                    "amplification_required": (torsion["amplification_envelope_12_8_4_3"] if classification["type_1"] else 1.0)}
@@ -903,7 +912,8 @@ def _capture_element_actions(dead_factor=1.0):
             # support there is no lower beam joint to trim.
             offset_i = sp.H_BEAM / 2 if ops.nodeCoord(ni, 3) > 0 else 0.0
             offset_j = sp.H_BEAM / 2
-            axial_line_load = dead_factor * sp.col_self_weight_kip_per_in()
+            from Model import Member_Properties as mp, Member_Groups as mg
+            axial_line_load = dead_factor * mp.column_self_weight_kip_per_in(mg.resolve(tag))
         members[str(tag)] = {
             "member_type": kind, "local_force_kip_kipin": forces,
             "centerline_axial_i_kip": forces[0], "centerline_axial_j_kip": -forces[6],
@@ -2371,6 +2381,7 @@ def design_structure(cfg=None, max_section_iter=10, max_steel_iter=6, verbose=Tr
     """
     _notify_progress(progress, "phase_started", "design.setup", max_section_iter=max_section_iter)
     cfg = cfg or DesignConfig.from_structure_parameters()
+    validate_beam_practical_ceiling(cfg)
     # Category, Ie and the drift criterion come from one basis; a policy that names another
     # category, or a stale ASCE_IE, stops the design before anything is analysed.
     sp.seismic_design_basis(risk_category=cfg.demands.risk_category, site_class=cfg.demands.site_class)
@@ -3248,6 +3259,7 @@ def source_sha256():
 def design_request_identity(cfg=None):
     """Portable identity of design inputs and source, excluding GM/intensity."""
     cfg = cfg or DesignConfig.from_structure_parameters()
+    validate_beam_practical_ceiling(cfg)
     # An identity is refused, not built, for a contradictory risk basis (policy category vs the
     # configured category vs ASCE_IE): there is no consistent request to identify.
     sp.seismic_design_basis(risk_category=cfg.demands.risk_category)

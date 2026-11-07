@@ -107,6 +107,8 @@ converged to it.
 """
 from __future__ import annotations
 
+from Design.Config import validate_beam_practical_ceiling
+
 import copy
 import hashlib
 import json
@@ -125,17 +127,18 @@ from Model import Member_Groups as mg
 from Model import Member_Properties as mp
 from Model.IMK_Calibration import column_moment_at_axial
 
-RULES_ID = "group_reinforcement_selection_v2_roof_exception"
+RULES_ID = "group_reinforcement_selection_v5_conventional_detailing"
 # Under the system policy (Model.Member_Groups.SYSTEM_POLICY_ID, 2026-10-16) the groups of a design tie select one
 # cage together, and the strong-column rule applies only in the directions in which a column is part of a
 # perimeter frame (ACI 318-19 18.7.3.2 is a special-moment-frame rule; an interior column and the gravity
 # direction of an edge column are members not designated as part of the SFRS, 18.14).
-SYSTEM_RULES_ID = "system_reinforcement_selection_v2_roof_exception"
+SYSTEM_RULES_ID = "system_reinforcement_selection_v5_conventional_detailing"
 BEAM_UNIT_SWEEPS = 3                      # beam units re-selected within a pass until none changes (crossing beams share joints)
 COLUMN_SUPPORTED_BAR_HX_MAX_IN = 14.0
 # Beam cage refusals by code: (class, the first rule the cage fails). The classes keep the code limits of a section apart
 # from the declared detailing and proportioning rules of this basis and from evidence that could not be established.
 BEAM_REFUSALS = {
+    "axial_domain": ("hard_section", "22.2: external axial force is outside the developed beam section N-M domain"),
     "through_joint_depth": ("hard_section", "18.8.2.3: the joint depth parallel to a through bar is below 20 db (26 db, Grade 80)"),
     "bar_layers_unsettled": ("missing_evidence", "the straight-bar layering did not settle: there are no rows to price"),
     "rows_invalid": ("missing_evidence", "the layering returned rows that are not a valid arrangement"),
@@ -147,11 +150,17 @@ BEAM_REFUSALS = {
                                                      "(RebarConfig.rho_beam_practical_max, 2026-10-17)"),
     "minimum_steel": ("hard_section", "9.6.1.2: below the minimum flexural steel"),
     "strength_balance": ("hard_section", "18.6.3.2: end reversal or along-span strength balance"),
+    "hook_tail_depth": ("hard_section", "Table 25.3.1: the standard 90-degree hook of a terminating bar row does not fit "
+                                        "the member depth inside the cover"),
+    "hook_rows_same_lane": ("construction_policy", "in-plane standard hooks of a top and a bottom row sharing a lane cross: "
+                                                   "the rows are closer than bend radius + extension + one bar diameter"),
 }
 # An admissible cage that does not thread the column cages, by cause. Both are construction policy: the bar grid and the
 # passage clearance give the lanes, BEAM_BAR_MAX_LAYERS caps the layers (SMRF_Cage_Geometry.passage_policy).
 THREADING_BLOCKS = {"no_lane": "no bar of this size passes between the column bars on the bar grid",
-                    "layer_cap": "the lanes would need more layers than Structure_Parameters.BEAM_BAR_MAX_LAYERS"}
+                    "layer_cap": "the lanes would need more layers than Structure_Parameters.BEAM_BAR_MAX_LAYERS",
+                    "common_lane": "each joint type has lanes, but no one lane set clears the column bars of all of them "
+                                   "(SMRF_Splice_Physical.group_beam_lanes)"}
 THREADING_EVIDENCE_ID = "beam_threading_evidence_v2"   # v2: core-cage and transition-joint blockage and look-ahead apart
 THREADING_PROSPECTS_MAX = 6               # stronger nonthreading cages carried as repair prospects, per beam unit
 INSTALLED_LANES_ID = "installed_cage_lane_evidence_v1"
@@ -252,6 +261,7 @@ def column_cage_candidates(design, cfg, rho_max=None, layout=None):
 
 def beam_cage_candidates(design, cfg, through_depth_in=None):
     """Beam cages of the declared domain for one section (bar size and counts; hoops unchanged)."""
+    validate_beam_practical_ceiling(cfg)
     result = []
     for bar_size in cfg.rebar.bar_sizes_beam:
         if through_depth_in is not None and sp.through_joint_bar_depth_factor() * sp.rebar_diameter(bar_size) > through_depth_in:
@@ -281,6 +291,22 @@ def _beam_through_depth(state, gid):
     return min(depths) if depths else None
 
 
+def _has_terminating_end(state, gid):
+    """Whether a member of the beam group ends at a joint with no beam of its own group beyond it on the same axis
+    (its bars hook there)."""
+    for tag in state.groups[gid]["member_tags"]:
+        member = state.member(tag)
+        k, i, j = member.story_or_floor, member.grid_i, member.grid_j
+        axis = mp.beam_axis(member)
+        for gi, gj in (((i, j), (i + 1, j)) if member.member_type == "beam_x" else ((i, j), (i, j + 1))):
+            joint = mg.joint_members(k, gi, gj)
+            minus, plus = joint[f"beam_{axis}_minus"], joint[f"beam_{axis}_plus"]
+            # Two beams of different groups also hook at the joint (the joint context treats it as mixed).
+            if minus is None or plus is None or minus.group_id != plus.group_id:
+                return True
+    return False
+
+
 def _refused(code, detail):
     """A refused beam cage: its first reason, by code and class (BEAM_REFUSALS)."""
     return {"admissible": False, "reason": detail, "reason_code": code, "reason_class": BEAM_REFUSALS[code][0]}
@@ -302,6 +328,7 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg, representatives=
     Returns {"admissible", "threads", "layers", "lanes", "dcr", "dcr_basis", "dcr_union_bound", "steel_in2", "reason",
     "reason_code", "reason_class"}; a refusal names only its first reason.
     """
+    validate_beam_practical_ceiling(cfg)
     from Design.SMRF_Beam_Slab_Strength import validate_bar_rows
     design = candidate
     trial = _trial_state(state, gid, design)
@@ -336,6 +363,13 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg, representatives=
     with mg.installed(trial):
         tags = tuple(representatives if representatives is not None else checks.beam_group_representatives(trial, gid))
         resolved = [checks.resolved_beam_flexural_strengths(trial.member(tag), rows) for tag in tags]
+        axial_resolved = {}
+        if paired_demand is not None:
+            from Design.SMRF_Beam_Axial import installed_member_sections, capacity_at_axial
+            for tag in tags:
+                pair = paired_demand.get(tag, ())
+                if len(pair) >= 4:
+                    axial_resolved[tag] = capacity_at_axial(installed_member_sections(trial.member(tag), rows), pair[2:4])
     if any(not value[sign].get("tension_controlled", True) for value in resolved for sign in ("positive", "negative")):
         return _refused("tension_control", "composite beam is not tension controlled (9.3.3.1)")
     for sign in ("positive", "negative"):
@@ -345,7 +379,7 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg, representatives=
     as_top, as_bot = design.top_bars * ab, design.bot_bars * ab
     as_min = max(strengths["positive"]["as_min_in2"], strengths["negative"]["as_min_in2"])
     code_cap = sp.beam_rho_max_code()
-    rho_cap = min(code_cap, getattr(cfg.rebar, "rho_beam_practical_max", 0.025))
+    rho_cap = min(code_cap, cfg.rebar.rho_beam_practical_max)
     if d <= 0 or max(as_top, as_bot) > rho_cap * design.b_in * d:
         # Above the code limit, or above the practical ceiling only (a proportioning policy of this basis).
         over_code = d <= 0 or max(as_top, as_bot) > code_cap * design.b_in * d
@@ -384,6 +418,64 @@ def evaluate_beam_candidate(state, gid, candidate, demand, cfg, representatives=
                       paired_demand[tag][1] / value["negative"]["phi_mn_kip_in"] if paired_demand[tag][1] > 0.0 else 0.0)
                   for tag, value in zip(tags, resolved))
         basis = "member_paired"
+        if axial_resolved:
+            for tag, value in axial_resolved.items():
+                if any(value['domain_failure']):
+                    return _refused('axial_domain', 'external beam axial force exceeds the developed section domain')
+                if not all(value['tension_controlled']):
+                    return _refused('tension_control', 'beam at external axial force is not tension controlled where 9.3.3.1 requires it')
+            paired_values, union_values = [], []
+            for tag, value in axial_resolved.items():
+                positive = max(float(min(value['positive_kip_in'])), 1e-9)
+                negative = max(float(min(value['negative_kip_in'])), 1e-9)
+                paired_values.append(max(paired_demand[tag][0]/positive, paired_demand[tag][1]/negative))
+                union_values.append(max(mu_pos/positive, mu_neg/negative))
+            # A section/context axial envelope is conservative across its
+            # combinations. No zero-N probe can accept an unchecked N-M row.
+            dcr = max(paired_values)
+            union = max(union_values)
+            basis = 'member_paired_external_axial_envelope'
+    # Last, so that every earlier refusal keeps its own first reason: a cage every other rule admits must also be
+    # one whose terminating rows can take their standard hooks (the joint context's rule, SMRF_Cage_Geometry). Only
+    # where a slab mat layout is installed: without one the joint context is not evaluated and its rows stay unknown.
+    from Design import SMRF_Conventional_Detail as conventional
+    terminating = False
+    if sp.SLAB_THICKNESS_IN is not None and (sp.SLAB_REINFORCEMENT or {}).get("layout") is not None and not conventional.active():
+        with mg.installed(trial):
+            terminating = _has_terminating_end(trial, gid)
+    if terminating:
+        from Design.SMRF_Cage_Geometry import standard_hook_tail_fits
+        for face in ("top", "bottom"):
+            for row, offset in enumerate(rows[face]["offsets_in"]):
+                if not standard_hook_tail_fits(design.bar_size, face, offset, design.h_in, sp.BEAM_CLEAR_COVER_IN):
+                    return _refused("hook_tail_depth", f"the standard 90-degree hook of {face} row {row + 1} (No. {design.bar_size} "
+                                                       f"at {offset:g} in from the face) does not fit the {design.h_in:g} in depth")
+        from Design.SMRF_Cage_Geometry import same_lane_hooks_clear, same_lane_hook_separation_in
+        from Design.SMRF_Splice_Physical import group_beam_lanes
+        with mg.installed(trial):
+            lane_record = group_beam_lanes()[gid]
+        if lane_record.get("status") == "pass":
+            lanes_of = {}
+            for point in lane_record.get("coordinates") or []:
+                lanes_of.setdefault((point["source_face"], point["row"]), set()).add(round(point["x_in"], 6))
+            for top_row, top_offset in enumerate(rows["top"]["offsets_in"]):
+                for bottom_row, bottom_offset in enumerate(rows["bottom"]["offsets_in"]):
+                    if (lanes_of.get(("top", top_row), set()) & lanes_of.get(("bottom", bottom_row), set())
+                            and not same_lane_hooks_clear(design.bar_size, top_offset, bottom_offset, design.h_in)):
+                        return _refused("hook_rows_same_lane",
+                                        f"top row {top_row + 1} and bottom row {bottom_row + 1} share a lane "
+                                        f"{design.h_in - top_offset - bottom_offset:g} in apart; in-plane No. {design.bar_size} "
+                                        f"hooks need {same_lane_hook_separation_in(design.bar_size):.2f} in")
+    # The physical inventory needs one lane set clear of the column bars of every joint type of the group, which the
+    # tightest joint type alone does not show. Established failure only: an inventory not evaluated changes nothing.
+    if threads and sp.SLAB_THICKNESS_IN is not None and (sp.SLAB_REINFORCEMENT or {}).get("layout") is not None and not conventional.active():
+        from Design.SMRF_Splice_Physical import group_beam_lanes
+        with mg.installed(trial):
+            common = group_beam_lanes()[gid]
+        if common.get("status") == "fail":
+            threads = False
+            lanes = {**lanes, "blocked_by": "common_lane", "common_lanes_found": len(common.get("pool_from_left_in") or []),
+                     "common_lanes_requested": common.get("requested_maximum")}
     return {"admissible": True, "threads": threads, "layers": max(rows["top"]["layers"], rows["bottom"]["layers"]),
             "lanes": lanes, "dcr": dcr, "dcr_basis": basis, "dcr_union_bound": union, "steel_in2": as_top + as_bot,
             "reason": None, "reason_code": None, "reason_class": None,
@@ -398,10 +490,12 @@ def _paired_beam_demand(state, gid, rows):
     representative, of_tag = {}, {}
     for tag in state.groups[gid]["member_tags"]:
         of_tag[tag] = representative.setdefault(checks.beam_section_context(state.member(tag)), tag)
-    demand = {tag: (0.0, 0.0) for tag in representative.values()}
-    for tag, _combination, mu_pos, mu_neg, _vu in rows:
+    demand = {tag: (0.0, 0.0, 0.0, 0.0) for tag in representative.values()}
+    for tag, _combination, mu_pos, mu_neg, _vu, *axial in rows:
         rep = of_tag[tag]
-        demand[rep] = (max(demand[rep][0], mu_pos), max(demand[rep][1], mu_neg))
+        demand[rep] = (max(demand[rep][0], mu_pos), max(demand[rep][1], mu_neg),
+                       min(demand[rep][2], *axial) if axial else demand[rep][2],
+                       max(demand[rep][3], *axial) if axial else demand[rep][3])
     return tuple(representative.values()), demand
 
 
@@ -642,7 +736,8 @@ def _threading_evidence(state, gids, installed, priced, refusals, domain_size, c
     missing = sum(classes[gid].get("missing_evidence", 0) for gid in gids)
     causes = {}
     for _candidate, result in blocked:
-        cause = "no_lane" if any((row.get("lanes") or {}).get("blocked_by") == "no_lane" for row in result["by_group"]) \
+        blocks = [(row.get("lanes") or {}).get("blocked_by") for row in result["by_group"]]
+        cause = "no_lane" if "no_lane" in blocks else "layer_cap" if "layer_cap" in blocks else "common_lane" if "common_lane" in blocks \
             else "layer_cap"
         causes[cause] = causes.get(cause, 0) + 1
     entry = next((_priced_entry(gids, c, r) for c, r in priced if _cage(c) == _cage(installed)), None)
@@ -715,6 +810,7 @@ def select_beam_groups(state, gids, actions, cfg, installed_only=False):
     block is the threading evidence of the module docstring. ``installed_only``: the installed cage is the only
     candidate, under every rule below (verify_installed_selection); status "selected" then says it is admissible in
     every group's place and within dcr_hard_max."""
+    validate_beam_practical_ceiling(cfg)
     gids = tuple(gids)
     current = state.designs[gids[0]]
     rows_by = {gid: checks.beam_demand_rows(state.groups[gid]["member_tags"], actions) for gid in gids}
@@ -885,6 +981,7 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0, requirem
     feasibility: a supported transition, and 18.7.3.2 at the band-boundary joints with the lower band's
     cage below and the upper band's above.
     """
+    validate_beam_practical_ceiling(cfg)
     chain = _column_chain(state, location)
     label = location if isinstance(location, str) else "+".join(location)
     if not chain:
@@ -920,17 +1017,33 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0, requirem
                              and discontinuous_column_exempt(ranges[tag]["j"][1], member.design.b_in * member.design.h_in,
                                                              member.design.fc_ksi)[0])
         domain = column_cage_candidates(current, cfg, layout=mg.layout_of(state.policy_id))
+        from Design import SMRF_Conventional_Detail as conventional
+        if conventional.active() and sp.NUM_FLOOR in stories:
+            # 18.8.5.1 and 18.8.5.3 cover No. 3 through No. 11: a larger bar has no supported termination at the roof
+            # (2026-11-07). The band of the top story is offered only bars it can anchor; the exclusion is recorded.
+            kept = [c for c in domain if c.bar_size <= 11]
+            rejected["roof_termination_bar_size"] = len(domain) - len(kept)
+            domain = kept
         if installed_only:
             domain = [c for c in domain if (c.bar_size, c.top_bars, c.bot_bars, c.side_bars)
                       == (current.bar_size, current.top_bars, current.bot_bars, current.side_bars)]
             if not domain:
                 rejected["not_in_domain"] = 1
+        from Design import SMRF_Capacity_Design as capacity_design
+        band_pu = capacity_design.seismic_column_compression_kip(actions, tags)
+        if band_pu is None:
+            band_pu = max(value for tag in tags for end in ("i", "j") for value in ranges[tag][end])
         for candidate in domain:
             if not _cage_develops_its_bars(candidate, clear_height):
                 # ACI 318-19 18.7.4.3 (2026-10-02): 1.25 ld at Ktr = 0 must fit in half the clear height.
                 rejected["bar_bond"] += 1
                 continue
-            envelope = checks.column_pm_envelope(checks.column_pm_diagrams(candidate), rows, alpha)
+            if not capacity_design.column_hoop_feasibility(candidate, band_pu)[0]:
+                # 18.7.5.2-18.7.5.4 (2026-11-07): no catalog hoop confines this cage under the band's Pu; the hoops are
+                # designed after the selection (Group_Capacity.column_group_capacity) and would not exist.
+                rejected["hoops"] = rejected.get("hoops", 0) + 1
+                continue
+            envelope = checks.column_pm_selection_screen(checks.column_pm_diagrams(candidate), rows, cfg.dcr.dcr_hard_max, alpha)
             dcr = envelope["dcr"]
             if envelope["outside_domain"]:
                 # A demand outside the cage's axial domain, in compression or in tension, rejects the cage by name.
@@ -939,6 +1052,8 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0, requirem
             if dcr > cfg.dcr.dcr_hard_max:
                 rejected["strength"] += 1
                 continue
+            if not envelope["all_rows_checked"]:
+                raise RuntimeError("A partial column-strength screen cannot permit a cage.")
             needed = [math.ceil(max(b.top_bars, b.bot_bars) / fit) if fit and fit > 0 else 99
                       for b, axis in core_beams[gids] for fit in (bar_layers.bars_per_layer(candidate, b, axis),)]
             layers = max(needed, default=1)
@@ -1035,10 +1150,14 @@ def select_column_chain(state, location, actions, cfg, scwb_margin=1.0, requirem
         key = (k, lower["design"], upper["design"])
         if key not in transitions:
             clear, depth = boundary[k]
+            from Design import SMRF_Conventional_Detail as conventional
             transition = column_transition(lower["design"], upper["design"], fy_ksi=sp.FY_KSI,
                                            clear_cover_in=sp.COL_CLEAR_COVER_IN, upper_clear_height_in=clear,
-                                           joint_depth_in=depth)
-            transitions[key] = (transition["supported"],
+                                           joint_depth_in=depth,
+                                           physical_context={"conventional": True} if conventional.active() else None)
+            # A pair whose detail is not supported is not offered; a supported catalog option elsewhere stays available.
+            usable = transition["supported"] and (not conventional.active() or transition["physical_detail"]["status"] == "pass")
+            transitions[key] = (usable,
                                 transition.get("extra_bar_length_in", 0.0) * sp.rebar_area(lower["design"].bar_size))
             transition_details[key] = transition.get("detail")
             inventories[key] = bar_layers.transition_inventory(lower["design"], upper["design"], transition)
@@ -1168,6 +1287,7 @@ def select_reinforcement(state, actions, cfg, scwb_margin=1.0, max_passes=4, coo
     The state returned has a complete arrangement whose rows fit: a terminal arrangement that does not is closed
     (close_terminal_arrangement), or CageArrangementError carries the incomplete outcome (2026-11-01).
     """
+    validate_beam_practical_ceiling(cfg)
     tied = bool(state.ties())
     report = {"rules": SYSTEM_RULES_ID if tied else RULES_ID, "objective": cfg.dcr.objective, "scwb_margin": scwb_margin,
               "passes": [], "settled": False, "policy": state.policy_id,
@@ -1363,6 +1483,7 @@ def coordinate_threading(state, actions, cfg, scwb_margin, max_passes, report, r
     inputs (_coordination_key) and reported, not run again, for the same inputs; any changed input is a new key, and an
     input without a canonical content form bypasses the memo. Selection only: the cages of the declared domain at the
     installed sizes; column-size alternatives are the evidence's look-ahead, not changed here; nothing is accepted here."""
+    validate_beam_practical_ceiling(cfg)
     log = {"rules": COORDINATION_ID, "status": "not_needed", "trials": [], "adopted": [],
            "limits": {"units": COORDINATION_MAX_UNITS, "prospects_per_unit": COORDINATION_MAX_PROSPECTS,
                       "trials": COORDINATION_MAX_TRIALS, "passes_per_trial": max_passes},
@@ -1682,6 +1803,7 @@ def verify_installed_selection(state, actions, cfg, scwb_margin=1.0, reserve=Non
     ``failing`` names each rule that is not met (rows, rows_unsettled or rows_malformed for the arrangement, a beam
     unit and its status, a column line and its status); an arrangement whose layers do not settle keeps its
     ``settle_error``."""
+    validate_beam_practical_ceiling(cfg)
     with mg.installed(state):
         audit = bar_layers.row_audit(state)
     result = {"rules": VERIFICATION_ID, "state_identity": state.identity(), "verified": False,
@@ -1753,6 +1875,7 @@ def close_terminal_arrangement(state, actions, cfg, scwb_margin, report, reserve
     becomes the column reports in force (report["columns_in_force"]), so a later closure on the same report starts from
     it. An arrangement that does not settle, or a malformed row record, is raised
     (Model.Member_Bar_Layers.raise_arrangement_errors), not closed."""
+    validate_beam_practical_ceiling(cfg)
     audit = bar_layers.row_audit(state)
     bar_layers.raise_arrangement_errors(audit)
     log = {"rules": TERMINAL_RULES_ID, "status": "valid", "context": (inputs or {}).get("call", "select_reinforcement"),

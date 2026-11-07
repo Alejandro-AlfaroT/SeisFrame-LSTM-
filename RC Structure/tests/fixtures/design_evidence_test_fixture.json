@@ -1,0 +1,78 @@
+{
+  "schema": "design_evidence_profile_v1",
+  "profile_id": "test_fixture_asserted_slab_actions",
+  "kind": "test_fixture",
+  "review_status": "reviewed_for_declared_scope",
+  "provenance": {
+    "prepared_by": "TEST FIXTURE - not an engineering review",
+    "prepared_date": "2026-11-01",
+    "purpose": "Exercises the asserted path of the design-evidence profile loader in tests only; never a run configuration (the runner refuses a test fixture)."
+  },
+  "scope": {
+    "case_id": "grouped_fixture_frame",
+    "case_sha256": "7da66690ae5e5f77b8b608b606a8fab32f80f4f0e630e41781e570fd21db9654",
+    "profile": "fixture_profile",
+    "geometry": {
+      "num_bay_x": 2,
+      "num_bay_y": 3,
+      "num_floor": 4,
+      "bay_x_in": 240.0,
+      "bay_y_in": 216.0,
+      "story_h_in": 168.0
+    },
+    "materials": {
+      "slab_fy_ksi": 60.0,
+      "concrete_unit_weight_kcf": 0.15
+    },
+    "loads": {
+      "floor_live_load_ksf": 0.05,
+      "superimposed_dead_load_ksf": 0.05
+    },
+    "slab_policy": {
+      "live_load_patterning": true,
+      "transfer_mesh_per_bay": null,
+      "minimum_thickness_in": 5.0,
+      "maximum_thickness_in": 14.0,
+      "thickness_increment_in": 0.5
+    },
+    "floor_sections_sha256": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "slab_thickness_in": 7.0
+  },
+  "slab_refinement": {
+    "recipe": "graded_face_v1",
+    "levels": 2,
+    "max_shells": 4096,
+    "moment_tolerance": 0.9,
+    "shear_tolerance": 0.9,
+    "tolerance_basis": "TEST FIXTURE only: a loose two-level screen for software tests, not an engineering tolerance"
+  },
+  "slab_refinement_basis": "TEST FIXTURE only: exercises the loader; not a numerical criterion for any structure",
+  "slab_action_assertions": {
+    "analysis_applicability_verified": true,
+    "all_floors_enveloped": true,
+    "load_pattern_envelope_verified": true,
+    "spatial_envelope_per_unit_width": true,
+    "twisting_moment_resolution_verified": true,
+    "zero_membrane_force_verified": true,
+    "verified": true,
+    "two_way_shear_path_assessed": false,
+    "asserted_by": "TEST FIXTURE - not an engineering review",
+    "assertion_date": "2026-11-01",
+    "assertion_basis": "TEST FIXTURE only: asserts nothing about any structure"
+  },
+  "review": {
+    "reviewed_by": "TEST FIXTURE - not an engineering review",
+    "review_date": "2026-11-01",
+    "basis": "TEST FIXTURE only",
+    "decision": "none: a software test fixture",
+    "evidence": [
+      {
+        "path": "design_evidence_fixture_review.txt",
+        "sha256": "c0a609fedd60806f0b56a0852ea920f274bbe6c315b8df22b21b4dc46e970fe7",
+        "description": "the fixture's stand-in evidence file"
+      }
+    ]
+  }
+}

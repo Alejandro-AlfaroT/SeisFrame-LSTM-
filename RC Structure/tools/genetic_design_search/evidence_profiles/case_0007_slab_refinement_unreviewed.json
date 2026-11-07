@@ -1,0 +1,68 @@
+{
+  "schema": "design_evidence_profile_v1",
+  "profile_id": "case_0007_slab_refinement_unreviewed_example",
+  "kind": "unreviewed_example",
+  "review_status": "unreviewed",
+  "provenance": {
+    "prepared_by": "SeisFrame research workflow (example file, no engineering review)",
+    "prepared_date": "2026-11-01",
+    "purpose": "Run case_0007 with the slab actions refined on nested meshes so that numerical slab evidence is produced and recorded; every engineering assertion stays false, so no slab layout is selected and the strong-column checks that need the developed slab stay unknown."
+  },
+  "scope": {
+    "case_id": "case_0007",
+    "case_sha256": "ffb9ba87e4bde33e9d49e295acbb60cd8a022731e4af64547d7ba0edb492a01c",
+    "profile": "v2_nonlinear_flexure_screening_v1",
+    "geometry": {
+      "num_bay_x": 3,
+      "num_bay_y": 3,
+      "num_floor": 6,
+      "bay_x_in": 282.0,
+      "bay_y_in": 336.0,
+      "story_h_in": 186.0
+    },
+    "materials": {
+      "slab_fy_ksi": 60.0,
+      "concrete_unit_weight_kcf": 0.15
+    },
+    "loads": {
+      "floor_live_load_ksf": 0.05,
+      "superimposed_dead_load_ksf": 0.05
+    },
+    "slab_policy": {
+      "live_load_patterning": true,
+      "transfer_mesh_per_bay": null,
+      "minimum_thickness_in": 5.0,
+      "maximum_thickness_in": 14.0,
+      "thickness_increment_in": 0.5
+    },
+    "floor_sections_sha256": null,
+    "slab_thickness_in": null
+  },
+  "slab_refinement": {
+    "recipe": "graded_face_v1",
+    "levels": 4,
+    "max_shells": 130000,
+    "local_extension": {
+      "method": "failed_witness_face_band_v1",
+      "max_extra_levels": 2
+    },
+    "moment_tolerance": 0.05,
+    "shear_tolerance": 0.05,
+    "tolerance_basis": "Investigation criterion, not an ACI requirement or a validated error bound: the 5 percent all-strip screen inherited from the 2026-09-24 fixed-candidate benchmark (graded face meshes 12/24/48/60 cells per bay, at most two failed-witness face-band extensions inside the same 130,000-shell budget)."
+  },
+  "slab_refinement_basis": "Numerical evidence only (2026-11-01): the case_0007 validation bundle declares this plan, tolerance, shell budget and stopping rule before solving; a failed or unresolved comparison stays failed and is never replaced by an earlier passing mesh. The tolerance is an investigation criterion, not an ACI requirement or a validated error bound.",
+  "slab_action_assertions": {
+    "analysis_applicability_verified": false,
+    "all_floors_enveloped": false,
+    "load_pattern_envelope_verified": false,
+    "spatial_envelope_per_unit_width": false,
+    "twisting_moment_resolution_verified": false,
+    "zero_membrane_force_verified": false,
+    "verified": false,
+    "two_way_shear_path_assessed": false,
+    "asserted_by": "",
+    "assertion_date": "",
+    "assertion_basis": ""
+  },
+  "review": null
+}

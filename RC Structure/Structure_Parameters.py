@@ -173,15 +173,27 @@ def snap_up_to_grid(value_in, grid_in=_MODULE_GRID):
 
 
 def first_bar_offset_in(clear_cover_in, hoop_db_in, bar_db_in, grid_in=_MODULE_GRID):
-    """Face to the centre of the first bar, from the SPECIFIED clear cover.
+    """Corner-bar centroid offset, basis ``hoop_corner_containment_v1``.
 
-    On the grid: the grid step at or beyond the specified cover + the layout hoop (the larger of the
-    member's hoop and BAR_LAYOUT_HOOP_DB_IN) + half the bar, so the hoop selected later never moves the
-    bars. Without a grid (None, pre-rule records): cover + hoop + half the bar exactly.
+    A nominal bar cylinder must fit inside the curved hoop corner, not just
+    between its straight legs. Table 25.3.2 of ACI 318-19 gives minimum
+    transverse inside bend diameters 4dt (#3--5) and 6dt (#6--8). With
+    inside radius Ri, the diagonal distance to the corner centre is at most
+    Ri-db/2. The larger layout hoop on a grid keeps later hoop selection
+    from moving the longitudinal cage. Grid rounding remains outward.
+    Dimensions are the Code's nominal ASTM equivalent diameters (25.1);
+    this function does not purport to specify a mill's rib tolerances.
     """
-    if _grid(grid_in) is None:
-        return clear_cover_in + hoop_db_in + 0.5 * bar_db_in
-    return snap_up_to_grid(clear_cover_in + max(hoop_db_in, BAR_LAYOUT_HOOP_DB_IN) + 0.5 * bar_db_in, grid_in)
+    grid = _grid(grid_in)
+    cover, tie, diameter = map(float, (clear_cover_in, hoop_db_in, bar_db_in))
+    if not all(math.isfinite(v) for v in (cover, tie, diameter)) or cover < 0 or min(tie, diameter) <= 0:
+        raise ValueError("Cover must be nonnegative and bar diameters positive and finite.")
+    tie = tie if grid is None else max(tie, BAR_LAYOUT_HOOP_DB_IN)
+    if tie > 1.0 + 1e-9:
+        raise ValueError("Transverse bends above No. 8 have no declared Table 25.3.2 geometry.")
+    radius = max((2.0 if tie <= 0.625 + 1e-9 else 3.0) * tie, diameter / 2.0)
+    corner = cover + tie + radius - (radius - diameter / 2.0) / math.sqrt(2.0)
+    return snap_up_to_grid(max(cover + tie + diameter / 2.0, corner), grid_in)
 
 
 def face_bar_pitches_in(width_in, first_in, count, grid_in=_MODULE_GRID):
@@ -276,14 +288,27 @@ def _member_bar_sizes(member, bar_size, stirrup_bar_size):
 
 
 def clear_cover_provided_in(member_type, bar_size=None, stirrup_bar_size=None):
-    """The clear cover outside the hoops as built: the first bar on the grid in the hoop corner, less the
-    hoop and half the bar. At least the specified cover; the legacy COVER without a slab."""
+    """Outside cover of the actual minimum-radius hoop corner containing the first bar."""
     member = _reinforcement_member(member_type)
     if SLAB_THICKNESS_IN is None:
         return COVER
     bar_size, stirrup_bar_size = _member_bar_sizes(member, bar_size, stirrup_bar_size)
-    return (longitudinal_cover_in(member, bar_size, stirrup_bar_size)
-            - rebar_diameter(stirrup_bar_size) - 0.5 * rebar_diameter(bar_size))
+    return hoop_clear_cover_from_centroid_in(longitudinal_cover_in(member, bar_size, stirrup_bar_size),
+                                             rebar_diameter(stirrup_bar_size), rebar_diameter(bar_size))
+
+
+def hoop_corner_centroid_inset_in(hoop_db_in, bar_db_in):
+    """Outside hoop face to corner-bar centroid, hoop_corner_containment_v1."""
+    tie,diameter=float(hoop_db_in),float(bar_db_in)
+    if not all(math.isfinite(v) and v>0 for v in (tie,diameter)) or tie>1.+1e-9:
+        raise ValueError("Positive finite bar diameters and transverse bar no larger than No.8 are required.")
+    radius=max((2. if tie<=.625+1e-9 else 3.)*tie,diameter/2)
+    return max(tie+diameter/2,tie+radius-(radius-diameter/2)/math.sqrt(2))
+
+
+def hoop_clear_cover_from_centroid_in(centroid_offset_in, hoop_db_in, bar_db_in):
+    """Invert physical rounded-corner containment; the selected hoop follows its corner bar."""
+    return float(centroid_offset_in)-hoop_corner_centroid_inset_in(hoop_db_in,bar_db_in)
 
 
 def core_cover_in(member_type, bar_size=None, stirrup_bar_size=None):
@@ -306,7 +331,7 @@ def longitudinal_cover_in(member_type, bar_size=None, stirrup_bar_size=None):
 
     Optional bar sizes price a candidate without changing the current section.
     New-mode bars sit in the hoop corners on the bar position grid: the first
-    grid step at or beyond c_clear + d_hoop + d_bar/2 (first_bar_offset_in).
+    grid step at or beyond the rounded-corner containment bound (first_bar_offset_in).
     """
     member = _reinforcement_member(member_type)
     if SLAB_THICKNESS_IN is None:
@@ -328,6 +353,10 @@ def longitudinal_cover_in(member_type, bar_size=None, stirrup_bar_size=None):
 #   "x_over_y", "y_over_x"  fixed conventions.   "none"  legacy single elevation.
 BEAM_BAR_STACKING = "inner_over_outer"
 BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN = 1.0     # ACI 318-19 25.2.2, clear between layers
+# The reinforcement detailing basis of the evaluator (2026-11-07): closed-form code rules on the frame-plus-transfer
+# production route (Design.SMRF_Conventional_Detail); the 3D bar inventory only where the computed route selects it.
+DETAIL_BASIS = "conventional_detailing_v1"
+BEAM_TORSION_DESIGN = None      # {beam group: torsion design} of the candidate in force (Design.SMRF_Conventional_Floor)
 # Layers of beam bars per face (user decision 2026-09-27: "we can just add another layer"). The bars
 # of a direction that do not pass the column bars in one layer take a second layer directly below
 # (25.2.2), each layer one pitch (db + max(1 in, db)) apart; the lower direction's cage then starts
@@ -493,7 +522,7 @@ def beam_hoop_cover_in(bar_size=None, stirrup_bar_size=None, top_bars=None, bot_
     the hoop corners. The lateral (side) cover is clear_cover_provided_in("beam")."""
     layers = beam_bar_layers(bar_size, top_bars, bot_bars, stirrup_bar_size, max_layers)
     bar_size, stirrup_bar_size = _member_bar_sizes("beam", bar_size, stirrup_bar_size)
-    inset = rebar_diameter(stirrup_bar_size) + 0.5 * rebar_diameter(bar_size)
+    inset = hoop_corner_centroid_inset_in(rebar_diameter(stirrup_bar_size),rebar_diameter(bar_size))
     return {axis: {face: layers[axis][face]["offsets_in"][0] - inset for face in ("top", "bottom")}
             for axis in ("x", "y")}
 
@@ -1424,20 +1453,24 @@ def floor_dead_load_ksf():
     return FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF + slab_self_weight_ksf()
 
 
-def node_tributary_area_in2(i, j):
+def node_tributary_area_in2(i, j, floor=None):
     """
     Tributary floor area (in²) for a structural node at grid position (i, j).
     Corner nodes receive a quarter bay, edge nodes a half bay, interior nodes
     a full bay in each direction.
     """
+    if SLAB_THICKNESS_IN is not None:
+        from Model import Floor_Footprint as fp
+        physical = fp.uniform_floor() if floor is None else fp.physical_floor(floor)
+        return fp.consistent_nodal_areas(physical, fp.geometry())[i, j]
     tx = (BAY_X / 2.0) if (i == 0 or i == NUM_BAY_X) else BAY_X
     ty = (BAY_Y / 2.0) if (j == 0 or j == NUM_BAY_Y) else BAY_Y
     return tx * ty
 
 
-def node_gravity_load_kip(i, j):
+def node_gravity_load_kip(i, j, floor=None):
     """Tributary gravity load (kips, downward) at grid node (i, j)."""
-    return floor_load_ksi() * node_tributary_area_in2(i, j)
+    return floor_load_ksi() * node_tributary_area_in2(i, j, floor)
 
 
 def node_seismic_mass(i, j):
@@ -1446,15 +1479,21 @@ def node_seismic_mass(i, j):
         return node_gravity_load_kip(i, j) / G
     area_weight = ((floor_dead_load_ksf() + SEISMIC_LIVE_LOAD_FRACTION * FLOOR_LIVE_LOAD_KSF)
                    * node_tributary_area_in2(i, j) / 144.0)
-    return (area_weight + node_structural_self_weight_kip(i, j)) / G
+    mass = (area_weight + node_structural_self_weight_kip(i, j)) / G
+    if mass <= 0:
+        raise ValueError("Physical volume exceeds positive lumped floor-mass applicability")
+    return mass
 
 
-def total_floor_gravity_load():
+def total_floor_gravity_load(floor=None):
     """Total gravity load per floor (kips)."""
+    if SLAB_THICKNESS_IN is not None:
+        from Model import Member_Properties as mp
+        return floor_load_ksi() * mp.floor_area_in2(floor)
     return floor_load_ksi() * (BAY_X * NUM_BAY_X) * (BAY_Y * NUM_BAY_Y)
 
 
-def beam_tributary_width_in(beam_axis, perp_index):
+def beam_tributary_width_in(beam_axis, perp_index, floor=None):
     """
     Tributary width (in) for a beam.
 
@@ -1463,6 +1502,18 @@ def beam_tributary_width_in(beam_axis, perp_index):
                   For X-beams this is the j-index (Y-direction).
                   For Y-beams this is the i-index (X-direction).
     """
+    if beam_axis not in ("x", "y"):
+        raise ValueError("Beam tributary axis must be x or y")
+    if SLAB_THICKNESS_IN is not None:
+        from Model import Floor_Footprint as fp
+        physical = fp.uniform_floor() if floor is None else fp.physical_floor(floor)
+        areas = fp.consistent_nodal_areas(physical, fp.geometry())
+        # Longitudinal overhang area is smeared over the actual grid span.
+        # The separate beam-uniform gravity adapter preserves any eccentric
+        # floor first moment with its explicitly applied equivalent couple.
+        if beam_axis == "x":
+            return sum(v for (i,j),v in areas.items() if j==perp_index)/(NUM_BAY_X*BAY_X)
+        return sum(v for (i,j),v in areas.items() if i==perp_index)/(NUM_BAY_Y*BAY_Y)
     if beam_axis == "x":
         n_max  = NUM_BAY_Y
         bay_perp = BAY_Y
@@ -1472,9 +1523,9 @@ def beam_tributary_width_in(beam_axis, perp_index):
     return (bay_perp / 2.0) if (perp_index == 0 or perp_index == n_max) else bay_perp
 
 
-def beam_gravity_wz_kip_per_in(beam_axis, perp_index):
+def beam_gravity_wz_kip_per_in(beam_axis, perp_index, floor=None):
     """Uniform downward load (kip/in, negative) on a beam at perp_index."""
-    trib = beam_tributary_width_in(beam_axis, perp_index)
+    trib = beam_tributary_width_in(beam_axis, perp_index, floor)
     return -floor_load_ksi() * trib
 
 
@@ -1482,12 +1533,17 @@ def pushover_target_disp():
     return PUSHOVER_STEPS * PUSHOVER_DU
 
 
-def col_self_weight_kip_per_in():
-    """Equivalent column line weight; new mode excludes the slab-height slice."""
+def col_self_weight_kip_per_in(i=None, j=None):
+    """Actual indexed column weight; subtract only its slab intersection."""
     if SLAB_THICKNESS_IN is not None:
         _validate_slab_load_state()
-        return (CONCRETE_UNIT_WEIGHT_KCF / 1728.0 * B_COL * H_COL
-                * (STORY_H - SLAB_THICKNESS_IN) / STORY_H)
+        if i is None or j is None:
+            raise ValueError("Slab-aware column weight requires actual grid indices i,j")
+        from Model import Floor_Footprint as fp
+        if not (0 <= i <= NUM_BAY_X and 0 <= j <= NUM_BAY_Y):
+            raise ValueError("Column indices must lie on the structural grid")
+        overlap = fp.column_overlap_area_in2(fp.uniform_floor(), i*BAY_X, j*BAY_Y, H_COL, B_COL)
+        return CONCRETE_UNIT_WEIGHT_KCF / 1728.0 * (B_COL*H_COL*STORY_H-overlap*SLAB_THICKNESS_IN) / STORY_H
     return CONCRETE_UNIT_WEIGHT_KCI * B_COL * H_COL
 
 
@@ -1546,7 +1602,8 @@ def total_structural_self_weight_per_floor():
     n_col    = (NUM_BAY_X + 1) * (NUM_BAY_Y + 1)
     n_beam_x = NUM_BAY_X * (NUM_BAY_Y + 1)
     n_beam_y = (NUM_BAY_X + 1) * NUM_BAY_Y
-    w_col_floor  = col_self_weight_kip_per_in()  * STORY_H * n_col
+    w_col_floor = sum(col_self_weight_kip_per_in(i,j) * STORY_H
+                      for j in range(NUM_BAY_Y+1) for i in range(NUM_BAY_X+1))
     w_beam_floor = (beam_self_weight_kip_per_in("x") * BAY_X * n_beam_x
                     + beam_self_weight_kip_per_in("y") * BAY_Y * n_beam_y)
     return w_col_floor + w_beam_floor
@@ -1561,18 +1618,36 @@ def node_structural_self_weight_kip(i, j):
     """
     if not (0 <= i <= NUM_BAY_X and 0 <= j <= NUM_BAY_Y):
         raise ValueError("Node indices must lie on the structural floor grid.")
+    if SLAB_THICKNESS_IN is not None:
+        return CONCRETE_UNIT_WEIGHT_KCF / 1728.0 * uniform_member_volume_ledger()["nodal_volumes_in3"][i,j]
     incident_x = int(i > 0) + int(i < NUM_BAY_X)
     incident_y = int(j > 0) + int(j < NUM_BAY_Y)
-    return (col_self_weight_kip_per_in() * STORY_H
+    return (col_self_weight_kip_per_in(i,j) * STORY_H
             + 0.5 * incident_x * BAY_X * beam_self_weight_kip_per_in("x")
             + 0.5 * incident_y * BAY_Y * beam_self_weight_kip_per_in("y"))
+
+
+def uniform_member_volume_ledger():
+    """Exact non-slab uniform member volumes; roof extensions handled separately."""
+    from Model import Floor_Footprint as fp
+    columns = [{"x":i*BAY_X,"y":j*BAY_Y,"h_x":H_COL,"b_y":B_COL}
+               for j in range(NUM_BAY_Y+1) for i in range(NUM_BAY_X+1)]
+    beams = [{"axis":"x","line":j*BAY_Y,"start":i*BAY_X+H_COL/2,
+              "end":(i+1)*BAY_X-H_COL/2,"b_in":B_BEAM,"h_in":H_BEAM}
+             for j in range(NUM_BAY_Y+1) for i in range(NUM_BAY_X)]
+    beams += [{"axis":"y","line":i*BAY_X,"start":j*BAY_Y+B_COL/2,
+               "end":(j+1)*BAY_Y-B_COL/2,"b_in":B_BEAM,"h_in":H_BEAM}
+              for i in range(NUM_BAY_X+1) for j in range(NUM_BAY_Y)]
+    return fp.member_volume_ledger(fp.geometry(),fp.uniform_floor(),columns,beams,
+                                  float(SLAB_THICKNESS_IN or 0.),STORY_H)
 
 
 def total_floor_seismic_weight():
     """Floor weight matching exactly the mass assigned to structural grid nodes."""
     if SLAB_THICKNESS_IN is None:
         return total_floor_gravity_load()
-    area = BAY_X * NUM_BAY_X * BAY_Y * NUM_BAY_Y
+    from Model import Floor_Footprint as fp
+    area = fp.uniform_floor()["area_in2"]
     return ((floor_dead_load_ksf() + SEISMIC_LIVE_LOAD_FRACTION * FLOOR_LIVE_LOAD_KSF) * area / 144.0
             + total_structural_self_weight_per_floor())
 
@@ -1581,8 +1656,10 @@ def floor_load_metadata():
     """Persist the load model without changing the existing numeric feature order."""
     selected = SLAB_THICKNESS_IN is not None
     dead = floor_dead_load_ksf()
-    area_sqft = BAY_X * NUM_BAY_X * BAY_Y * NUM_BAY_Y / 144.0
-    column_weight = (NUM_BAY_X + 1) * (NUM_BAY_Y + 1) * STORY_H * col_self_weight_kip_per_in()
+    from Model import Floor_Footprint as fp
+    area_sqft = (fp.uniform_floor()["area_in2"] if selected else BAY_X*NUM_BAY_X*BAY_Y*NUM_BAY_Y) / 144.0
+    column_weight = sum(col_self_weight_kip_per_in(i,j)*STORY_H
+                        for j in range(NUM_BAY_Y+1) for i in range(NUM_BAY_X+1))
     beam_weight_x = NUM_BAY_X * (NUM_BAY_Y + 1) * BAY_X * beam_self_weight_kip_per_in("x")
     beam_weight_y = NUM_BAY_Y * (NUM_BAY_X + 1) * BAY_Y * beam_self_weight_kip_per_in("y")
     return {
@@ -1609,10 +1686,9 @@ def floor_load_metadata():
         "total_seismic_weight_kip": (NUM_FLOOR * total_floor_seismic_weight()
                                      + ((NUM_BAY_X + 1) * (NUM_BAY_Y + 1) * roof_column_extension_weight_kip() if selected else 0.0)),
         "load_accounting_basis": (
-            "Uniform slab over centerline floor footprint; beam drops over clear spans between column faces; "
-            "columns over story height minus slab thickness. Equivalent member weights distributed over "
-            "centerline elements. One column story lumped at its upper floor plus half each incident beam. "
-            "Perimeter surfaces and joints remain centerline-model idealizations, not a physical quantity takeoff."
+            "Slab over actual outer perimeter beam faces; beam drops between column faces; full column "
+            "prisms minus only the actual column/slab overlap. Grid masses integrate these physical "
+            "volumes with piecewise linear shapes, preserving volume and both plan first moments."
             if selected else
             "Legacy bundled slab/finishes/MEP area dead load; full rectangular centerline member gravity weights; "
             "seismic mass uses floor D+100%L only and omits member self-weight."

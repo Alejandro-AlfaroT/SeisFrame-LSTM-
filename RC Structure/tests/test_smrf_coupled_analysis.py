@@ -59,7 +59,10 @@ class CoupledAnalysisTests(unittest.TestCase):
         gamma = .15/1728
         expected_slab = 2.*.1125*240*200/144
         expected_web = 2.*12*(18-5)*(2*(240-18)+2*(200-18))*gamma
-        expected_column = 2.*4.*18*18*(144-5)*gamma
+        # Each 18 in corner column stands 9 in beyond its grid lines and the physical floor (the outer faces of
+        # the 12 in perimeter beams) 6 in: 15 x 15 in of the column is under the slab, and the other 99 in2 is
+        # column concrete through the 5 in slab depth (the frame's clipped column volume, 2026-11-06).
+        expected_column = 2.*4.*(18*18*(144-5)+99*5)*gamma
         ledger = result["weight_ledger"]
         self.assertAlmostEqual(ledger["slab_area_load_kip"], expected_slab)
         self.assertAlmostEqual(ledger["beam_drop_weight_kip"], expected_web)

@@ -33,7 +33,9 @@ def tearDownModule():
 
 LOWER = MemberDesign("column", 30.0, 30.0, 5.0, 10, 4, 4, 2, 4, 4, 4.0, (4, 4))  # No. 10, 4/4/2, No. 4 hoops 4 legs at 4 in
 KWARGS = dict(fy_ksi=60.0, clear_cover_in=1.5, upper_clear_height_in=140.0, joint_depth_in=28.0)
-COVER = 1.5 + 0.5 + 0.5 * 1.27                                                    # clear + No. 4 hoop + half a No. 10
+COVER = 3.0 - (1.0 - 1.27 / 2.0) / math.sqrt(2.0)                                                    # clear + No. 4 hoop + half a No. 10
+HOOP_DELTA = .375 - .25 / math.sqrt(2.0)
+BAR_DELTA = .135 / math.sqrt(2.0)
 BENDS = "the inclined part of the offset bends fits in the joint depth at a slope of at most 1 in 6"
 TIES = "hoop sets at each bend carry 1.5 times the horizontal component of the offset bars"
 
@@ -64,7 +66,7 @@ class DevelopmentAndLap(unittest.TestCase):
     def test_the_table_row_is_decided_from_the_cage(self):
         case = tr.development_case(LOWER, 1.5)
         self.assertTrue(case["favourable"])
-        self.assertEqual(case["clear_cover_to_bar_in"], 2.0)                               # 1.5 in clear + No. 4 hoop
+        self.assertAlmostEqual(case["clear_cover_to_bar_in"], COVER - 1.27/2, places=8)                               # 1.5 in clear + No. 4 hoop
         self.assertAlmostEqual(case["clear_spacing_in"], (30.0 - 2 * COVER) / 3.0 - 1.27, places=12)   # four bars across the face
         crowded = replace(LOWER, b_in=14.0, h_in=14.0, bar_size=11, top_bars=5, bot_bars=5)
         self.assertLess(tr.development_case(crowded, 1.5)["clear_spacing_in"], 1.41)       # closer than one bar diameter
@@ -115,8 +117,8 @@ class BarCoordinates(unittest.TestCase):
 
     def test_the_hoop_and_the_bar_size_move_the_bars(self):
         self.assertAlmostEqual(tr.centroid_cover_in(LOWER, 1.5), COVER, places=12)
-        self.assertAlmostEqual(tr.centroid_cover_in(replace(LOWER, stirrup_bar_size=5), 1.5) - COVER, 0.125, places=12)
-        self.assertAlmostEqual(tr.centroid_cover_in(replace(LOWER, bar_size=8), 1.5) - COVER, -0.135, places=12)
+        self.assertAlmostEqual(tr.centroid_cover_in(replace(LOWER, stirrup_bar_size=5), 1.5) - COVER, HOOP_DELTA, places=12)
+        self.assertAlmostEqual(tr.centroid_cover_in(replace(LOWER, bar_size=8), 1.5) - COVER, -BAR_DELTA, places=12)
 
     def test_pairing_along_a_face_is_one_to_one_in_order_and_of_least_distance(self):
         self.assertEqual(tr._match_along_face([-9.0, -3.0, 3.0, 9.0], [-9.0, -3.0, 3.0, 9.0]), [0, 1, 2, 3])
@@ -144,14 +146,14 @@ class Paths(unittest.TestCase):
         self.assertEqual(result["path_counts"]["offset"], 12)
         self.assertEqual(result["path_counts"]["straight"], 0)
         bend = result["offset_bend"]
-        self.assertAlmostEqual(bend["bar_offset_in"], 0.125 * math.sqrt(2.0), places=12)
-        self.assertAlmostEqual(bend["inclined_length_in"], 6.0 * 0.125 * math.sqrt(2.0), places=12)
+        self.assertAlmostEqual(bend["bar_offset_in"], HOOP_DELTA * math.sqrt(2.0), places=12)
+        self.assertAlmostEqual(bend["inclined_length_in"], 6.0 * HOOP_DELTA * math.sqrt(2.0), places=12)
         corner = next(p for p in result["paths"] if p["face"] == "top" and p["lower_index"] == 0)
-        self.assertAlmostEqual(corner["offset_xy_in"][0], 0.125, places=12)
-        self.assertAlmostEqual(corner["offset_xy_in"][1], -0.125, places=12)
+        self.assertAlmostEqual(corner["offset_xy_in"][0], HOOP_DELTA, places=12)
+        self.assertAlmostEqual(corner["offset_xy_in"][1], -HOOP_DELTA, places=12)
         # a smaller hoop above moves them out by the same amount
         self.assertAlmostEqual(transition(LOWER, lower=replace(LOWER, stirrup_bar_size=5))["offset_bend"]["bar_offset_in"],
-                               0.125 * math.sqrt(2.0), places=12)
+                               HOOP_DELTA * math.sqrt(2.0), places=12)
 
     def test_an_offset_is_measured_between_bar_coordinates_not_between_faces(self):
         # Reviewed counterexample: 30 to 26 in, No. 10 bars, No. 4 hoops below and No. 5 above, an 18 in joint.
@@ -159,8 +161,8 @@ class Paths(unittest.TestCase):
         upper = replace(LOWER, b_in=26.0, h_in=26.0, stirrup_bar_size=5)
         result = transition(upper, joint_depth_in=18.0)
         bend = result["offset_bend"]
-        self.assertAlmostEqual(bend["bar_offset_in"], math.hypot(2.125, 2.125), places=12)
-        self.assertAlmostEqual(bend["inclined_length_in"], 6.0 * math.hypot(2.125, 2.125), places=12)
+        self.assertAlmostEqual(bend["bar_offset_in"], math.hypot(2+HOOP_DELTA, 2+HOOP_DELTA), places=12)
+        self.assertAlmostEqual(bend["inclined_length_in"], 6.0 * math.hypot(2+HOOP_DELTA, 2+HOOP_DELTA), places=12)
         self.assertGreater(bend["inclined_length_in"], 18.0)
         self.assertEqual((result["kind"], result["supported"], result["column_reinforcement_continuous"]), ("offset_bends", False, False))
         self.assertEqual(failed(result), [BENDS])
@@ -178,26 +180,28 @@ class Paths(unittest.TestCase):
         self.assertEqual(result["offset_bend"]["bend_points_below_joint_top_in"], [0.0, result["offset_bend"]["inclined_length_in"]])
         self.assertEqual(result["offset_bend"]["smallest_bar_offset_in"], min(p["offset_in"] for p in result["paths"]))
 
-    def test_smaller_bars_above_are_lapped_in_the_center_half_beside_their_lower_bars(self):
+    def test_smaller_bars_above_cannot_lap_at_intersecting_declared_coordinates(self):
         result = transition(replace(LOWER, bar_size=8))
         self.assertEqual((result["kind"], result["supported"]), ("bar_size_reduction", True))
-        self.assertEqual(result["path_counts"]["lap_spliced"], 12)
+        self.assertTrue(result["physical_bar_clearance"]["passes"])
+        self.assertEqual(result["path_counts"]["mechanically_spliced"], 12)
         splice = result["splice"]
         self.assertAlmostEqual(splice["class_b_lap_in"], tr.lap_length_in(10, 8, 5.0, 60.0), places=9)
-        self.assertEqual((splice["center_half_clear_height_in"], splice["splice_type"]), (70.0, "class_B_lap_center_half"))
+        self.assertEqual((splice["center_half_clear_height_in"], splice["splice_type"]), (70.0, "type_2_mechanical_18.2.7"))
         self.assertEqual(splice["development"]["row_used"], "first row")
         # the lower bars run straight (they lie inside the upper hoops); a corner pair sits 0.135 sqrt(2) apart
-        self.assertEqual(result["bars_bent"], 0)
+        self.assertEqual(result["bars_bent"], 12)
         corner = next(p for p in result["paths"] if p["face"] == "top" and p["lower_index"] == 0)
-        self.assertAlmostEqual(corner["splice_distance_in"], 0.135 * math.sqrt(2.0), places=9)
-        self.assertLessEqual(corner["splice_distance_in"], splice["non_contact_distance_limit_in"])
+        self.assertAlmostEqual(corner["offset_in"], BAR_DELTA * math.sqrt(2.0), places=9)
+        self.assertEqual(splice["splice_type"], "type_2_mechanical_18.2.7")
+        self.assertEqual(splice["lap_geometry_refusals"], 12)
 
     def test_a_lap_that_does_not_fit_or_is_not_permitted_is_a_coaxial_mechanical_splice(self):
         short = transition(replace(LOWER, bar_size=8), upper_clear_height_in=80.0)        # center half 40 in < lap
         self.assertEqual(short["splice"]["splice_type"], "type_2_mechanical_18.2.7")
         self.assertEqual(short["path_counts"]["mechanically_spliced"], 12)
         self.assertEqual(short["bars_bent"], 12)                                          # each lower bar goes to its upper bar's axis
-        self.assertAlmostEqual(short["offset_bend"]["bar_offset_in"], 0.135 * math.sqrt(2.0), places=9)
+        self.assertAlmostEqual(short["offset_bend"]["bar_offset_in"], BAR_DELTA * math.sqrt(2.0), places=9)
         self.assertTrue(short["supported"])
         big = transition(replace(LOWER, bar_size=11), lower=replace(LOWER, bar_size=14))  # No. 14: no lap (25.5.1.1)
         self.assertFalse(big["splice"]["lap_splice_permitted_25_5_1_1"])
@@ -223,13 +227,46 @@ class Paths(unittest.TestCase):
     def test_a_reduced_column_with_smaller_bars_offsets_the_lower_bars_into_the_upper_cage_and_laps_them(self):
         result = transition(replace(LOWER, b_in=28.0, h_in=28.0, bar_size=8))
         self.assertEqual((result["kind"], result["supported"]), ("offset_bends", True))
-        self.assertEqual(result["path_counts"]["lap_spliced"], 12)
+        self.assertTrue(result["physical_bar_clearance"]["passes"])
+        self.assertEqual(result["path_counts"]["mechanically_spliced"], 12)
         self.assertEqual(result["bars_bent"], 12)
-        self.assertAlmostEqual(result["offset_bend"]["bar_offset_in"], math.sqrt(2.0), places=9)   # 1 in per axis: inside the upper hoops
-        self.assertIn("continuous-column branch", " ".join(result["not_established"]))
-        self.assertEqual(result["continuity_branch"], "continuing_column")
+        self.assertAlmostEqual(result["offset_bend"]["bar_offset_in"], (1-BAR_DELTA) * math.sqrt(2.0), places=9)
+        self.assertFalse(result["column_reinforcement_continuous"])
+        self.assertEqual(result["continuity_branch"], "other_conservative_reduced_column")
         self.assertIsNone(result["confinement"]["lower_hoops_continue_above_joint_in"])
         self.assertFalse(result["confinement"]["established_15_2_6_b"])
+
+
+class PhysicalBarClearance(unittest.TestCase):
+    def test_grid_rounding_does_not_make_two_lap_bars_one_bar(self):
+        saved = sp.BAR_POSITION_GRID_IN
+        sp.BAR_POSITION_GRID_IN = 0.5
+        try:
+            result = transition(replace(LOWER, bar_size=8))
+            self.assertTrue(result["supported"])
+            self.assertEqual(result["path_counts"]["mechanically_spliced"], 12)
+            self.assertEqual(result["splice"]["lap_geometry_refusals"], 12)
+            worst = result["physical_bar_clearance"]["minimum_by_region"]["upper_overlap_zone"]
+            self.assertGreater(worst["clearance_in"], 0.0)
+        finally:
+            sp.BAR_POSITION_GRID_IN = saved
+
+    def test_contact_lap_and_mechanical_splice_are_distinct_geometries(self):
+        path = dict(path="lap_spliced", lower_xy_in=[0., 0.], target_xy_in=[0., 0.],
+                    upper_xy_in=[1.135, 0.], offset_in=0.)
+        self.assertTrue(tr.transition_bar_clearance([path], 1.27, 1.0)["passes"])
+        path["upper_xy_in"] = [0., 0.]
+        self.assertFalse(tr.transition_bar_clearance([path], 1.27, 1.0)["passes"])
+        path["path"] = "mechanically_spliced"
+        self.assertTrue(tr.transition_bar_clearance([path], 1.27, 1.0)["passes"])
+
+    def test_crossing_paths_are_detected_between_endpoints(self):
+        paths = [dict(path="offset", lower_xy_in=[x, 0.], target_xy_in=[-x, 0.],
+                      upper_xy_in=[-x, 0.], offset_in=4.) for x in (-2., 2.)]
+        result = tr.transition_bar_clearance(paths, 1., 1.)
+        worst = result["minimum_by_region"]["joint"]
+        self.assertFalse(result["passes"])
+        self.assertEqual(worst["fraction_through_inclined_run"], .5)
 
 
 class BendTies(unittest.TestCase):
@@ -312,7 +349,7 @@ class OutsideTheDeclaredScope(unittest.TestCase):
     def test_every_result_names_the_rule_set_and_what_it_does_not_establish(self):
         for upper in (LOWER, replace(LOWER, bar_size=8), replace(LOWER, b_in=26.0, h_in=26.0), replace(LOWER, b_in=24.0, h_in=24.0)):
             result = transition(upper)
-            self.assertEqual(result["rules"], "column_transition_rules_v2")
+            self.assertEqual(result["rules"], "column_transition_rules_v4_physical_details")
             self.assertIn(result["kind"], tr.KINDS)
             self.assertTrue(result["not_established"])
             self.assertEqual(sum(result["path_counts"].values()), len(result["paths"]))

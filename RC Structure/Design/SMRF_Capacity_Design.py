@@ -195,6 +195,18 @@ def beam_axial_envelope(cases, member_tags, b_in, h_in, fc_ksi, label, expected_
                     problems.append(f"{source} case {cid}: member {tag} has no finite axial_{end}_kip")
                 else:
                     rows.append((float(value), tag, end, cid, source))
+                    extra = float((member.get("floor_actions") or {}).get("n_diaphragm_kip", 0.0))
+                    if extra:
+                        rows.append((float(value) - extra, tag, end, cid, source))
+                        rows.append((float(value) + extra, tag, end, cid, source))
+            if isinstance(member,dict) and str((member.get('span_bending') or {}).get('method_version','')).startswith('physical_piecewise_section_force_extrema_'):
+                try:
+                    from Design.SMRF_Physical_Member_Actions import validated_member_span
+                    full=validated_member_span(member)['full_span']
+                    rows.extend((float(full[key]),tag,label,cid,source) for key,label in
+                                (('axial_min_kip','span_min'),('axial_max_kip','span_max')))
+                except (KeyError,ValueError,TypeError) as exc:
+                    problems.append(f'{source} case {cid}: physical member {tag} axial field did not replay: {exc}')
     ag = b_in * h_in
     limit = ag * fc_ksi / 10.0
     result = {"group_id": label, "ag_in2": ag, "fc_ksi": fc_ksi, "limit_kip": limit,
@@ -401,7 +413,7 @@ def _drop_weight(beam, axis, geometry, sections):
 
 
 def _face_reactions(transfer, axis, position, geometry, factor_dead, factor_live, beam_weight_per_in,
-                    column_depth_in=None):
+                    column_depth_in=None, strip=None):
     """Envelope of the upward joint-face reactions of a family under factored gravity alone.
 
     Every span of the family and every unit case that can load it are
@@ -411,7 +423,10 @@ def _face_reactions(transfer, axis, position, geometry, factor_dead, factor_live
     reaction over spans, the right value the largest right-face reaction,
     so neither end nor sway direction is judged on another end's span. With
     a zero live factor the live envelope is zero. Beam self-weight acts on
-    the clear span.
+    the clear span. ``strip`` (the pieces of Loads.Perimeter_Strip, 2026-11-05)
+    adds, to a perimeter line in every unit case, the perimeter strip of the
+    physical floor on the clear span: the line load the frame receives beside
+    the transfer of the centreline plate.
     """
     nx, ny = geometry["num_bay_x"], geometry["num_bay_y"]
     if axis == "x":
@@ -429,6 +444,7 @@ def _face_reactions(transfer, axis, position, geometry, factor_dead, factor_live
     if not cases:
         return [self_weight, self_weight], "member self-weight only; no slab transfer supplied"
     dead, live = {}, {}
+    strip_loaded = False
     for name, case in cases.items():
         factor = factor_dead if name == "dead" else factor_live
         if factor == 0.0 or not case:
@@ -439,6 +455,12 @@ def _face_reactions(transfer, axis, position, geometry, factor_dead, factor_live
                 continue
             key = (beam["line_index"], beam["span_index"])
             left, right = _span_face_reactions(beam, span, depth, factor)
+            if strip is not None:
+                from Loads.Perimeter_Strip import line_load_kip_per_in
+                strip_end = factor * line_load_kip_per_in(strip, transfer, (axis, *key), name) * clear / 2.0
+                if strip_end:
+                    strip_loaded = True
+                    left, right = left + strip_end, right + strip_end
             if name == "dead":
                 target[key] = [left, right]
             else:
@@ -453,9 +475,14 @@ def _face_reactions(transfer, axis, position, geometry, factor_dead, factor_live
     right_by_span = {key: dead.get(key, [0.0, 0.0])[1] + (live[key][1] if key in live else 0.0) for key in spans}
     left_key = max(left_by_span, key=left_by_span.get)
     right_key = max(right_by_span, key=right_by_span.get)
+    strip_clause = ""
+    if strip_loaded:
+        # The same clause, with the strip method, as the grouped route records (2026-11-06).
+        from Loads.Perimeter_Strip import SHEAR_BASIS_CLAUSE as strip_clause
     return ([left_by_span[left_key] + self_weight, right_by_span[right_key] + self_weight],
             f"joint-face free body over the clear span; left governed by span {left_key}, right by span {right_key}; "
-            f"live enveloped over {len([n for n in cases if n != 'dead'])} unit case(s); plus beam self-weight")
+            f"live enveloped over {len([n for n in cases if n != 'dead'])} unit case(s); plus beam self-weight"
+            + strip_clause)
 
 
 def design_beam_shear(state, strengths, transfer):
@@ -469,6 +496,11 @@ def design_beam_shear(state, strengths, transfer):
     sds = state["sds"]
     families = {}
     worst_ve, worst_mechanism = 0.0, 0.0
+    strip = None
+    if transfer:
+        # The transfer is the centreline plate's; edge lines also carry the perimeter strip (2026-11-05).
+        from Loads.Perimeter_Strip import uniform_pieces
+        strip = uniform_pieces(geometry, bw)
     for key, s in strengths.items():
         entries = []
         for family_name, dead, live in (("seismic_high_gravity", 1.2 + 0.2 * sds, 1.0),
@@ -476,7 +508,7 @@ def design_beam_shear(state, strengths, transfer):
             reactions, basis = _face_reactions(transfer, s["axis"], s["position"], geometry, dead, live,
                                                _drop_weight(beam, s["axis"], geometry, sections),
                                                column_depth_in=(sections["h_col_in"] if s["axis"] == "x"
-                                                                else sections["b_col_in"]))
+                                                                else sections["b_col_in"]), strip=strip)
             data = {"id": f"{key}/{family_name}", "clear_span_in": s["clear_span_in"],
                     "mpr_left_positive_kip_in": s["mpr_positive_kip_in"], "mpr_left_negative_kip_in": s["mpr_negative_kip_in"],
                     "mpr_right_positive_kip_in": s["mpr_positive_kip_in"], "mpr_right_negative_kip_in": s["mpr_negative_kip_in"],
@@ -507,7 +539,8 @@ def design_beam_shear(state, strengths, transfer):
 
 
 def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bars, worst_ve, worst_mechanism,
-                      grid_in=_GRID_OMITTED, transverse_rule=BEAM_TRANSVERSE_SFRS):
+                      grid_in=_GRID_OMITTED, transverse_rule=BEAM_TRANSVERSE_SFRS, torsion_at_per_in=0.0,
+                      torsion_spacing_limit_in=None):
     """Transverse steel of one beam cage for its governing capacity shear (18.6.5, 22.5.1.2).
 
     ``transverse_rule`` BEAM_TRANSVERSE_SFRS: hinge-zone hoops at <= min(d/4, 6 db or 5 db, 6 in) (18.6.4.4).
@@ -549,6 +582,12 @@ def select_beam_hoops(bw, d, fc, fy, bar_size, clear_cover_in, top_bars, bot_bar
         av = legs * _BAR[bar][1]
         s_shear = av * fy * d / vs_required if vs_required > 0 else float("inf")
         s_cap = min(s_shear, *bounds.values())
+        if torsion_at_per_in > 0.0:
+            # An outer leg carries its share of the shear steel plus one leg of torsion steel (22.7.6.1, 9.5.4.3).
+            shear_per_leg = vs_required / (fy * d * legs) if vs_required > 0 else 0.0
+            s_cap = min(s_cap, _BAR[bar][1] / (torsion_at_per_in + shear_per_leg))
+            if torsion_spacing_limit_in is not None:
+                s_cap = min(s_cap, torsion_spacing_limit_in)
         spacing = _grid_down(s_cap)
         if spacing is not None:
             selected = {"bar_size": bar, "legs": legs, "spacing_in": spacing, "av_in2": av,
@@ -1252,7 +1291,9 @@ def design_column_shear(state, strengths, method=None):
     # half the bar and that hoop, never less than the specified cover. A core taken from the selected hoop
     # would move with the selection (a #4 hoop leaves a core 0.25 in wider than a #5) and the hoop selection
     # would have no fixed point; a record from before the bar grid keeps its specified cover exactly.
-    cc = max(col["clear_cover_in"], offset - 0.5 * _BAR[col["bar_size"]][0] - LAYOUT_HOOP_DB_IN)
+    from Structure_Parameters import hoop_clear_cover_from_centroid_in
+    cc = max(col["clear_cover_in"], hoop_clear_cover_from_centroid_in(offset, LAYOUT_HOOP_DB_IN,
+                                                                    _BAR[col["bar_size"]][0]))
     ag = b * h
     envelopes = state.get("column_action_envelopes") or {}
     # Beam probable moments a joint can deliver to its columns, per direction.
@@ -1458,6 +1499,14 @@ def design_column_shear(state, strengths, method=None):
             stories.setdefault(axis, {})[story] = entry
             if axis not in worst or vs_required > worst[axis]["vs_required_kip"]:
                 worst[axis] = entry
+    # Beyond l0 the Vc = 0 assumption of 18.7.6.2.1 does not apply: the same Ve with Vc per 22.5.5.1 (2026-11-07).
+    def _vs_beyond_l0(entry, spec):
+        depth = spec["depth_in"] - offset
+        nu_psi = max(0.0, entry["axial_min_kip"]) * 1000.0 / ag
+        vc_full = (2.0 * math.sqrt(fc * 1000.0) + min(nu_psi / 6.0, 0.05 * fc * 1000.0)) * spec["width_in"] * depth / 1000.0
+        return max(0.0, entry["ve_kip"] / PHI_SHEAR - vc_full)
+    vs_beyond_l0 = {axis: max(_vs_beyond_l0(entry, directions[axis]) for entry in stories[axis].values())
+                    for axis in stories if stories[axis]}
     vs_limit = {axis: 8.0 * math.sqrt(fc * 1000.0) * spec["width_in"] * (spec["depth_in"] - offset) / 1000.0
                 for axis, spec in directions.items()}
     governing = max(worst.values(), key=lambda w: w["vs_required_kip"]) if worst else None
@@ -1465,6 +1514,11 @@ def design_column_shear(state, strengths, method=None):
     # Confinement (18.7.5.4) per direction, with every face bar tied by a leg or crosstie.
     ach = (b - 2.0 * cc) * (h - 2.0 * cc)
     p_max_all = max(v["axial_max_kip"] for axis in stories for v in stories[axis].values()) if stories else 0.0
+    seismic_pu = state.get("column_seismic_axial_max_kip")
+    if seismic_pu is not None:
+        # 18.7.5.2(f) and Table 18.7.5.4: Pu is the largest compression consistent with the factored load combinations
+        # including E (2026-11-07). A caller without that inventory keeps the maximum of every combination supplied.
+        p_max_all = float(seismic_pu)
     ratio = max(0.3 * (ag / ach - 1.0) * fc / fyt, 0.09 * fc / fyt)
     high_axial = p_max_all > 0.3 * ag * fc
     if high_axial:
@@ -1517,6 +1571,8 @@ def design_column_shear(state, strengths, method=None):
                     "bc_in": spec["bc_in"], "vs_required_kip": vs_req,
                     "spacing_from_shear_in": av * fyt * d / vs_req if vs_req > 0 else float("inf"),
                     "spacing_from_confinement_in": av / (ratio * spec["bc_in"]),
+                    "spacing_from_shear_beyond_l0_in": (av * fyt * d / vs_beyond_l0[axis]
+                                                        if vs_beyond_l0.get(axis, 0.0) > 0 else float("inf")),
                     "ash_required_per_in": ratio * spec["bc_in"]}
             s_shear = min(v["spacing_from_shear_in"] for v in per_direction.values())
             s_conf = min(v["spacing_from_confinement_in"] for v in per_direction.values())
@@ -1536,6 +1592,7 @@ def design_column_shear(state, strengths, method=None):
                     "legs_model": min(legs.values()),
                     "av_in2": min(v["av_in2"] for v in per_direction.values()),
                     "spacing_from_shear_in": s_shear, "spacing_from_confinement_in": s_conf,
+                    "spacing_from_shear_beyond_l0_in": min(v["spacing_from_shear_beyond_l0_in"] for v in per_direction.values()),
                     "ash_provided_per_in": min(v["ash_provided_per_in"] for v in per_direction.values()),
                     "ash_required_per_in": max(v["ash_required_per_in"] for v in per_direction.values()),
                     "phi_vn_kip": min(v["phi_vn_kip"] for v in per_direction.values()),
@@ -1588,13 +1645,73 @@ def design_column_shear(state, strengths, method=None):
             "confinement": {"ach_in2": ach, "bc_in": max(b, h) - 2.0 * cc,
                             "bc_by_direction_in": {axis: spec["bc_in"] for axis, spec in directions.items()},
                             "ash_ratio_required": ratio, "high_axial": high_axial,
-                            "hx_in": hx, "so_in": so, "hx_within_8in_when_required": hx_ok},
+                            "hx_in": hx, "so_in": so, "hx_within_8in_when_required": hx_ok,
+                            **({"high_axial_pu_kip": p_max_all,
+                                "high_axial_basis": "the largest compression of the factored load combinations "
+                                                      "including E (18.7.5.2(f))"} if seismic_pu is not None else {})},
             "spacing_bounds_in": bounds, "hoops": selected, "joint_delivery_kip_in": joint_delivery,
             "screen": screen,
             "directions": {axis: {"depth_in": spec["depth_in"], "width_in": spec["width_in"], "legs_key": spec["legs_key"],
                                   "bc_in": spec["bc_in"], "layers_basis": spec["layers_basis"]}
                            for axis, spec in directions.items()},
             "basis": method_basis}
+
+
+def seismic_column_compression_kip(actions, tags):
+    """The largest joint-face compression of these columns in the factored combinations that include E (ex or ey not
+    zero; ACI 318-19 18.7.5.2(f)); None when no successful combination includes E."""
+    values = [float(a["members"][str(tag)][f"axial_{end}_kip"]) for a in actions or []
+              if a.get("analysis_succeeded") is not False and (a.get("ex") or a.get("ey"))
+              for tag in tags for end in ("i", "j")]
+    return max(values) if values else None
+
+
+def column_hoop_feasibility(design, p_max_kip):
+    """(feasible, detail): whether hoops of the catalog can confine this column cage under the axial ``p_max_kip``.
+
+    The hoop loop of design_column_shear without its shear term (Ve needs the probable moments): the same core cover,
+    Table 18.7.5.4 ratio (expression (c) and kn when Pu > 0.3 Ag f'c), 18.7.5.2 arrangement (every bar tied and
+    hx <= 8 in at high axial, SMRF_Cage_Layout.column_cage) and 18.7.5.3 spacing limits with its conservative 4 in cap.
+    Feasible when some hoop bar and constructible leg pair reaches SPACING_MIN_IN; a cage this rejects gets no hoops
+    in design_column_shear, and one it accepts can still be refused there on shear.
+    """
+    import Structure_Parameters as sp
+    from Model import Member_Properties as mp
+    from Design.SMRF_Cage_Layout import column_cage, cage_passes
+    from Structure_Parameters import hoop_clear_cover_from_centroid_in
+    b, h, fc = design.b_in, design.h_in, design.fc_ksi
+    fy, fyt = float(sp.FY_KSI), float(getattr(sp, "FYT_KSI", sp.FY_KSI))
+    db = _BAR[design.bar_size][0]
+    cc = max(sp.COL_CLEAR_COVER_IN, hoop_clear_cover_from_centroid_in(mp.longitudinal_cover_in(design), LAYOUT_HOOP_DB_IN, db))
+    ag, ach = b * h, (b - 2.0 * cc) * (h - 2.0 * cc)
+    ratio = max(0.3 * (ag / ach - 1.0) * fc / fyt, 0.09 * fc / fyt)
+    high_axial = p_max_kip > 0.3 * ag * fc
+    if high_axial:
+        kf = max(1.0, fc / 25.0 + 0.6)
+        perimeter_bars = design.top_bars + design.bot_bars + 2 * design.side_bars
+        kn = perimeter_bars / max(1, perimeter_bars - 2)
+        ratio = max(ratio, 0.2 * kf * kn * p_max_kip / (fyt * ach))
+    bc = {"across_b_face": b - 2.0 * cc, "across_h_face": h - 2.0 * cc}
+    detail = {"high_axial": high_axial, "pu_kip": p_max_kip, "ash_ratio_required": ratio}
+    for bar in COLUMN_HOOP_BARS:
+        base = column_cage(b, h, cc, _BAR[bar][0], db, design.top_bars, design.side_bars, high_axial=high_axial,
+                           grid_in=sp.MODULE_GRID)
+        options = base["constructible_legs_by_direction"]
+        for nb in options["across_b_face"]:
+            for nh in options["across_h_face"]:
+                legs = {"across_b_face": nb, "across_h_face": nh}
+                trial = column_cage(b, h, cc, _BAR[bar][0], db, design.top_bars, design.side_bars, grid_in=sp.MODULE_GRID,
+                                    high_axial=high_axial, legs=legs)
+                if not cage_passes(trial):
+                    continue
+                s_conf = min(legs[key] * _BAR[bar][1] / (ratio * bc[key]) for key in legs)
+                limits = (min(b, h) / 4.0, _hoop_bar_factor(fy) * db,
+                          max(4.0, min(6.0, 4.0 + (14.0 - trial["hx_in"]) / 3.0)), 4.0)
+                spacing = _grid_down(min(s_conf, *limits))
+                if spacing is not None:
+                    return True, {**detail, "hoop_bar": bar, "legs": legs, "spacing_in": spacing}
+    return False, {**detail, "hoop_bars": list(COLUMN_HOOP_BARS),
+                   "reason": "no catalog hoop and constructible leg pair confines the cage at the minimum spacing"}
 
 
 def column_shear_screen(stories, hoops, vs_limit, fy):

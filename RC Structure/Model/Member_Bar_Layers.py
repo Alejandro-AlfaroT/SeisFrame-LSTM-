@@ -82,6 +82,20 @@ def pitch_in(design_a, design_b):
     return sp.snap_up_to_grid(0.5 * (da + db) + max(sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, da, db))
 
 
+def _crossing_clear_in():
+    from Design import SMRF_Conventional_Detail as conventional
+    return 0.0 if conventional.active() else sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN
+
+
+def crossing_pitch_in(design_a, design_b):
+    """Centre-to-centre distance between layers of two crossing beams. On the conventional detailing basis orthogonal bars
+    may touch: the 25.2 clear spacing rules govern parallel bars (Design.SMRF_Conventional_Detail)."""
+    from Design import SMRF_Conventional_Detail as conventional
+    if conventional.active():
+        return sp.snap_up_to_grid(0.5 * (_db(design_a.bar_size) + _db(design_b.bar_size)))
+    return pitch_in(design_a, design_b)
+
+
 def bars_per_layer(column_design, beam_design, axis):
     """How many bars of this beam pass this column cage in one layer, in the beam's own direction."""
     from Design.SMRF_Cage_Geometry import column_cage_admits_beam_bars
@@ -162,8 +176,10 @@ def joint_inventory(level, i, j):
     if key not in _CACHE:
         if len(_CACHE) > 8192:
             _CACHE.clear()
+        from Design import SMRF_Conventional_Detail as conventional
         transition = column_transition(core.design, above.design, fy_ksi=sp.FY_KSI, clear_cover_in=sp.COL_CLEAR_COVER_IN,
-                                       upper_clear_height_in=clear, joint_depth_in=depth)
+                                       upper_clear_height_in=clear, joint_depth_in=depth,
+                                       physical_context={"conventional": True} if conventional.active() else None)
         bars = transition_inventory(core.design, above.design, transition)
         _CACHE[key] = None if bars is None else {
             "bars": bars, "established": bars != INVENTORY_NOT_ESTABLISHED,
@@ -296,11 +312,11 @@ def _place(sequence, offsets, depth_of, fixed=None, trace=None):
         while changed:
             changed = False
             for g, other_layer, p, d in placed:
-                if g != gid and abs(position - p) < pitch_in(design, d) - _TOL:
-                    position, changed = p + pitch_in(design, d), True
+                if g != gid and abs(position - p) < crossing_pitch_in(design, d) - _TOL:
+                    position, changed = p + crossing_pitch_in(design, d), True
                     cause = {"by": "crossing_layer", "group": g, "layer": other_layer}
             for p, db in fixed.get(gid, ()):
-                clearance = 0.5 * (_db(design.bar_size) + db) + sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN
+                clearance = 0.5 * (_db(design.bar_size) + db) + _crossing_clear_in()
                 if abs(position - (rise + p)) < clearance - _TOL:
                     position = rise + sp.snap_up_to_grid(p + clearance)
                     changed = True
@@ -334,7 +350,7 @@ def arrangement(controls=None):
     limit = sp.BEAM_BAR_MAX_LAYERS
     layout = (sp.SLAB_REINFORCEMENT or {}).get("layout") if sp.SLAB_THICKNESS_IN is not None else None
     mats, mats_complete = slab_mats()
-    key = ("arrangement", state.identity(), convention, limit, sp.BEAM_BAR_LAYER_ORDER, sp.SLAB_THICKNESS_IN,
+    key = ("arrangement", sp.DETAIL_BASIS, state.identity(), convention, limit, sp.BEAM_BAR_LAYER_ORDER, sp.SLAB_THICKNESS_IN,
            sp.COL_CLEAR_COVER_IN, sp.BEAM_CLEAR_COVER_IN, sp.AGGREGATE_MAX_SIZE_IN, sp.COVER,
            sp.BEAM_BAR_STACKING_INTERLAYER_CLEAR_MIN_IN, sp.BAR_POSITION_GRID_IN, sp.BAR_LAYOUT_HOOP_DB_IN, sp.FY_KSI,
            None if layout is None else layout.get("outer_axis"), mats_complete,

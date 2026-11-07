@@ -767,10 +767,7 @@ def expected_gravity_total_kip(settings):
             from Model import Member_Properties as mp
             self_weight = settings.gravity_self_weight_factor * mp.weight_ledger()["total_member_self_weight_kip"]
         else:
-            self_weight = settings.gravity_self_weight_factor * (
-                sp.col_self_weight_kip_per_in() * sp.STORY_H * floors * (sp.NUM_BAY_X + 1) * (sp.NUM_BAY_Y + 1)
-                + sp.beam_self_weight_kip_per_in("x") * sp.BAY_X * sp.NUM_BAY_X * (sp.NUM_BAY_Y + 1) * floors
-                + sp.beam_self_weight_kip_per_in("y") * sp.BAY_Y * sp.NUM_BAY_Y * (sp.NUM_BAY_X + 1) * floors)
+            self_weight = settings.gravity_self_weight_factor * floors * sp.total_structural_self_weight_per_floor()
         from Model import Roof_Extension as roof
         self_weight += settings.gravity_self_weight_factor * roof.total_weight_kip()
         mode = sp.effective_gravity_load_model()
@@ -781,7 +778,8 @@ def expected_gravity_total_kip(settings):
             transfers = ([container["transfers"][container["floors"][str(k)]] for k in range(1, floors + 1)] if grouped
                          else [container] * floors)
             total = 0.0
-            for transfer in transfers:
+            from Loads import Perimeter_Strip as perimeter_strip
+            for k, transfer in enumerate(transfers, start=1):
                 for name, factor in (("dead", settings.gravity_dead_factor), (live_case, settings.gravity_live_factor)):
                     case = transfer["unit_cases"].get(name)
                     if case is None or factor == 0.0:
@@ -789,11 +787,15 @@ def expected_gravity_total_kip(settings):
                     per_floor = sum(load for beam in case["beams"] for _, load in beam["node_loads"])
                     per_floor += sum(column["direct_load_kip"] for column in case["columns"])
                     total += factor * per_floor
-            return total + self_weight, "slab transfer unit cases (beam node loads + column direct loads) x factors x floors + member self-weight"
+                # The transfer is the centreline plate's; the frame also receives the perimeter strip (2026-11-05).
+                total += perimeter_strip.floor_loads(k, transfer, settings.gravity_dead_factor, settings.gravity_live_factor,
+                                                     settings.live_pattern)["total_kip"]
+            return total + self_weight, ("slab transfer unit cases (beam node loads + column direct loads) x factors x floors "
+                                         "+ perimeter strip of the physical floor + member self-weight")
         floor_dead = sp.floor_dead_load_ksf()
         total = floor_dead + sp.FLOOR_LIVE_LOAD_KSF
         floor_factor = (settings.gravity_dead_factor * floor_dead + settings.gravity_live_factor * sp.FLOOR_LIVE_LOAD_KSF) / total
-        return floor_factor * sp.total_floor_gravity_load() * floors + self_weight, f"{mode} tributary floor load x factor x floors + member self-weight"
+        return floor_factor * sum(sp.total_floor_gravity_load(k) for k in range(1,floors+1)) + self_weight, f"{mode} actual floor loads x factors + member self-weight"
     except Exception as exc:                        # noqa: BLE001 -- unknown stays unknown
         return None, f"unavailable ({type(exc).__name__}: {exc})"
 

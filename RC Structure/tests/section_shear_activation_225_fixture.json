@@ -1,0 +1,350 @@
+{
+  "purpose": "Unit regression only; not pilot qualification evidence",
+  "origin": "partial_shear_branch_225",
+  "source_manifest_sha256": "b0b334ae3d075ac8e4e0fc7b2e16033dac9cb15add580a016560008bbb23eea6",
+  "cases": [
+    {
+      "cut_id": "beam/169/1.0",
+      "constructor": {
+        "thickness_in": 7.5,
+        "fc_ksi": 5.0,
+        "ec_ksi": 4030.508652763321,
+        "axis": "y",
+        "slab_interval_in": [
+          -15.0,
+          40.5
+        ],
+        "web": {
+          "id": "member_169",
+          "interval_in": [
+            -15.0,
+            15.0
+          ],
+          "z_interval_in": [
+            -24.25,
+            -3.75
+          ]
+        },
+        "reference_s_in": 12.75,
+        "longitudinal_bars": [
+          {
+            "id": "floor_1/slab/y_bottom/0",
+            "s_in": -5.0,
+            "z_in": -2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_bottom/1",
+            "s_in": 1.0,
+            "z_in": -2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_bottom/2",
+            "s_in": 7.0,
+            "z_in": -2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_bottom/3",
+            "s_in": 13.0,
+            "z_in": -2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_bottom/4",
+            "s_in": 19.0,
+            "z_in": -2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_bottom/5",
+            "s_in": 25.0,
+            "z_in": -2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_bottom/6",
+            "s_in": 31.0,
+            "z_in": -2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_bottom/7",
+            "s_in": 37.0,
+            "z_in": -2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_top/0",
+            "s_in": -5.0,
+            "z_in": 2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_top/1",
+            "s_in": 1.0,
+            "z_in": 2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_top/2",
+            "s_in": 7.0,
+            "z_in": 2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_top/3",
+            "s_in": 13.0,
+            "z_in": 2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_top/4",
+            "s_in": 19.0,
+            "z_in": 2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_top/5",
+            "s_in": 25.0,
+            "z_in": 2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_top/6",
+            "s_in": 31.0,
+            "z_in": 2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "floor_1/slab/y_top/7",
+            "s_in": 37.0,
+            "z_in": 2.25,
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "member_169/beam/top_0_0",
+            "s_in": -9.5,
+            "z_in": 0.75,
+            "area_in2": 0.79,
+            "db_in": 1.0,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "member_169/beam/top_0_1",
+            "s_in": -7.5,
+            "z_in": 0.75,
+            "area_in2": 0.79,
+            "db_in": 1.0,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "member_169/beam/top_0_2",
+            "s_in": -1.5,
+            "z_in": 0.75,
+            "area_in2": 0.79,
+            "db_in": 1.0,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "member_169/beam/top_0_3",
+            "s_in": 0.5,
+            "z_in": 0.75,
+            "area_in2": 0.79,
+            "db_in": 1.0,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "member_169/beam/bottom_0_0",
+            "s_in": -9.5,
+            "z_in": -19.25,
+            "area_in2": 0.79,
+            "db_in": 1.0,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "member_169/beam/bottom_0_1",
+            "s_in": -7.5,
+            "z_in": -19.25,
+            "area_in2": 0.79,
+            "db_in": 1.0,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "member_169/beam/bottom_0_2",
+            "s_in": -1.5,
+            "z_in": -19.25,
+            "area_in2": 0.79,
+            "db_in": 1.0,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          },
+          {
+            "id": "member_169/beam/bottom_0_3",
+            "s_in": 0.5,
+            "z_in": -19.25,
+            "area_in2": 0.79,
+            "db_in": 1.0,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "strength_credited": true
+          }
+        ],
+        "transverse_rows": [
+          {
+            "id": "pitch_row/floor_1/slab/x_bottom/54",
+            "physical_bar_ids": [
+              "floor_1/slab/x_bottom/54"
+            ],
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "z_in": -2.75,
+            "accounting_length_in": 6.0,
+            "run_interval_in": [
+              -9.375,
+              40.5
+            ],
+            "strength_run_interval_in": [
+              -0.375,
+              40.5
+            ]
+          },
+          {
+            "id": "pitch_row/floor_1/slab/x_top/54",
+            "physical_bar_ids": [
+              "floor_1/slab/x_top/54"
+            ],
+            "area_in2": 0.2,
+            "db_in": 0.5,
+            "fy_ksi": 60.0,
+            "es_ksi": 29000.0,
+            "z_in": 2.75,
+            "accounting_length_in": 6.0,
+            "run_interval_in": [
+              -10.875,
+              40.5
+            ],
+            "strength_run_interval_in": [
+              -1.875,
+              40.5
+            ]
+          }
+        ],
+        "phi_requirements": {
+          "NM": 0.65,
+          "diaphragm_shear": 0.6
+        },
+        "quadrature_order": 12,
+        "slab_void_rectangles": []
+      },
+      "target": [
+        0.6133504590700327,
+        -0.0613751008727323,
+        -0.1588132069594003,
+        0.2545321934977344,
+        42.3178147316814,
+        -0.2494078480801104,
+        15.42830373850714
+      ],
+      "initial_strain": [
+        0.0007063364769197168,
+        0.00010655180201379219,
+        -2.8194364993823765e-06,
+        3.3511360009438335e-05,
+        1.5036942439740483e-05,
+        -1.1242792224425252e-06,
+        -3.3574998436337543e-06
+      ],
+      "verified_solution": [
+        0.0008892456754101315,
+        0.001003125153290672,
+        -0.001914002775871393,
+        7.138362485290644e-05,
+        5.611400842020279e-05,
+        -0.00014861925130579186,
+        2.7931580391281685e-06
+      ],
+      "source_record_sha256": "35f685dc4fccd931ff419c93677f1859f110d8bca4b9762bb1ef28739307b9ba"
+    }
+  ]
+}

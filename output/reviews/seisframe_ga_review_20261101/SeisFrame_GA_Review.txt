@@ -1,0 +1,271 @@
+SEISFRAME GENETIC DESIGN GENERATION REVIEW
+Independent implementation review
+Review date: November 1, 2026 | America/Los_Angeles
+Prepared by Codex for the SeisFrame capstone project
+
+VERDICT
+
+The description is mostly accurate about how the GA searches, but it overstates the completeness of the acceptance safeguards. The current source contains substantial corrections that the historical reports still describe as unfinished.
+
+The review found three reproducible implementation gaps: an incomplete detailing-check inventory, inconsistent rejection of test-labelled evidence profiles, and an alternate API path around the authorized reinforcement ceiling. Separately, the slab procedure remains unreviewed. The evidence does not establish readiness for an accepted-design yield pilot.
+
+No production code or engineering assertions were changed. No packages were installed. No GA run or structural analysis was launched. The review used source inspection, recorded results, isolated tests and small no-solve reproductions. This package preserves that completed review; it does not constitute a new validation run or authorize engineering assertions.
+
+SCOPE AND FIXED PROJECT DECISIONS
+
+Repository: C:\Users\andro\Documents\GitHub\StructGNN-OpenSeesPy-Integrated
+Unless a reference begins with research/, source paths below are relative to RC Structure/. Line numbers refer to the working tree inspected during the review, not an immutable Git commit.
+
+The practical beam longitudinal reinforcement ceiling remains 0.0175. Fire-resistance design is excluded from the capstone scope and must be recorded as outside scope, not passed. Applicable structural strength, shear, detailing, drift, stability and slab requirements remain required. The task is to finish and validate the existing GA approach, without a new optimizer or major redesign. Candidate code acceptance, structural qualification and nonlinear performance remain distinct.
+
+FINDING 1  REQUIRED DETAILING CHECKS ARE NOT FULLY INVENTORIED
+
+Classification: Confirmed completeness-guard defect.
+
+Trigger: A required detailing row is absent from an otherwise passing evaluation record.
+
+Actual behavior: Code_Check_Contract.expected_inventory requires at least one detailing row per group, plus selected exact checks. It does not independently require all minimum-steel, maximum-ratio, spacing, longitudinal-bar and hoop checks that the producer emits. For beams, clear-span and column-projection rows can satisfy the broad detailing pattern.
+
+Small reproduction: An otherwise passing synthetic assessment with a failing detailing / beam.minimum_steel / <beam_gid>/top row is check_failed. Omitting that row changes the assessment to accepted. The reproduction invokes the assessment boundary only; it performs no structural solve.
+
+Expected behavior: Every applicable detailing identity, including face and location variants, must be present. Missing required evidence must block acceptance.
+
+Practical consequence: The public acceptance boundary cannot substantiate a complete detailing inventory. Comparability safeguards downstream inherit this incomplete inventory.
+
+Limit: No current production emitter was found actually dropping this row. This is a verified guard weakness, not evidence that a recorded physical design was falsely accepted.
+
+Required correction: Enumerate the applicable detailing identities and add omission tests for each required row, rather than testing only inventories produced from the contract's own list.
+
+Sources: Design/Code_Check_Contract.py:224-243, 451-457; Design/Grouped_Record.py:684-719; Design/SMRF_Detailing.py:199-210, 243-285, 296-364.
+
+FINDING 2  THE V1 LOADER CAN ACCEPT EXPLICIT TEST FIXTURE ASSERTIONS
+
+Classification: Confirmed evidence-profile guard inconsistency.
+
+Trigger: Change only the existing v1 fixture's kind from test_fixture to reviewed.
+
+Actual behavior: Validation returns asserted=True even though reviewer and asserted_by still say TEST FIXTURE - not an engineering review and the review decision still says none: a software test fixture. The evidence file and hash remain unchanged. The broader fixture-text rejection applies only to v2 reviewed_procedure profiles. The v1 reviewed path rejects PROBE wording but not TEST FIXTURE wording.
+
+Small reproduction: JSON-load tests/fixtures/design_evidence_test_fixture.json, set data['kind']='reviewed', and call Design_Evidence_Profile._validate(data, fixture.parent, False). It returns True. No file was saved and no assertions were activated. test_design_evidence_profile.py:487 currently expects this behavior as an accepted control.
+
+Expected behavior: Reject explicitly test-labelled evidence in every production profile format.
+
+Practical consequence: An intended engineering-evidence safeguard is incomplete.
+
+Limit: Relabelling this fixture alone does not accept a real pilot candidate. Its case, profile and floor identifiers are artificial, its two-way assessment is false, and local-steel assessment is omitted. This is a production-loader guard bypass requiring explicit relabelling, not automatic structural acceptance.
+
+Required correction: Apply the existing fixture-text prohibition to all non-test schemas and change the existing control test to require rejection.
+
+Sources: Design/Design_Evidence_Profile.py:169-170, 266-270, 284-309, 341-343; tests/test_design_evidence_profile.py:487; tests/fixtures/design_evidence_test_fixture.json:4-9, 12-41, 53-69.
+
+FINDING 3  THE AUTHORIZED REINFORCEMENT CEILING IS NOT UNIVERSAL
+
+Classification: Confirmed alternate-entry-point inconsistency.
+
+Trigger: A caller supplies a mutable DesignConfig with rho_beam_practical_max above 0.0175 directly to the legacy search or engineering evaluator/selector path.
+
+Actual behavior: The runner's with_beam_practical_ratio helper and GenerationRun reject a higher ceiling. Genetic_Search.search validates its search policy but passes the engineering configuration through; the inner selector trusts that configuration and applies the minimum of its code cap and configured practical cap, without independently applying the authorized 0.0175 limit.
+
+Small reproduction: Pure cage pricing with a supplied ceiling of 0.020 admitted a two-layer cage with seven #9 bars per face and actual As/(bw*d)=0.019568690095846646. The same cage was rejected at 0.0175 with steel_ratio_practical. OpenSees analyze and eigen were guarded; no search or analysis ran.
+
+Expected behavior: Shared validation at engineering entry points enforces the authorized maximum.
+
+Practical consequence: Alternate callers can violate the project decision. No evidence was found that the protected pilot configuration exceeded 0.0175.
+
+Ratio wording qualification: The selector checks max(As_top,As_bottom)/(bw*min(d_positive,d_negative)), rather than pairing each face's area and depth independently. It is conservative and equivalent for equal-face reinforcement, as in the grouped symmetric pilot. It does not let a face exceed the supplied ceiling. Jump pricing shares the same rule.
+
+Required correction: Centralize validation. Do not increase the ceiling.
+
+Sources: Design/Config.py:154, 604-629, 665-680; Design/Genetic_Search.py:306-367; Design/Genetic_Generation.py:450-453; Design/Group_Selection.py:343-354; tools/genetic_design_search/run.py:219-221.
+
+MISSING ENGINEERING EVIDENCE AND CURRENT CORRECTIONS
+
+Both checked-in evidence examples remain unreviewed. The v2 example loads as inactive_unreviewed, asserted false, with no method-hash mismatch. All seven engineering dispositions remain open: floor idealization, supports and faces, stiffness sensitivity, two-way shear path, local slab-column steel, independent reference, and tolerance. There is no reviewed procedure in the runner's evidence_profiles directory.
+
+The procedure infrastructure checks method identity, domain and candidate-specific floor evidence. It does not establish engineering adequacy. ACI 318-19 section 8.4.4.1.1 requires two-way shear evaluation near columns, concentrated loads and reaction areas; the proposed beam-supported interpretation still needs its evidence-backed disposition. Mesh agreement alone cannot supply that judgment.
+
+The working tree is ahead of the historical closure and follow-up reports in the following ways:
+
+- Two-way shear and local slab-column steel are independent required slab-completion items. Each needs its own assessment and valid premise; review relabelling cannot silently bypass them.
+- Fire is an explicit scope exclusion. It is not checked or passed, and a bogus pass/fail/review row for the exclusion is rejected.
+- Hook logic records support-face and joint-face embedments. SCWB uses development at either datum; beam sizing uses both; hinges and saved strengths retain their support-face basis. These consumers remain distinct.
+- Corner-hook location and confinement factors depend on the declared geometry.
+- Roof SCWB applicability is checked per connection using discontinuity above the connection and the column's own Ag*f'c/10 limit, with recorded axial-load evidence. Missing evidence does not create an exemption.
+- Procedure profiles bind method files, applicability domain, numerical protocol, dispositions and per-floor checks. Inactive or changed methods do not authorize assertions.
+
+Sources: Design/SMRF_Slab_Reinforcement.py:382-417, 554-586; Design/Code_Check_Contract.py:85-90, 309-314, 420-439; Design/SMRF_Common.py:61-109; Model/Member_Properties.py:489-511, 569-589; Design/Group_Checks.py:278-323; Design/SMRF_Beam_Slab_Strength.py:308-418; Design/SMRF_Joints.py:176-207; Design/Group_Capacity.py:581-616; Design/SMRF_Slab_Procedure.py:138-222, 299-324; Design/Design_Evidence_Profile.py:406-420, 465-477; tools/genetic_design_search/evidence_profiles/case_0007_slab_procedure_v2_unreviewed.json:268-300.
+
+ACCEPTANCE QUALIFICATION AND PERFORMANCE
+
+Accepted remains a scoped candidate classification. The contract intentionally permits listed regularity/story-strength/torsion review dependencies. Its candidate scope explicitly excludes diaphragm and foundation design. Grouped qualification separately retains unresolved diaphragm.design_and_collectors and other applicable strength-model, constructability, model-consistency and transition reviews. Completing the slab procedure alone therefore does not establish fully qualified grouped designs.
+
+These are visible scope limitations, not evidence that the software accidentally treats every unknown as a pass. They must remain visible in reporting and in the definition of the capstone finish line. Nonlinear performance is separately not_requested; ordinary candidate evaluation does not perform earthquake time-history validation.
+
+Sources: Design/Code_Check_Contract.py:65-97, 326-330, 475-486, 519-524; Design/Grouped_Record.py:875-925, 981-991, 1206.
+
+CLAIM BY CLAIM ASSESSMENT
+
+Confirmed means verified in source or isolated behavior. It does not mean engineering validation.
+
+| Claim | Status | Assessment and source references |
+| 1 Architecture and scope | Confirmed | generation_v3 maintains a population and generates mutations; crossover and adaptive weights are rejected. Runner default is heuristic_v2; the saved plan explicitly selects generation_v3. Geometry, layout, loading basis, grouping and longitudinal steel grade stay fixed in the intended run. Design/Genetic_Generation.py:181, 447-490; tools/genetic_design_search/run.py:63; research/ga_v3_preference_20261101/next_run_plan/PLAN.json:5. |
+| 2 Chromosome | Confirmed for the pilot | Current reconstruction of the saved six-story state gives eight section genes plus three grade genes. Bands s01_03 and s04_06 each have gravity beam, gravity column, SFRS beam and SFRS column sections. Grades are shared beam, gravity-column and SFRS-column families. Eleven is not universal. Design/Genetic_Search.py:73-98; Design/Concrete_Grades.py:90-112, 132-163; PLAN.json:9815, 10473, 10492, 10505. |
+| 3 Reinforcement ceiling | Partially correct | Base default is 0.015; pilot explicitly uses 0.0175. Selector uses a conservative combined-face ratio and jump pricing shares it. Runner and v3 protect the authorized ceiling, but alternate APIs do not universally do so. Design/Config.py:154, 665-680; Design/Group_Selection.py:343-354; Design/Genetic_Generation.py:450-453. |
+| 4 Initialization and parents | Confirmed | Default evaluates the seed and three random local-neighbor inputs, subject to repair and deduplication. Pilot population and offspring counts are four. Parent selection is uniform; severity acts after selecting a parent. Design/Genetic_Generation.py:115-155, 1024-1052, 1093-1096. |
+| 5 Guided operators | Partially correct | H1-H5 and R1 largely match the description and require authenticated dependencies. Some genuine failures have no supported route. Unknown/stale evidence and solver failures do not automatically strengthen. Design/Genetic_Operators.py:192-212, 443-548; Design/Genetic_Diagnostics.py:533-566, 693-702, 751-762, 794-799. |
+| 6 Demand sized jumps | Partially correct | Supported beam-flexure estimates use Mu/target_DCR, actual cage geometry and frozen parent conditions, with baseline agreement required. Grade screening covers implicated failing units, not every affected beam. Time limits are cooperative. Design/Genetic_Jumps.py:118-151, 211-236, 452-539. |
+| 7 Severity and preference | Confirmed | Saved values are guidance 0.75, severe threshold 1.25, preferred share 0.80, target 0.85 and minimum gain 0.02. Repeated rows are collapsed and preference uses the affected unit's estimate. The 0.60 branch-entry probability is conditional, not completed-evaluation yield. Design/Genetic_Operators.py:661-723, 785-855, 967-1007; PLAN.json:10525-10556. |
+| 8 Repair and duplicates | Confirmed | Repair can alter more genes; removed/reversed interventions, illegal results and no-ops are rejected. Submitted identity includes basis and seed cages; realized identity includes final cages/slab. Cached inputs retain new origins. Design/Genetic_Operators.py:1073-1120; Design/Genetic_Generation.py:1189-1235; Design/Code_Check_Contract.py:132-139, 527-542. |
+| 9 Evaluation | Partially correct and current end to end behavior unverified | Source implements slab, demands, coordination, capacity and final-check stages. Verified cycle resolution is distinct from convergence. No current structural evaluation was run. Ordinary evaluation uses an elastic design model with P-Delta, not earthquake time histories. Design/Grouped_Design.py:947-1096, 1273-1520; Design/SMRF_Elastic.py:46-92. |
+| 10 Survival and archives | Partially correct | Tiers, compatible inventories/masks/bases, per-family maxima, diversity and parent-offspring competition are implemented. Accepted designs survive material dominance in the registry. These protections inherit the contract's incomplete detailing inventory. Design/Genetic_Population.py:196-249, 342-427; Design/Genetic_Generation.py:1505-1567. |
+| 11 Acceptance and corrections | Partially correct | Slab gates, explicit fire exclusion, hook-datum separation, roof exception and procedure infrastructure now exist. Historical claims that they are wholly unimplemented are stale. Engineering review and the identified integrity corrections remain outstanding. Design/Code_Check_Contract.py:85-90, 420-439; Model/Member_Properties.py:569-589; Design/SMRF_Joints.py:176-207. |
+| 12 Stops and reproducibility | Confirmed in source and current resume execution unverified | Evaluation, proposal, generation, error and stagnation bounds exist. Time is checked between steps. Checkpoints bind configuration, basis, versions, history and random state; runner requests include source hashes. Stops deny proof of infeasibility/optimality. Design/Genetic_Generation.py:742-824, 969-1001; tools/genetic_design_search/run.py:264-328. |
+
+ENGINEERING GUIDED OPERATORS
+
+| Route | Supported trigger and action |
+| H1 | Authenticated applicable SCWB failure with valid joint/axis/sign and connected-column inventory: increase connected column section ties or their concrete-family grade. |
+| H2 | Beam flexure or capacity shear: width, depth or grade. Column P-M or capacity shear: section or grade. Column growth is withheld under the authenticated minimum-ratio cage and column-own probable-shear mechanism. Capacity-shear routing requires the transverse-selection outcome. |
+| H3 | Pure width blockage: width. Threading: evidenced blocking cores or transitions. Lane-limited strength: beam dimensions and relevant cores. A mixed threading-plus-flexural deficit may also use grade. Pure geometric clearance does not receive a grade remedy. |
+| H4 | Joint shear: core size or grade. Through-bar depth and hook embedment: core size. Through-bar and terminating-bar dependencies are distinguished. |
+| H5 | Relevant SFRS story columns and direction-matching beam depths at floors story-1 and story. |
+| R1 | Uniform mutable gene, then uniform permitted local neighbor. Grade moves use nearest lower/higher choices; section neighbors follow the declared dimensional rule. |
+
+Authentication binds diagnostics to the evaluated parent's realized identity and evaluation basis. Routing requires failed status, applicability, valid evidence and the reason's dependencies; numeric contradiction causes abstention. Threading records also authenticate the installed cage and blocking information. These are software provenance checks, not independent proof of engineering assumptions.
+
+Sources: Design/Genetic_Operators.py:149-157, 192-212, 267-315, 426-548, 1036-1056; Design/Genetic_Diagnostics.py:318-471, 473-494, 608-715, 751-762.
+
+UNSUPPORTED ROUTES AND CONSERVATIVE ABSTENTIONS
+
+- Analysis-shear components have no supported mutation reason. A strength failure does not automatically become a capacity-shear diagnosis.
+- Production slab-mat overlap leaves blocked_dimension=None and diagnosed_dimension=False. H3 therefore abstains, despite the nominal route existing.
+- The nominal beam_row_depth operator lacks a production diagnostic source when evaluation stops before normal code-check rows; that stopped design is not an ordinary selection parent.
+- Unlisted slab, selected-hoop and other final checks remain unsupported rather than being converted into invented strengthening instructions.
+- Verified cycle resolution does not establish ordinary selector convergence for geometry-routing dependencies. That conservative choice is separate from numerical completion under the contract.
+- Exhausted catalogs and unsupported transition look-ahead may also yield no legal move. Missing or invalid evidence is reported separately.
+
+Sources: Design/Genetic_Diagnostics.py:118-121, 230-236, 533-566, 693-702, 794-799; Design/Genetic_Operators.py:267-315, 522-532, 557-558.
+
+DEMAND SIZED JUMPS AND PREFERENCE
+
+The estimator covers authenticated beam_flexure, beam_lane_limited_strength and beam_threading_constrained_strength shortfalls. Required capacity is Mu/target_DCR. The 0.85 target is a search setting, not a multiplier on dimensions or reinforcement and not an engineering acceptance threshold.
+
+Pricing uses final evaluated slab/floor context, actual bar arrangement and effective depths, paired demands, admissibility, threading and the configured ratio ceiling. Surrounding cages and parent demands remain frozen. Parent-baseline agreement within the implemented 2 percent tolerance is required before returning a screened target.
+
+The scan is bounded rather than an exhaustive cage optimization: it scans descending steel and uses a 75 percent cutoff after the first admissible threading cage. Repair is applied before pricing, and the requested allele must survive repair. Target-reaching options are distinguished from useful partial improvements. Unpriced alternatives remain unscreened and cannot acquire screened-preference status merely because the budget expired; normal local routes can still propose a candidate for full evaluation.
+
+A concrete-family gene changes all groups in that family, but its screen prices only beam units with authenticated eligible flexural shortfalls. The gene estimate is the worst among those screened units, not a complete family-wide reevaluation. Individual-unit baselines and predicted improvements prevent one band's improvement from being credited to another failure.
+
+The eight-pricing count includes the parent baseline for size screening. Each grade option consumes pricing work for its screened units. The fifteen-second observation deadline is capped by remaining run time but checked between cages, options and units; an operation already in progress can overrun it. Every new input proposed after screening still receives the full evaluator.
+
+Severity weighting collapses repeated signs/faces/groups into failure keys and uses the worst authenticated utilization, rather than summing duplicate rows. Preferred proposals need their own affected unit's useful predicted gain and a threading cage. Exhausted preferred candidates leave that branch. Normal guidance, including clearance and column coordination, remains available when a beam-only change cannot reach the target. A preferred draw can be rejected, repaired to a no-op, duplicated or cached, so 0.75*0.80=0.60 does not predict the share of completed evaluations.
+
+Sources: Design/Genetic_Jumps.py:95-151, 158-262, 288-450, 452-539, 576-578; Design/Genetic_Operators.py:575-601, 661-723, 785-855, 967-1007; Design/Genetic_Generation.py:943-950, 1118-1161, 1249-1357.
+
+CANDIDATE EVALUATION AND EVIDENCE CONSISTENCY
+
+1. Install the candidate, enforce concrete families, size the slab, derive floor descriptions and obtain floor transfer/action evidence. Reject an invalid starting beam-row arrangement before ordinary strength evaluation rather than silently certifying it.
+2. Recompute the elastic period, torsional assessment, explicit signed strength combinations, member actions and gravity-frame displacement compatibility.
+3. Reselect longitudinal cages, coordinate beam-column threading, recompute capacity design and hoops, and stop on convergence, a verified cycle resolution or the applicable bound.
+4. Reprice slab reinforcement on selected cages and repeat coordination if the slab layout changes. Rebuild capacity/joint evidence if the final slab eligibility signature changes.
+5. Compute final strength, drift, stability, regularity and material quantities; derive the expected inventory; apply the contract; record final cages, slab identities and evidence currency.
+
+Sources: Design/Grouped_Design.py:354-448, 1007-1096, 1273-1397, 1403-1520.
+
+Caching is specific rather than blanket reuse. Floor transfer reuse requires matching sections, mesh, slab, loading/patterns, geometry and slab-input digest. Slab-action cache keys include floor signature, inputs, refinement, assertions and procedure identity/status; current floor instances are checked and combined evidence replayed. Gravity-only frame actions are cached within one candidate. Section-strength caches are local to fixed group/cage/slab contexts and distinguish flange, support and anchorage conditions.
+
+Sources: Design/SMRF_Floor_Transfer.py:318-330; Design/Grouped_Design.py:239-284; Design/Perimeter_Systems.py:130-179; Design/Group_Checks.py:250-275, 325-337.
+
+Verified cycle resolution is not ordinary convergence. On a proven repeated state, the resolver tries at most four distinct cycle states. Adoption requires verification of the installed cages against selection rules, rebuilt capacity evidence, fixed hoops and accepted capacity checks. The ordinary selection flags remain false; only a bound resolution for the final identity can satisfy the alternate completion rule. The positive unit-test path is software evidence, not a demonstrated production cycle solution; one adoption test forces capacity acceptance to exercise control flow.
+
+Sources: Design/Grouped_Design.py:947-1096; Design/Group_Selection.py:1670-1738; Design/Code_Check_Contract.py:76-84 and numerical_completion; tests/test_cycle_resolution.py:438-448.
+
+Ordinary GA evaluation uses cracked elastic design members with P-Delta effects. It is not nonlinear earthquake time-history validation, regardless of an analysis-profile name. Sources: Design/Design_Driver.py:65, 553-610; Design/SMRF_Elastic.py:46-92; Design/Grouped_Design.py:1502.
+
+RECORDED PARENT TO CHILD WALKTHROUGH
+
+This example is historical. It comes from research/ga_v3_15min_preference_20261101/r and does not validate today's edited source.
+
+Parent selection: o0001 was one of four initial survivors. It was numerically complete but unresolved, with 19 failed rows and 194 unknown rows.
+
+Mutation: The preferred H3 branch proposed changing the lower-band SFRS beam gene from 16 x 30 in to 26 x 36 in. The gene controls tied X/Y perimeter beams. Repair induced no additional gene change.
+
+Screen: The governing frozen-parent beam-unit utilization was predicted to improve from 1.71165 to 1.13229. This was a useful partial improvement; it did not reach 1.0 or the 0.85 jump target.
+
+Full evaluation: Child o0007 recorded frame=47 and floor=3 in its solve counters. The floor counter counts transfer/evidence builds and does not necessarily count each load-case or refinement analysis. The corresponding negative-flexure DCR was 1.13177. Other checks worsened: the number of failed rows rose to 23 and 194 unknown rows remained.
+
+Survival: o0007 survived because compatible progress measures improved. Maximum known exceedance fell from 1.33619 to 1.00000; the mean per-family maximum fell from 0.04559 to 0.03497. It remained unresolved and unaccepted. This is a concrete example of survival without acceptance or improvement in every check.
+
+| Measure | Parent o0001 | Child o0007 |
+| Failed rows | 19 | 23 |
+| Unknown rows | 194 | 194 |
+| Maximum known exceedance | 1.33619 | 1.00000 |
+| Mean per family maximum exceedance | 0.04559 | 0.03497 |
+| Classification | Unresolved | Unresolved |
+
+Sources: research/ga_v3_15min_preference_20261101/r/observations.jsonl:8; research/ga_v3_15min_preference_20261101/r/generations.jsonl:2.
+
+The historical pilot directory contains 14 observation records and three generation records but no final result.json. It should not be presented as a completed bounded-run result. There were 22 normalized source-hash differences against the saved next-run plan, plus new infrastructure. Normalization follows UTF-8 text reading with BOM/newline normalization; raw-byte differences also include line-ending effects. Old observations and old test reports are not validation of the current tree.
+
+STOPS REPRODUCIBILITY AND RECORDED SETTINGS
+
+The saved next-run plan selects generation_v3, random seed 2026103101, population four, offspring four, up to 100 evaluations, 4000 proposals, 30 generations, a 900-second wall budget, three stagnant generations, 30 attempts per child and two evaluation errors. Its initialization is seed_r1_neighbors_v1 with three post-seed evaluations. These are saved plan settings, not claims that a completed run reached those bounds.
+
+The controller checks time between steps, allowing an active evaluation to finish. A final selection accounts for evaluated children at a budget stop. Checkpoints store random state and bind configuration, case, basis, design space and versions. History digests and explained interrupted-write records are checked on resume. The runner also binds source/configuration identities and the explicit reinforcement override. Changed identities require a new run rather than reusing old evaluated evidence.
+
+Budget, stagnation and unsuccessful-search stops explicitly do not establish structural infeasibility or optimality. Code acceptance remains separate from qualification and nonlinear performance. Current checkpoint/resume execution was not exercised during this review.
+
+Sources: Design/Genetic_Generation.py:447-490, 742-824, 909-1001, 1505-1567; tools/genetic_design_search/run.py:264-328; research/ga_v3_preference_20261101/next_run_plan/PLAN.json:10525-10556.
+
+PRIORITIZED CORRECTIONS BEFORE THE NEXT MEANINGFUL PILOT
+
+1. Close the three acceptance/configuration boundary gaps. Enumerate required detailing identities and omission tests; reject test-labelled evidence across schemas; enforce the 0.0175 authorized maximum at shared engineering entry points.
+2. Finish the bounded slab assessment and reviewed procedure. Resolve the seven dispositions independently, retain raw evidence and limits, and require every candidate floor to establish applicability and numerical evidence. Do not activate assertions because the infrastructure or tests pass.
+3. Reconcile the required structural finish line. Preserve explicit candidate acceptance, outstanding structural reviews, qualification and nonlinear statuses. Finishing the slab procedure alone does not close the remaining qualification items.
+4. Verify the existing mutation coverage against the actual remaining failures. Finish necessary evidence/routing connections within the existing operator approach; do not synthesize remedies from unknown evidence or solver failure, introduce a new optimizer, or force failing cycles to pass.
+5. Freeze a fresh configuration/source identity and validate one complete candidate before the broader pilot. Keep v3, 0.0175 and intended preference settings explicit. Then measure accepted yield, runtime/evaluation cost and governing failures under a bounded pilot. An unsuccessful bounded attempt is not proof of infeasibility.
+
+VERIFICATION PERFORMED
+
+| Test group | Passed |
+| test_genetic_population | 24 |
+| test_genetic_operators | 29 |
+| test_genetic_diagnostics | 31 |
+| Selected test_genetic_jumps and test_genetic_preference classes | 51 |
+| test_cycle_resolution | 25 |
+| test_slab_structural_gates | 19 |
+| test_slab_procedure | 15 |
+| test_roof_exception_grouped | 15 |
+| test_perimeter_hook_datums | 14 |
+| test_code_check_contract | 39 |
+| test_design_evidence_profile | 25 |
+| Total | 287 |
+
+Test sources and helpers were inspected before execution. Existing OpPy Python was used with bytecode writing disabled. OpenSees analyze/eigen guards were applied to engineering-fixture batches; the later acceptance batch also guarded evaluator and GA entry functions. Pure population/operator/diagnostic tests were inspected for no analysis or search execution. Controller run classes were excluded from selected jump/preference testing. Initial Python-alias and temporary-directory access problems were resolved using the existing environment and allowed temporary storage; the final selected runs passed.
+
+Selected jump classes: Requirement, Screen, Ceiling, Router and Selection. Selected preference classes: Allocation, Deduplication, Fallbacks, UnitTargets and Reproducibility. Their combined count is 51.
+
+The review also reconstructed the pilot chromosome from saved input and ran the three small no-solve reproductions described in the findings. These tests establish isolated software behavior using synthetic fixtures and algebraic pricing. They do not establish structural adequacy, a validated slab procedure, qualified designs or nonlinear performance.
+
+REVIEW LIMITS AND INSPECTED MATERIAL
+
+All named primary modules were inspected: Genetic_Generation, Genetic_Search, Genetic_Operators, Genetic_Jumps, Genetic_Diagnostics, Genetic_Population, Grouped_Design, Group_Selection, Grouped_Search, Code_Check_Contract, Config, Concrete_Grades, Model/Member_Groups, the runner and README, and both evidence-profile examples.
+
+Directly involved code inspected included Design_Evidence_Profile, SMRF_Slab_Procedure, slab actions/reinforcement/refinement and floor signatures/transfer, Group_Capacity, Group_Checks, Grouped_Record, Perimeter_Systems, SMRF_Beam_Slab_Strength, SMRF_Joints, SMRF_Common, SMRF_Qualification, SMRF_Elastic, Design_Driver and Model/Member_Properties, plus relevant tests and fixtures. Inspection was targeted to the described behavior; it was not a complete normative audit of every structural module.
+
+No applicable AGENTS.md was found. The discovered structural-analysis-kit/AGENTS.md belongs to an unrelated subtree.
+
+The full suite, actual GA/controller searches, structural solves, current checkpoint/resume execution, and nonlinear analyses were not run. Quantitative slab-method adequacy, current accepted-design yield and current end-to-end engineering performance remain unverified. Passing tests do not establish readiness.
+
+Supporting historical material inspected:
+- research/ga_v3_preference_20261101/next_run_plan/PLAN.json
+- research/ga_closure_followup_20261101/REPORT.md
+- research/ga_closure_followup_20261101/hook_datum/WORKED_EXAMPLES.md
+- research/ga_closure_followup_20261101/slab_assessment/SLAB_ASSESSMENT_DRAFT.md
+- research/ga_followup_review_20261101/REVIEW.txt
+- research/ga_followup_review_20261101/CLAUDE_NEXT_ACTIONS.txt
+- Recorded requests, observations and generation records under research/ga_v3_10min_jumps_20261031/r and research/ga_v3_15min_preference_20261101/r
+
+External reference consulted for the stated clause checks: ACI 318-19 and Commentary, including sections 6.4.3.2, 8.4.4.1.1, 8.7.4.1.1 and 18.7.3.1-18.7.3.2. https://www.ocf.berkeley.edu/~chiep/wp-content/uploads/2024/01/CE-123-ACI-318-19.pdf
+
+The completed review and this package do not grant engineering approval, authorize relaxed checks, or certify a structure. Source line references and historical results must be kept distinct from any later implementation changes.

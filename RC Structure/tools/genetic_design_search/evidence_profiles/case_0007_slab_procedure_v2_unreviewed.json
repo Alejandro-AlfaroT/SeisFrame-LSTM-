@@ -1,0 +1,341 @@
+{
+  "schema": "design_evidence_profile_v2",
+  "profile_id": "case_0007_slab_procedure_v2_unreviewed",
+  "kind": "unreviewed_example",
+  "review_status": "unreviewed",
+  "provenance": {
+    "prepared_by": "acceptance-path implementation (production code)",
+    "prepared_date": "2026-11-01",
+    "purpose": "the inactive procedure-based slab evidence path (P1) for the pilot case: every candidate floor records the evidence it earns; nothing is asserted"
+  },
+  "scope": {
+    "case_id": "case_0007",
+    "case_sha256": "ffb9ba87e4bde33e9d49e295acbb60cd8a022731e4af64547d7ba0edb492a01c",
+    "profile": "v2_nonlinear_flexure_screening_v1",
+    "geometry": {
+      "num_bay_x": 3,
+      "num_bay_y": 3,
+      "num_floor": 6,
+      "bay_x_in": 282.0,
+      "bay_y_in": 336.0,
+      "story_h_in": 186.0
+    },
+    "materials": {
+      "slab_fy_ksi": 60.0,
+      "concrete_unit_weight_kcf": 0.15
+    },
+    "loads": {
+      "floor_live_load_ksf": 0.05,
+      "superimposed_dead_load_ksf": 0.05
+    },
+    "slab_policy": {
+      "live_load_patterning": true,
+      "transfer_mesh_per_bay": null,
+      "minimum_thickness_in": 5.0,
+      "maximum_thickness_in": 14.0,
+      "thickness_increment_in": 0.5
+    },
+    "floor_sections_sha256": null,
+    "slab_thickness_in": null
+  },
+  "slab_refinement": {
+    "recipe": "graded_face_v1",
+    "levels": 4,
+    "max_shells": 130000,
+    "local_extension": {
+      "method": "failed_witness_face_band_v1",
+      "max_extra_levels": 2
+    },
+    "moment_tolerance": 0.05,
+    "shear_tolerance": 0.05,
+    "tolerance_basis": "Investigation criterion, not an ACI requirement or a validated error bound: the 5 percent all-strip screen inherited from the 2026-09-24 fixed-candidate benchmark (graded face meshes 12/24/48/60 cells per bay, at most two failed-witness face-band extensions inside the same 130,000-shell budget)."
+  },
+  "slab_refinement_basis": "Numerical evidence only (2026-11-01): the case_0007 validation bundle declares this plan, tolerance, shell budget and stopping rule before solving; a failed or unresolved comparison stays failed and is never replaced by an earlier passing mesh. The tolerance is an investigation criterion, not an ACI requirement or a validated error bound.",
+  "slab_action_assertions": {
+    "analysis_applicability_verified": false,
+    "all_floors_enveloped": false,
+    "load_pattern_envelope_verified": false,
+    "spatial_envelope_per_unit_width": false,
+    "twisting_moment_resolution_verified": false,
+    "zero_membrane_force_verified": false,
+    "verified": false,
+    "two_way_shear_path_assessed": false,
+    "asserted_by": "",
+    "assertion_date": "",
+    "assertion_basis": "",
+    "slab_column_local_steel_assessed": false
+  },
+  "review": null,
+  "procedure": {
+    "schema": "slab_action_procedure_v1",
+    "method": {
+      "id": "plate_fe_flexible_beams_graded_face_refinement_v1",
+      "source_sha256": {
+        "Design/SMRF_Slab_Actions.py": "c1c411d1534243209106f7812b9c7016850da7cd38241da2c9b14a69e775e177",
+        "Design/SMRF_Slab_Refinement.py": "6e2757730631681e7bae425ad67fee0fbd19424b49dacf4c5f29c9a5b905dbf9",
+        "Design/SMRF_Floor_Mesh.py": "be92d207d9de4ab2bba9f46e1cc8a43ed7895b25ab6c9f6239d9b4b827b5023e",
+        "Design/SMRF_Floor_Analysis.py": "4bb1fb1e1393cfd03bd9fc2f593ec4a8577e1a43d5e85b8eac18c87436d704b9",
+        "Design/SMRF_Slab_Recovery.py": "7405c422513e722939eb7761c05ee6a511fd4e6fcd63455563b2d1cb471bbe3f",
+        "Design/SMRF_Floor_Sections.py": "a612e3e6a805baae2941dd8ef4d167b06956410ef78dd24a8d0b4e4211fd8e01",
+        "Design/SMRF_Slab.py": "17230d7294164dbc0d057bfe5e7d07c63f85d2842f155206c9ce0e1a761fbc16",
+        "Design/SMRF_Slab_Procedure.py": "d3d51c6c1f2b4a25e3fee8dbd3a6519104f6d4eb51e3917c8085b13802cc42b4"
+      },
+      "information_sha256": {
+        "Design/SMRF_Slab_Reinforcement.py": "83741c374550dfe533bc48535d87a894b5267812f1e0bbccf701b49af9272e8b"
+      }
+    },
+    "domain": {
+      "beam_sections_in": [
+        [
+          10.0,
+          16.0
+        ],
+        [
+          10.0,
+          18.0
+        ],
+        [
+          10.0,
+          20.0
+        ],
+        [
+          12.0,
+          22.0
+        ],
+        [
+          12.0,
+          24.0
+        ],
+        [
+          14.0,
+          20.0
+        ],
+        [
+          14.0,
+          26.0
+        ],
+        [
+          14.0,
+          28.0
+        ],
+        [
+          16.0,
+          22.0
+        ],
+        [
+          16.0,
+          24.0
+        ],
+        [
+          16.0,
+          30.0
+        ],
+        [
+          16.0,
+          32.0
+        ],
+        [
+          18.0,
+          26.0
+        ],
+        [
+          18.0,
+          28.0
+        ],
+        [
+          18.0,
+          36.0
+        ],
+        [
+          20.0,
+          30.0
+        ],
+        [
+          20.0,
+          32.0
+        ],
+        [
+          22.0,
+          36.0
+        ],
+        [
+          24.0,
+          32.0
+        ],
+        [
+          26.0,
+          36.0
+        ]
+      ],
+      "beam_fc_ksi": [
+        5.0,
+        6.0,
+        8.0
+      ],
+      "column_sections_in": [
+        [
+          14.0,
+          14.0
+        ],
+        [
+          15.0,
+          15.0
+        ],
+        [
+          16.0,
+          16.0
+        ],
+        [
+          17.0,
+          17.0
+        ],
+        [
+          18.0,
+          18.0
+        ],
+        [
+          19.0,
+          19.0
+        ],
+        [
+          20.0,
+          20.0
+        ],
+        [
+          21.0,
+          21.0
+        ],
+        [
+          22.0,
+          22.0
+        ],
+        [
+          23.0,
+          23.0
+        ],
+        [
+          24.0,
+          24.0
+        ],
+        [
+          26.0,
+          26.0
+        ],
+        [
+          28.0,
+          28.0
+        ],
+        [
+          30.0,
+          30.0
+        ],
+        [
+          32.0,
+          32.0
+        ],
+        [
+          34.0,
+          34.0
+        ],
+        [
+          36.0,
+          36.0
+        ]
+      ],
+      "thickness_ladder_in": {
+        "minimum": 5.0,
+        "maximum": 14.0,
+        "increment": 0.5
+      }
+    },
+    "protocol": {
+      "expected_resolution": {
+        "status": "resolved",
+        "base_levels": 4
+      },
+      "instance_checks": [
+        "resolution_as_declared",
+        "refinement_passed",
+        "static_balance",
+        "membrane_free",
+        "face_recovery_complete",
+        "load_case_inventory"
+      ],
+      "plan_sha256": "41a3b890cc545991b78d066d783dfcc1b642845c32c9771c69c220eaf504230e"
+    },
+    "dispositions": {
+      "floor_idealization": {
+        "decision": "open",
+        "consequence": "beam stiffness, eccentricity and membrane restraint of the plate model; open until the slab validation protocol's comparisons are reviewed",
+        "evidence": []
+      },
+      "supports_and_faces": {
+        "decision": "open",
+        "consequence": "finite support and beam-face representation and column rotational restraint; open",
+        "evidence": []
+      },
+      "stiffness_sensitivity": {
+        "decision": "open",
+        "consequence": "flexural and torsional stiffness sensitivity and the resulting demand envelope; open",
+        "evidence": []
+      },
+      "two_way_shear_path": {
+        "decision": "open",
+        "consequence": "the beam-supported shear path in place of a slab-column two-way check (ACI 318-14 8.10.8 via 318-19 R8.2.1); open",
+        "evidence": []
+      },
+      "local_slab_column_steel": {
+        "decision": "open",
+        "consequence": "applicability of ACI 318-19 8.6.1.2 to the beam-supported floor; open",
+        "evidence": []
+      },
+      "independent_reference": {
+        "decision": "open",
+        "consequence": "an independent reference check with stated limits (interior, edge and corner); open",
+        "evidence": []
+      },
+      "tolerance": {
+        "decision": "open",
+        "consequence": "acceptance of the refinement tolerance as an engineering criterion; open",
+        "evidence": []
+      }
+    },
+    "flag_basis": {
+      "analysis_applicability_verified": [
+        "floor_idealization",
+        "independent_reference",
+        "stiffness_sensitivity",
+        "supports_and_faces"
+      ],
+      "all_floors_enveloped": [
+        "floor_idealization"
+      ],
+      "load_pattern_envelope_verified": [
+        "independent_reference"
+      ],
+      "spatial_envelope_per_unit_width": [
+        "independent_reference",
+        "supports_and_faces"
+      ],
+      "twisting_moment_resolution_verified": [
+        "independent_reference"
+      ],
+      "zero_membrane_force_verified": [
+        "floor_idealization"
+      ],
+      "verified": [
+        "floor_idealization",
+        "independent_reference",
+        "stiffness_sensitivity",
+        "supports_and_faces",
+        "tolerance"
+      ],
+      "two_way_shear_path_assessed": [
+        "two_way_shear_path"
+      ],
+      "slab_column_local_steel_assessed": [
+        "local_slab_column_steel"
+      ]
+    }
+  }
+}

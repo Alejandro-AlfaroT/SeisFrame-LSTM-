@@ -298,7 +298,8 @@ STRENGTH_MODEL_REVIEW_ITEM = "M1"
 STRENGTH_MODEL_STATUSES = ("provisional", "verified")
 
 
-def classify_torsional_irregularity(tir, one_side_strength_fraction=None, strength_model_verified=False):
+def classify_torsional_irregularity(tir, one_side_strength_fraction=None, strength_model_verified=False,
+                                    independent_distribution_bound=None):
     """ASCE 7-22 Table 12.3-1 Type 1 torsional irregularity from its two criteria.
 
     Type 1 exists where the torsional irregularity ratio (TIR, 12.3.2.1.1:
@@ -315,7 +316,9 @@ def classify_torsional_irregularity(tir, one_side_strength_fraction=None, streng
     here: it is a ratio of level displacements
     (amplification_from_level_displacements), not of the TIR.
 
-    The two criteria stay distinct. The strength fraction comes from a
+    The two criteria stay distinct. An independently computed physical-frame
+    reflection bound can resolve the one-sided fraction without establishing
+    the total or vertical story-strength model M1. Otherwise the fraction comes from a
     story-strength model whose applicability is a review decision
     (STRENGTH_MODEL_REVIEW_ITEM); ``strength_model_verified`` says whether
     that decision has been asserted. An unknown fraction leaves the
@@ -327,14 +330,18 @@ def classify_torsional_irregularity(tir, one_side_strength_fraction=None, streng
     otherwise. A positive TIR establishes Type 1 on its own.
     """
     tir = _number(tir, "tir", minimum=1.0)
-    fraction = (None if one_side_strength_fraction is None
+    from Design.SMRF_Plan_Symmetry import METHOD as SYMMETRY_METHOD
+    bound = independent_distribution_bound or {}
+    symmetric = (bound.get("method") == SYMMETRY_METHOD and bound.get("verified") is True
+                 and bound.get("one_side_fraction") == .5 and not bound.get("problems"))
+    fraction = (.5 if symmetric else None if one_side_strength_fraction is None
                 else _number(one_side_strength_fraction, "one_side_strength_fraction", minimum=0.0))
     if fraction is not None and fraction > 1.0:
         raise ValueError("one_side_strength_fraction must not exceed 1.")
     by_tir = tir > TIR_TYPE_1
     by_strength = None if fraction is None else fraction > ONE_SIDE_STRENGTH_TYPE_1
-    verified = bool(strength_model_verified) and fraction is not None
-    status = "unevaluated" if fraction is None else ("verified" if verified else "provisional")
+    verified = (bool(strength_model_verified) or symmetric) and fraction is not None
+    status = "verified_by_reflection" if symmetric else "unevaluated" if fraction is None else ("verified" if verified else "provisional")
     type_1 = by_tir or bool(by_strength)
     absence_established = (not by_tir) and by_strength is False and verified
     label = "type_1" if type_1 else ("none" if absence_established else "unresolved")
@@ -344,6 +351,7 @@ def classify_torsional_irregularity(tir, one_side_strength_fraction=None, streng
             "strength_criterion_evaluated": by_strength is not None,
             "strength_criterion_status": status,
             "strength_criterion_resolved": verified,
+            "independent_distribution_bound": bound if symmetric else None,
             "strength_model_review_item": STRENGTH_MODEL_REVIEW_ITEM,
             "absence_established": absence_established,
             "tir_exceeds_1_4": tir > TIR_FORMER_TYPE_1B,
@@ -351,8 +359,8 @@ def classify_torsional_irregularity(tir, one_side_strength_fraction=None, streng
             "basis": ("ASCE 7-22 Table 12.3-1 Type 1: TIR > 1.2 (12.3.2.1.1, story drifts) or more than 75% of a story's "
                       "lateral strength at or on one side of the center of mass; the former Type 1b is Type 1 with "
                       "TIR > 1.4 (12.3.4.2.1 for rho; no 7-22 prohibition); Ax per 12.8.4.3 from level displacements; "
-                      "the strength criterion is resolved only on a verified story-strength model (review item "
-                      f"{STRENGTH_MODEL_REVIEW_ITEM}); a provisional model can establish Type 1, not its absence")}
+                      "the strength criterion is resolved by a verified story-strength model or the independently "
+                      "computed reflected-frame bound; a provisional M1 model alone can establish Type 1, not its absence")}
 
 
 def torsional_irregularity_limit(sdc):
@@ -939,10 +947,18 @@ def evaluate_demand_basis(record, strength_families=None):
             strength_fraction, strength_problem = None, ("the record asserts story_strength_model_verified but the evidence was "
                                                          "priced as provisional: stale evidence")
     model_verified = strength_fraction is not None and block_status == "verified" and asserted_verified
+    independent_bound = None
+    if isinstance(strength_block, dict) and strength_block.get("independent_distribution_bound") is not None:
+        from Design.SMRF_Plan_Symmetry import bound_from_record
+        rebuilt = bound_from_record(record)
+        # Rebuild from the saved members and materials, not the stored flag.
+        if rebuilt == strength_block["independent_distribution_bound"]:
+            independent_bound = rebuilt
     classification, torsion_problem = None, assessment.get("reason")
     if assessment["valid"]:
         classification = classify_torsional_irregularity(assessment["tir"], strength_fraction,
-                                                         strength_model_verified=model_verified)
+                                                         strength_model_verified=model_verified,
+                                                         independent_distribution_bound=independent_bound)
         stored = torsion.get("classification")
         if isinstance(stored, dict) and (
                 stored.get("type_1") != classification["type_1"] or stored.get("label") != classification["label"]

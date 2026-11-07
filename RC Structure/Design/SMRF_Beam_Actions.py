@@ -204,9 +204,13 @@ def evaluate_saved_beam_bending(record):
                     return not_evaluated(check_id, clause, "Saved member actions predate span-interior recovery; rerun design-only in a new root.")
                 if member["member_type"] != kind or not _matches(span.get("length_in"), length):
                     raise ValueError(f"Beam {tag} geometry differs from its recovered diagram.")
-                recomputed = recover_beam_bending(length, member["local_force_kip_kipin"],
-                                                  span["uniform_z_kip_per_in"], span["point_z_loads"],
-                                                  span["face_offsets_in"])
+                if str(span.get('method_version','')).startswith('physical_piecewise_section_force_extrema_'):
+                    from Design.SMRF_Physical_Member_Actions import validated_member_span
+                    recomputed=validated_member_span(member)
+                else:
+                    recomputed = recover_beam_bending(length, member["local_force_kip_kipin"],
+                                                      span["uniform_z_kip_per_in"], span["point_z_loads"],
+                                                      span["face_offsets_in"])
                 if not _matches(span, recomputed):
                     raise ValueError(f"Beam {tag} saved extrema differ from recomputed equilibrium.")
                 count += 1

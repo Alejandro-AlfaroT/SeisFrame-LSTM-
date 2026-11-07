@@ -1,0 +1,1 @@
+TEST FIXTURE - not an engineering review. This file stands in for reviewed evidence in the design-evidence profile tests; it records no review of any structure, floor or slab, and its hash is checked by the loader like any evidence file.

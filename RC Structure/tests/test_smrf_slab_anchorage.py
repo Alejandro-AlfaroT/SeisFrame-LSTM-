@@ -38,11 +38,12 @@ class HookDevelopmentTests(unittest.TestCase):
         self.assertEqual(hook_development_length_in(4, 8.0, 60.0, 10.0)[1]["psi_c"], 1.0)
 
     def test_perimeter_anchorage_against_the_edge_beam(self):
-        # #4 mats hook into a 10-in perimeter beam: 6.0 <= 10 - 1.5 - 0.5 = 8.0
+        # Bottom #4 hook is inset 0.5 + 1.0 in from the top-hook plane:
+        # 6.0 <= 10 - 1.5 - 0.5 - 1.5 = 6.5 in.
         ok = perimeter_slab_bar_anchorage(layout(4), "x", 10.0, 1.5, 0.5, 4.0, 60.0)
         self.assertTrue(ok["developed"])
-        self.assertAlmostEqual(ok["embedment_available_in"], 8.0)
-        # #6 mats do not: 9.71 > 8.0
+        self.assertAlmostEqual(ok["embedment_available_in"], 6.5)
+        # #6 mats do not: 9.71 > 10 - 1.5 - 0.5 - 1.75 = 6.25.
         bad = perimeter_slab_bar_anchorage(layout(6, 0.44), "x", 10.0, 1.5, 0.5, 4.0, 60.0)
         self.assertFalse(bad["developed"])
         self.assertIsNone(perimeter_slab_bar_anchorage(None, "x", 10.0, 1.5, 0.5, 4.0, 60.0))
@@ -111,7 +112,8 @@ class ExteriorEndCreditTests(unittest.TestCase):
         self.assertLess(ext_neg["mn_composite_kip_in"], int_neg["mn_composite_kip_in"])
         # Sagging at that end keeps the flange concrete but neither mat: the
         # bottom mat would otherwise add undeveloped tension steel (fourth
-        # cross-check: 1242.61 with the mats vs 1110.56 without).
+        # cross-check; the independent oracle below also removes concrete
+        # displaced by the compression mat inside the stress block).
         family = families["x_edge"]
         self.assertEqual(ext_pos["slab_basis"], "flange_concrete_undeveloped_bars")
         self.assertAlmostEqual(ext_pos["mn_composite_kip_in"], family["mn_undeveloped_positive_kip_in"])
@@ -119,8 +121,20 @@ class ExteriorEndCreditTests(unittest.TestCase):
         self.assertGreater(ext_pos["mn_composite_kip_in"], ext_pos["mn_rectangular_kip_in"])
         self.assertAlmostEqual(ext_pos["slab_mn_kip_in"], ext_pos["mn_composite_kip_in"] - ext_pos["mn_rectangular_kip_in"])
         self.assertEqual(ext_pos["slab_steel_in_flange_in2"], 0.0)
-        self.assertAlmostEqual(family["mn_positive_kip_in"], 1242.61, places=1)
-        self.assertAlmostEqual(family["mn_undeveloped_positive_kip_in"], 1110.56, places=1)
+        def hand_positive(mat_area):
+            # bf=10+102/12=18.5; the top web row is elastic, the far
+            # web row and bottom mat yield. Only the y=1 mat displaces
+            # concrete. Force equilibrium is a quadratic in c.
+            A=.85*4*18.5*.85
+            B=1.2*87-1.2*60+mat_area*(87-60-.85*4)
+            C=-(1.2*87*2.4375+mat_area*87)
+            c=(-B+math.sqrt(B*B-4*A*C))/(2*A)
+            a=.85*c
+            moment=-(A*c*a/2+1.2*87*(1-2.4375/c)*2.4375-1.2*60*15.5625
+                     +mat_area*87*(1-1/c)-mat_area*60*4-.85*4*mat_area)
+            return moment
+        self.assertAlmostEqual(family["mn_positive_kip_in"], hand_positive(.44*18.5/10), places=8)
+        self.assertAlmostEqual(family["mn_undeveloped_positive_kip_in"], hand_positive(0.), places=8)
         # Interior ends and the interior-end sagging keep the composite strengths.
         self.assertEqual(entries["17/j/positive"]["slab_basis"], "developed_effective_width")
         # The joint rule accepts both bases: zero slab term for hogging, the flange-concrete term for sagging.
@@ -139,7 +153,7 @@ class ExteriorEndCreditTests(unittest.TestCase):
 
     def test_hinges_take_the_rectangular_strength_at_an_undeveloped_exterior_end(self):
         values = {"NUM_BAY_X": 3, "NUM_BAY_Y": 3, "BAY_X": 120.0, "BAY_Y": 120.0,
-                  "B_COL": 18.0, "H_COL": 18.0, "B_BEAM": 10.0, "H_BEAM": 18.0, "FC_BEAM_KSI": 4.0,
+                  "B_COL": 18.0, "H_COL": 18.0, "B_BEAM": 10.0, "H_BEAM": 20.0, "FC_BEAM_KSI": 4.0,
                   "FY_KSI": 60.0, "BEAM_BAR_SIZE": 7, "BEAM_TOP_BARS": 2, "BEAM_BOT_BARS": 2,
                   "BEAM_BAR_AREA": 0.60, "SLAB_THICKNESS_IN": 5.0, "BEAM_CLEAR_COVER_IN": 1.5, "BEAM_STIRRUP_BAR_SIZE": 4,
                   "SLAB_REINFORCEMENT": {"layout": layout(6, 0.44)}}
@@ -204,7 +218,7 @@ class ExteriorEndCreditTests(unittest.TestCase):
 
 class LadderTests(unittest.TestCase):
     def test_ladder_refuses_a_bar_whose_hook_does_not_fit_the_perimeter_beam(self):
-        from test_smrf_slab_reinforcement import CORNERS, inputs, evidence
+        from tests.test_smrf_slab_reinforcement import CORNERS, inputs, evidence
         from Design.SMRF_Slab_Reinforcement import design_slab_reinforcement
         context = {"clear_span_x_in": 102.0, "clear_span_y_in": 102.0, "beam_width_in": 10.0,
                    "alpha_f_min": 5.6, "alpha_f_l2_l1_min": 5.6, "thickness_screen_passed": True,
@@ -224,9 +238,9 @@ class LadderTests(unittest.TestCase):
 
     def test_hook_is_checked_at_each_candidate_spacing_not_the_tightest_offered(self):
         """Fourth cross-check: spacings 3-12 rejected every #5 layout because the hook was priced at 3 in (psi_r = 1.6)."""
-        from test_smrf_slab_reinforcement import CORNERS, inputs, evidence
+        from tests.test_smrf_slab_reinforcement import CORNERS, inputs, evidence
         from Design.SMRF_Slab_Reinforcement import design_slab_reinforcement
-        context = {"clear_span_x_in": 102.0, "clear_span_y_in": 102.0, "beam_width_in": 10.0,
+        context = {"clear_span_x_in": 102.0, "clear_span_y_in": 102.0, "beam_width_in": 12.0,
                    "alpha_f_min": 5.6, "alpha_f_l2_l1_min": 5.6, "thickness_screen_passed": True,
                    "column_core_width_in": 13.0,
                    "two_way_shear_path_assessed": True, "slab_column_local_steel_assessed": False,
@@ -242,7 +256,7 @@ class LadderTests(unittest.TestCase):
         self.assertEqual(result["summary"]["counts"]["fail"], 0)
         trial = result["trial_history"][0]
         self.assertTrue(trial["passed"])
-        self.assertEqual(trial["spacings_rejected_by_hook_in"], [3.0])      # #5 hooks at 3 in < 6 db: 11.8 > 8.0
+        self.assertEqual(trial["spacings_rejected_by_hook_in"], [3.0])      # #5 at 3 in: 11.8 > 12-2-1.625=8.375
         without_three = design_slab_reinforcement(inputs(), evidence(), policy={"bar_sizes": [5], "spacing_options_in": spacings[1:]},
                                                   context=context)
         self.assertEqual(without_three["layout"]["layers"], result["layout"]["layers"])

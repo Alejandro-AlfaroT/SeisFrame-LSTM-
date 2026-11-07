@@ -1,0 +1,16 @@
+{
+  "source_size": [
+    1504,
+    1128
+  ],
+  "changed_pixels_inside_caption": 18255,
+  "changed_pixels_outside_caption": 0,
+  "widescreen_size": [
+    1920,
+    1080
+  ],
+  "source_sha256": "40d3b38db2940a2d4269981a5028b8e41f584fef49e86c1de9df758f55faf9f9",
+  "master_sha256": "7710e47aa59197fab5a2d316586b6bc49ae2aa1a504502aa8c98b50ef879f1f5",
+  "widescreen_sha256": "019bbf2f2bc38bc7eaedd36849d925d425106dc9cb3903d900d8aefe144abe5b",
+  "widescreen_layout_reflow": true
+}

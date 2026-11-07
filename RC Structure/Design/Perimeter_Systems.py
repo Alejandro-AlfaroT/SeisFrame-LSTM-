@@ -6,7 +6,7 @@ continuous frame: every beam framing into every column, the model of the gravity
 response-history analyses. "perimeter_sfrs" releases both ends of every interior (gravity) beam in bending,
 so the lateral load of the design analyses flows to the perimeter frames and the interior columns lean on
 the diaphragms: the structure is proportioned for the seismic forces with the members not designated as
-part of the SFRS left out of the lateral analysis (ASCE 7-22 12.2.3.3, 12.12.5; ACI 318-19 18.14).
+part of the SFRS left out of the lateral analysis (ASCE 7-22 12.2.3.3, 12.12.4; ACI 318-19 18.14).
 
 Per strength combination (decision D1 of the plan):
 
@@ -26,7 +26,7 @@ Per strength combination (decision D1 of the plan):
   entire structure's under every policy (Design_Driver.PERIOD_MODEL, the continuous frame; user decision
   2026-10-24: the period is not separated by system).
 
-Compatibility run (decision D2; ACI 318-19 18.14.2.1, ASCE 7-22 12.12.5): the design displacement
+Compatibility run (decision D2; ACI 318-19 18.14.2.1, ASCE 7-22 12.12.4): the design displacement
 delta_u = Cd delta_e / Ie of the released model's rho = 1 ELF runs is imposed, level by level, on the diaphragm
 masters of the continuous model (ux, uy and the diaphragm rotation, so every interior member sees its own
 drift, accidental torsion included) together with the gravity load combinations of 5.3 that carry the
@@ -123,7 +123,7 @@ def drift_screen(period, torsion, cfg, state=None):
     result["assumptions"]["lateral_design_model"] = model
     if model == RELEASED_MODEL:
         result["assumptions"]["model"] += ("; interior (gravity) beams released in bending at both ends, the perimeter "
-                                           "frames carry the lateral load (ASCE 7-22 12.12.5; ACI 318-19 18.14)")
+                                           "frames carry the lateral load (ASCE 7-22 12.12.4; ACI 318-19 18.14)")
     return result
 
 
@@ -209,7 +209,7 @@ def superpose_by_system(continuous, released_gravity, released, systems):
     return members
 
 
-# ---- deformation compatibility (ACI 318-19 18.14.2.1; ASCE 7-22 12.12.5) --------------------------------------
+# ---- deformation compatibility (ACI 318-19 18.14.2.1; ASCE 7-22 12.12.4) --------------------------------------
 def design_displacements(period, torsion, cfg, state=None):
     """delta_e at every diaphragm master of the design model under the rho = 1 ELF of each axis (the drift
     screen's runs, accidental torsion as the screen applies it) and delta_u = Cd delta_e / Ie (ASCE 7-22 12.8.6)."""
@@ -285,7 +285,7 @@ def compatibility_run(period, torsion, cfg, state=None, displacements=None):
                     driver._apply_combination_loads(combination, period, None)
                     _impose_design_displacements(levels, sign)
                     with driver._quiet():
-                        run_gravity_analysis()
+                        run_gravity_analysis(constraint_handler='Transformation')
                     solves += 1
                     cases.append({**combination, "axis": axis, "sign": sign, "analysis_succeeded": True,
                                   "axial_reference": "joint_faces", "imposed": _achieved_displacements(levels, sign),
@@ -294,7 +294,7 @@ def compatibility_run(period, torsion, cfg, state=None, displacements=None):
     return {"design_displacements": displacements, "cases": cases, "solves": solves,
             "basis": ("ACI 318-19 18.14.2.1: gravity load combinations of 5.3 including the vertical ground motion, "
                       "(1.2 + 0.2 SDS) D + 1.0 L and (0.9 - 0.2 SDS) D, acting simultaneously with the design displacement "
-                      "delta_u imposed at the diaphragm masters of the continuous frame (ASCE 7-22 12.12.5), each axis, "
+                      "delta_u imposed at the diaphragm masters of the continuous frame (ASCE 7-22 12.12.4), each axis, "
                       "both signs; every member's induced actions are read as signed concurrent centerline actions")}
 
 

@@ -380,12 +380,24 @@ def evaluate_slab_actions(evidence):
     from Design.SMRF_Slab_Refinement import refinement_verified
     mesh_ok = refinement_verified(evidence)
     assertions = evidence.get("engineering_assertions") or {}
+    from Design.SMRF_Conventional_Floor import SLAB_EVIDENCE_COMPUTED, slab_acceptance_problems
+    computed_basis = evidence.get("acceptance_basis") == SLAB_EVIDENCE_COMPUTED
+    if computed_basis:
+        # Accepted on computed conditions (2026-11-07): complete floors, balanced cases, valid face recovery, passed refinement.
+        problems = slab_acceptance_problems(evidence)
+        details = {"numerical_basis": evidence.get("numerical_basis"), "pattern_rule": evidence.get("pattern_rule"),
+                   "cases": [c["id"] for c in evidence.get("cases", [])], "acceptance_basis": SLAB_EVIDENCE_COMPUTED,
+                   "problems": problems}
+        checks.append(make_check("floor.qualified_slab_actions", "ACI 318-19 5.3.1, 6.4.3, 8.4; Wood-Armer",
+                                 int(mesh_ok and not problems), 1, "==", details=details))
     flags_ok = (mesh_ok and assertion_provenance_valid(assertions)
                 and all(assertions.get(flag) is True and evidence.get(flag) is True for flag in _FLAGS))
     details = {"numerical_basis": evidence.get("numerical_basis"), "pattern_rule": evidence.get("pattern_rule"),
                "cases": [c["id"] for c in evidence.get("cases", [])],
                "engineering_assertions": evidence.get("engineering_assertions")}
-    if flags_ok:
+    if computed_basis:
+        pass
+    elif flags_ok:
         checks.append(make_check("floor.qualified_slab_actions", "ACI 318-19 5.3.1, 6.4.3, 8.4; Wood-Armer",
                                  1, 1, "==", details=details))
     else:

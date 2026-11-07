@@ -1,0 +1,236 @@
+Independently review my current SeisFrame genetic design-generation implementation. Cross-check the description below against the actual source, configuration, and recorded results.
+
+Treat this description as a set of claims to verify—not as ground truth. Do not rely solely on implementation reports, comments, or passing tests.
+
+Repository:
+C:\Users\andro\Documents\GitHub\StructGNN-OpenSeesPy-Integrated
+
+Context and scope
+
+We are developing automated reinforced-concrete special moment-frame design generation for a capstone project. The objective is to produce varied, structurally coherent designs that satisfy the applicable structural requirements, including SMRF detailing.
+
+Quality of design matters more than simply minimizing material cost or obtaining a nominal numerical pass.
+
+Claude was implementing corrections but ran out of usage mid-task. Some changes may therefore be partial, untested, or inconsistent with existing documentation.
+
+This is a review request. Do not modify production code, finish unfinished changes, alter engineering assertions, relax checks, install packages, or launch GA runs or structural analyses. Preserve all existing edits and untracked files.
+
+Read applicable AGENTS.md instructions. If you cannot access the repository, identify the files you need before drawing implementation conclusions.
+
+Established project decisions:
+
+- The practical beam longitudinal reinforcement ratio ceiling is 0.0175; do not recommend exceeding it.
+- Fire-resistance design is excluded from the capstone scope. This should be represented as outside scope, not as a fictitious passed check.
+- Applicable structural strength, shear, detailing, drift, stability, and slab requirements remain required.
+- The current task is to finish and validate the existing GA approach. Avoid proposing a new optimizer, optional features, or a major redesign.
+- Code acceptance, qualification, and nonlinear-performance evaluation must remain distinct.
+
+Primary files to inspect
+
+Under:
+C:\Users\andro\Documents\GitHub\StructGNN-OpenSeesPy-Integrated\RC Structure\
+
+- Design\Genetic_Generation.py
+- Design\Genetic_Search.py
+- Design\Genetic_Operators.py
+- Design\Genetic_Jumps.py
+- Design\Genetic_Diagnostics.py
+- Design\Genetic_Population.py
+- Design\Grouped_Design.py
+- Design\Group_Selection.py
+- Design\Grouped_Search.py
+- Design\Code_Check_Contract.py
+- Design\Config.py
+- Design\Concrete_Grades.py
+- Model\Member_Groups.py
+- tools\genetic_design_search\run.py
+- tools\genetic_design_search\README.md
+- tools\genetic_design_search\evidence_profiles\
+- Relevant tests and any directly involved slab, joint, anchorage, or capacity-design modules.
+
+Supporting context under the repository:
+
+- research\ga_v3_preference_20261101\next_run_plan\PLAN.json
+- research\ga_closure_followup_20261101\REPORT.md
+- research\ga_closure_followup_20261101\hook_datum\WORKED_EXAMPLES.md
+- research\ga_closure_followup_20261101\slab_assessment\SLAB_ASSESSMENT_DRAFT.md
+- research\ga_followup_review_20261101\REVIEW.txt
+- research\ga_followup_review_20261101\CLAUDE_NEXT_ACTIONS.txt
+
+Use these reports to understand intent and prior findings. Independently verify whether the current source implements their claims. Clearly distinguish historical snapshots from the current working tree.
+
+Claims to verify
+
+1. Search architecture and scope
+
+The current generation_v3 controller maintains a population and generates offspring through mutation. Crossover and adaptive operator-performance weighting are disabled.
+
+The older heuristic_v2 engine has different behavior, including crossover. Verify which engine the runner defaults to and whether the intended configuration explicitly selects generation_v3.
+
+Within one run, building geometry, loading/design conditions, structural-system layout, grouping policy, longitudinal steel grade, and evaluation basis remain fixed.
+
+Different building geometries are supplied as separate cases outside this inner search.
+
+2. Chromosome and design variables
+
+Genes select discrete member sections and concrete grades.
+
+Section genes correspond to tied groups of members. Beam genes select permitted width–depth pairs; column genes select permitted square sections.
+
+For the saved six-story perimeter-frame pilot, the claimed chromosome has eight section genes—four member categories in each of two three-story bands—and three concrete-grade genes, for eleven genes total.
+
+Verify this for that specific configuration. Do not assume eleven genes applies to every case.
+
+Concrete grades are assigned by family, with changes potentially affecting multiple bands or systems.
+
+Longitudinal bars, hoops/stirrups, and slab reinforcement are selected by inner engineering routines rather than directly mutated as chromosome entries.
+
+3. Reinforcement ceiling
+
+The practical beam ceiling is applied per relevant face as As/(bw·d), using the appropriate effective depth.
+
+The base configuration reportedly defaults to 0.015, while recent pilot configurations explicitly request 0.0175.
+
+Verify that the authorized maximum, inner cage selector, jump estimator, evaluator, saved configuration, and resumed runs apply this consistently. Check for alternate paths or cached evidence that could bypass or misinterpret it.
+
+4. Initialization and parent selection
+
+The default initializer evaluates the seed and random local neighbors.
+
+The recent pilot plan specifies population size four and four offspring per generation.
+
+Parents are selected uniformly from the surviving population. Failure severity affects mutation selection, not parent selection.
+
+5. Engineering-guided operators
+
+Verify the actual triggers, required evidence, targets, and proposed changes for:
+
+- H1: Strong-column/weak-beam—connected column sections or concrete grade.
+- H2: Member strength—beam dimensions/grade or column section/grade, with mechanism-dependent restrictions for capacity shear.
+- H3: Reinforcement fit—beam dimensions, blocking joint cores, and evidenced column-transition changes. Pure geometric blockage should not be treated as something a concrete-grade increase resolves.
+- H4: Joint checks—joint-core dimensions and, for applicable joint-shear failures, concrete grade.
+- H5: Drift/stability—relevant seismic-frame columns and beam depths at floors bounding the affected story.
+- R1: Random exploration—one mutable gene and a permitted local neighbor.
+
+Check whether diagnostics are authenticated against the exact evaluated parent and evaluation basis. Unknown evidence, stale evidence, or solver failure must not automatically become a strengthening instruction.
+
+Identify genuine failing checks that currently have no supported mutation route.
+
+6. Demand-sized jumps
+
+These currently estimate beam-flexure improvements, including supported congestion-related flexural shortfalls; they are not a general sizing estimator for every failure type.
+
+The estimator freezes the parent’s demands and surrounding cage conditions, then evaluates permitted section or concrete-grade alternatives using compatible cage-selection logic.
+
+The recent target DCR is 0.85. Required capacity is Mu/target_DCR. This is not a multiplier applied directly to section dimensions or reinforcement.
+
+Verify treatment of:
+
+- Actual bar arrangement and effective depth.
+- Reinforcement ratio ceiling.
+- Threading and admissible cages.
+- Baseline agreement with the evaluated parent.
+- Family-wide versus individual beam-unit estimates.
+- Target-reaching options versus partial improvements.
+- Unscreened options when budgets expire.
+- Full reevaluation after a screened proposal.
+
+The recent screen budgets are eight option pricings per gene and fifteen seconds per observation, subject to remaining run time. Verify the actual budget semantics and whether these are hard or between-operation limits.
+
+7. Severity weighting and preferred jumps
+
+Verify the configured severity_preferred_jumps_v1 policy.
+
+The recent configuration uses:
+
+- Guided probability: 0.75.
+- Preferred severe-utilization threshold: 1.25.
+- Preferred share of guided draws: 0.80.
+- Jump target DCR: 0.85.
+- Minimum estimated gain: 0.02.
+
+When an eligible preferred pool exists, 0.75 × 0.80 gives a 0.60 probability of entering the preferred branch. This is not a guarantee about the fraction of completed evaluations.
+
+Verify that severe failures receive greater attention, repeated diagnostic rows do not unfairly multiply their weight, and screened jumps receive preference based on their own affected beam unit’s predicted improvement.
+
+Check fallback behavior, exhausted proposals, duplicate proposals, and whether clearance/coordination moves remain available when a beam-only jump cannot solve the problem.
+
+These are search settings, not engineering acceptance thresholds.
+
+8. Repair and duplicate handling
+
+A proposal normally requests one gene change. Repair can induce additional changes to satisfy grouping, section ordering, or coupling rules.
+
+Repair enforces allowable design structure; it does not certify structural adequacy.
+
+Verify that removed/reversed interventions, no-ops, illegal results, duplicate inputs, and previously evaluated candidates are handled correctly.
+
+Distinguish submitted-input identity from final realized-design identity.
+
+9. Candidate evaluation
+
+Trace one candidate through the real evaluator: slab/floor treatment, demands, load combinations, member actions, cage coordination, capacity design, final checks, and recorded results.
+
+Determine what is recomputed, what is cached, and how evidence is kept consistent with the final sections, cages, and slab.
+
+Check how reinforcement cycles and incomplete selection are handled. A verified cycle resolution must not be confused with ordinary convergence or an unsupported completion flag.
+
+Confirm that ordinary GA candidate evaluation does not constitute nonlinear earthquake time-history validation.
+
+10. Survival and archives
+
+The claimed selection hierarchy is:
+
+- Code-accepted candidates.
+- Numerically complete candidates with known failures and complete required evidence.
+- Numerically complete candidates with known failures plus unresolved evidence.
+
+Evidence-only cases and numerical failures are handled separately.
+
+Verify that progress comparisons use compatible check inventories, known-check masks, and bases. Missing checks must not make a candidate appear artificially superior.
+
+The reported progress measures are maximum known exceedance and the mean of per-family maximum exceedances, with diversity used when selecting survivors.
+
+Parents and offspring compete together. Accepted designs are retained independently of whether another accepted design uses less material.
+
+Verify that surviving as a parent does not imply acceptance or improvement in every engineering check.
+
+11. Acceptance and unfinished corrections
+
+Trace what can actually receive an “accepted” label today.
+
+Pay particular attention to:
+
+- Slab-action evidence and its applicability to changing GA designs.
+- Two-way shear and local slab-column reinforcement dependencies.
+- Slab-bar anchorage and its use in beam resistance versus SCWB.
+- Roof SCWB applicability.
+- Whether fire exclusion is represented explicitly.
+- Any review/unknown status that can silently bypass structural acceptance.
+
+Do not assume that implemented evidence-profile infrastructure means a validated, reviewed procedure exists.
+
+Separate implemented logic, tested logic, engineering evidence, and unresolved judgment.
+
+12. Stops and reproducibility
+
+Verify evaluation, proposal, generation, time, error, and stagnation bounds; checkpoint/resume behavior; source/configuration binding; and recorded seeds.
+
+A bounded unsuccessful search must not be reported as proof of structural infeasibility. Code acceptance must not be presented as qualification or validated nonlinear performance.
+
+Required response
+
+Start with a plain-language verdict on how accurately the description matches the implementation.
+
+Then provide:
+
+1. A claim-by-claim table: confirmed, partially correct, incorrect, or unverified, with source file and line references.
+2. The most consequential findings first, including trigger, actual behavior, expected behavior, and practical consequence.
+3. A clear distinction between confirmed defects, intentional limitations, missing engineering evidence, and incomplete work.
+4. One understandable walkthrough from parent selection to mutation, evaluation, and survival. Use an existing recorded candidate if available; otherwise label the example illustrative.
+5. A short, prioritized correction list needed for the next meaningful end-to-end pilot. Avoid optional enhancements.
+6. Explicit limits of your review: files inspected, tests run, and claims not verified.
+
+Existing isolated tests may be used only after confirming they do not launch structural solves or GA runs. Do not run the full suite blindly. For any suspected defect, prefer the smallest reproducible example or identify the exact missing test.
+
+Do not declare the GA ready merely because tests pass, and do not declare a defect solely because the implementation differs from a textbook GA. Assess whether the implemented behavior matches its declared purpose and preserves trustworthy engineering acceptance.

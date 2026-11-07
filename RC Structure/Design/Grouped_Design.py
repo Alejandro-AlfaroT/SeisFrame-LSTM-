@@ -37,11 +37,13 @@ failures, unknown or missing checks and review dependencies listed apart) and ``
 passed, the evaluation completed and the objectives are available). The strong-column beams credit the slab
 mats only as far as the slab record establishes them on the final floor context.
 
-Nothing here asserts a verification. The story-strength model is provisional (review item M1), the
-transition rules are declared rules awaiting review, and Design.SMRF_Qualification
-.GENERATION_RELEASE_READY is untouched.
+Computed final story strength is recognized only after independent replay of its
+complete nominal equilibrium and dual certificates. Missing certificates remain
+unresolved; no manual model assertion or generation release is invented here.
 """
 from __future__ import annotations
+
+from Design.Config import validate_beam_practical_ceiling
 
 import copy
 import hashlib
@@ -76,7 +78,7 @@ SCHEMA = "rc_smrf_grouped_candidate_v1"
 # v4 (2026-11-01, closure review): a proven reinforcement cycle is resolved only on verification (resolve_cycle) and
 # recorded either way (constraints.reinforcement_resolution); the seed arrangement outcome attributes the slab mats by
 # an audit with the mats masked and keeps its declared call site.
-EVALUATION_VERSION = "grouped_candidate_evaluation_v4_cycle_resolution"
+EVALUATION_VERSION = "grouped_candidate_evaluation_v7_computed_common_actions"
 CYCLE_RESOLUTION_ID = "reinforcement_cycle_verified_resolution_v1"
 CYCLE_RESOLUTION_MAX_CANDIDATES = 4   # distinct states of a cycle tried, in _cycle_candidates order
 STEEL_UNIT_WEIGHT_LB_PER_IN3 = 490.0 / 1728.0
@@ -206,12 +208,18 @@ def _effective_assertions(cfg, description):
 
 def _two_way_shear_path_assessed(cfg):
     """The two-way shear path assessment of the installed candidate's floors, under the assertions in force there."""
+    from Design.SMRF_Conventional_Floor import computed_slab_basis
+    if computed_slab_basis(cfg):
+        return True                                       # the premise itself is computed in _completion_checks
     assertions = _effective_assertions(cfg, floor_sections.by_floor())
     return assertions.all_asserted() and assertions.two_way_shear_path_assessed is True
 
 
 def _slab_column_local_steel_assessed(cfg):
     """The 8.6.1.2 applicability assessment of the installed candidate's floors, under the assertions in force there."""
+    from Design.SMRF_Conventional_Floor import computed_slab_basis
+    if computed_slab_basis(cfg):
+        return True                                       # the premise itself is computed in _local_steel_check
     assertions = _effective_assertions(cfg, floor_sections.by_floor())
     return assertions.all_asserted() and assertions.slab_column_local_steel_assessed is True
 
@@ -273,6 +281,9 @@ def _slab_evidence(cfg, slab, description, inputs, context):
                 evidence = procedure_module.masked(evidence, f"procedure {procedure.get('status')}")
         floors.append({"floor_sections_sha256": sha, "floors": served, "evidence": evidence})
     combined = combine_floor_evidence(floors, sp.NUM_FLOOR)
+    from Design.SMRF_Conventional_Floor import SLAB_EVIDENCE_COMPUTED, computed_slab_basis
+    if plan is not None and computed_slab_basis(cfg):
+        combined["acceptance_basis"] = SLAB_EVIDENCE_COMPUTED
     if procedure is not None:
         combined["procedure_instances"] = instances
         combined["procedure"] = {"identity": procedure.get("identity"), "status": procedure.get("status")}
@@ -400,7 +411,8 @@ def slab_stage(cfg, context):
         attempt["layout_selected"] = record["layout"] is not None
         scope = slab_assertion_scope(cfg, description)
         attempt["assertion_scope"] = {k: scope[k] for k in ("asserted", "in_scope", "effective")}
-        if record["layout"] is not None or not scope["effective"]:
+        computed_basis = evidence.get("acceptance_basis") is not None
+        if record["layout"] is not None or not (scope["effective"] or computed_basis):
             attempt["status"] = ("layout_selected" if record["layout"] is not None else
                                  "actions_not_asserted_no_layout" if not scope["asserted"] else
                                  "assertions_out_of_scope_no_layout")
@@ -449,71 +461,73 @@ def slab_stage(cfg, context):
 
 
 # ---- story-by-story regularity evidence ---------------------------------------------------------------------
-def story_strength_distribution(cfg):
-    """Frame-line story strengths of every story from the beams actually installed there (provisional model).
+def beam_end_sway_sums(values):
+    """The two beam-sway sums on the actual end sections, without an M1 applicability claim.
 
-    Each beam adds its member-wide composite strength (every flange mat, both signs). Beam sizing drops the mats at
-    an exterior end whose hook does not develop at both datums; this story strength still counts them, a declared
-    approximation of the provisional model (2026-11-01, decision D5).
-
-    The uniform model prices one set of four beam families and declares every story alike. Here each
-    story's lines are summed from that floor's own beams (Model.Member_Properties.beam_strengths), so the
-    one-sided fraction of ASCE 7-22 Table 12.3-1 is a value per story and direction, and the story
-    strengths are available for the vertical comparison. The model is the same beam-sway approximation,
-    with the same open questions (column, joint and shear limits, base and roof mechanisms): review item
-    M1 stays open and nothing here asserts it.
+    Both strength datums must develop a mat before it can be credited in a
+    lower-bound beam-end proxy. The legacy no-slab adapter has one section.
     """
-    from Design.SMRF_Demands import one_sided_strength_fraction
-    # Under the system policy only the perimeter frames are the seismic force-resisting system: the interior lines
-    # are gravity frames and carry no story strength here (ASCE 7-22 Table 12.3-1 reads the SFRS; decision D7).
-    perimeter_only = systems.two_system()
-    layout = mg.active_layout()
-    stories, worst = [], 0.0
-    for floor in range(1, sp.NUM_FLOOR + 1):
-        entry = {"story": floor, "by_direction": {}}
-        for direction, kind, lines, spans, spacing in (("x", "beam_x", sp.NUM_BAY_Y + 1, sp.NUM_BAY_X, sp.BAY_Y),
-                                                       ("y", "beam_y", sp.NUM_BAY_X + 1, sp.NUM_BAY_Y, sp.BAY_X)):
-            positions, strengths, groups, line_systems = [], [], [], []
-            for line in range(lines):
-                total, group = 0.0, None
-                counted = not perimeter_only
-                for span in range(spans):
-                    beam = mg.beam_at(kind, floor, span, line) if kind == "beam_x" else mg.beam_at(kind, floor, line, span)
-                    # A span counts when its beam is part of the SFRS: every span of a perimeter line, the ring spans of
-                    # a core line under the perimeter-core layout, none of a gravity line.
-                    if perimeter_only and mg.member_system(kind, beam.grid_i, beam.grid_j, sp.NUM_BAY_X, sp.NUM_BAY_Y,
-                                                           layout) != mg.SYSTEM_SFRS:
-                        continue
-                    counted = True
-                    values = mp.beam_strengths(beam)
-                    total += (values["hogging"] + values["sagging"]) / sp.STORY_H
-                    group = beam.group_id
-                positions.append(line * spacing)
-                strengths.append(total if counted else 0.0)
-                groups.append(group)
-                line_systems.append(mg.SYSTEM_SFRS if counted else mg.SYSTEM_GRAVITY)
-            fraction, detail = one_sided_strength_fraction(positions, strengths, 0.5 * positions[-1])
-            entry["by_direction"][direction] = {"line_positions_in": positions, "line_story_strength_kip": strengths,
-                                                "line_groups": groups, "line_systems": line_systems, "story_strength_kip": sum(strengths),
-                                                "one_side_fraction": fraction, **detail}
-            worst = max(worst, fraction)
-        stories.append(entry)
-    return {"one_side_fraction": worst, "stories": stories,
-            "lines_counted": (("the seismic force-resisting lines only: "
-                              + ("the perimeter frames and the core ring" if layout == mg.SFRS_LAYOUT_PERIMETER_CORE else "the perimeter frames")
-                              + " (the other lines are gravity frames, ACI 318-19 18.14)") if perimeter_only
-                              else "every frame line"),
-            "applicability": driver._strength_model_applicability(cfg),
-            "uniform_over_height": {"claim": False,
-                                    "basis": "grouped design: sections and cages vary by story band and plan location, so "
-                                             "every story is priced on its own beams"},
-            "model": ("beam-sway mechanism story strength per frame line, story by story: the sum over the line's spans of "
-                      "(Mn- + Mn+) / story height of the beams installed at that floor, composite with the developed slab "
-                      "where established; center of mass at the plan center. A declared approximation (review item M1): "
-                      "column-limited, joint-limited and shear-limited mechanisms, the base and the roof are not priced"),
-            "basis": ("ASCE 7-22 Table 12.3-1 Type 1 strength criterion per story and direction; the largest story value "
-                      "is reported. The story strengths also feed the weak-story comparison (Table 12.3-2 Types 4a, 4b), "
-                      "which stays open with the model")}
+    basis = values.get("basis") or {}
+    if "sizing_hogging_i_kip_in" not in basis:
+        return values["hogging"] + values["sagging"], values["hogging"] + values["sagging"]
+    return (basis["sizing_hogging_i_kip_in"] + basis["sizing_sagging_j_kip_in"],
+            basis["sizing_hogging_j_kip_in"] + basis["sizing_sagging_i_kip_in"])
+
+
+def story_strength_distribution(cfg, *, actions=None, expected_ids=None, transfers=None, capacity=None, state=None, gravity_actions=None):
+    """Final installed-state bounded story resistance; symmetry can precede loads.
+
+    Before demand solving only the independently checked reflected-frame
+    distribution is available. Actual strengths are calculated after final
+    cages, slab development, signed loads and joint/hoop evidence are known.
+    A beam-sway proxy is never substituted for the missing calculation.
+    """
+    from Design.SMRF_Plan_Symmetry import strength_distribution_bound
+    state = state or mg.active()
+    bound = strength_distribution_bound(state, driver._slab_geometry(),
+                                         clear_cover_in=sp.COL_CLEAR_COVER_IN, grid_in=sp.BAR_POSITION_GRID_IN)
+    base = {"one_side_fraction": bound.get("one_side_fraction"), "independent_distribution_bound": bound,
+            "lines_counted": "every actual SFRS member in the considered direction; all parallel lines share diaphragm translation",
+            "uniform_over_height": {"claim": False, "basis": "actual member sections, cages and final loads vary by story"}}
+    if actions is None:
+        return {**base, "stories": [], "model": "equilibrated nominal story resistance awaits final actions and cages",
+                "applicability": {"status": "incomplete", "verified": False,
+                                  "technical_gaps": ["final signed actions and capacity evidence are not yet available"]}}
+    if capacity is None or expected_ids is None:
+        raise ValueError("Actual story resistance requires final capacity and complete signed combination identities")
+    from Design import SMRF_Conventional_Detail as conventional_detail
+    if conventional_detail.active():
+        from Design import SMRF_Conventional_Story as conventional_story
+        from Design.SMRF_Story_Adapter import _validate_inventory
+        if gravity_actions is None:
+            raise ValueError("Actual story resistance requires exact gravity-only states for every signed-case load family")
+        # The inputs are bound before the mechanism runs: a binding error is a software error and raises (2026-11-07).
+        _validate_inventory(state, actions, expected_ids, gravity_actions)
+        try:
+            result = conventional_story.calculate(state, actions, capacity, gravity_actions)
+        except (ValueError, KeyError) as exc:
+            # An input the story mechanism needs is missing: no strength is formed and the strength regularity row stays
+            # not evaluated, with the reason.
+            return {**base, "method": conventional_story.METHOD, "stories": [],
+                    "model": "story mechanism strength not calculated",
+                    "applicability": {"status": "incomplete", "verified": False, "technical_gaps": [str(exc)]}}
+        result["floor_transfer_inventory"] = sorted(transfers) if transfers is not None else None
+        return {**result, **base}
+    from Design.SMRF_Story_Adapter import calculate, StoryStrengthPremiseUnavailable, ADAPTER_METHOD, METHOD as STORY_METHOD
+    if gravity_actions is None:
+        raise ValueError("Actual story resistance requires exact gravity-only states for every signed-case load family")
+    try:
+        result = calculate(state, actions, expected_ids, capacity, gravity_actions=gravity_actions)
+    except StoryStrengthPremiseUnavailable as exc:
+        # A physical premise of the story model is not established for this design: no strength is formed and the
+        # vertical strength regularity row stays not evaluated (an unknown row), with the refusal recorded.
+        return {**base, "method": STORY_METHOD, "adapter_method": ADAPTER_METHOD,
+                "stories": [], "model": "equilibrated nominal story resistance not calculated: a physical "
+                                                 "premise of the story model is not established",
+                "applicability": {"status": "incomplete", "verified": False, "technical_gaps": [str(exc)]},
+                "premise_refusal": {"reason": str(exc), **exc.evidence}}
+    result["floor_transfer_inventory"] = sorted(transfers) if transfers is not None else None
+    return {**result, **base}
 
 
 # ASCE 7-22 Table 12.3-2 as the vertical evidence uses it. The 2022 edition has no weight (mass) irregularity
@@ -609,7 +623,7 @@ def vertical_regularity(drift_screen, elf, strength, ledger):
     the drift runs (accidental torsion included, so it is a screen, not a pure translational stiffness).
     The ratios are formed only from complete evidence (``story_evidence``); with a row missing, duplicated
     or unusable no ratio is formed and the stiffness check stays not evaluated. Strength is the
-    provisional story-strength model (review item M1). ASCE 7-22 has no weight (mass) irregularity: the
+    independently certified directional nominal resistance bounds. ASCE 7-22 has no weight (mass) irregularity: the
     member-resolved story weights and their ratios are recorded without a threshold or a check.
     """
     nf = sp.NUM_FLOOR
@@ -652,6 +666,10 @@ def vertical_regularity(drift_screen, elf, strength, ledger):
                for k in range(1, nf + 1) if floors.get(k) is not None]
     by_story = {entry.get("story"): entry for entry in (strength or {}).get("stories", []) if isinstance(entry, dict)}
     strengths, strength_problems = [], []
+    if isinstance(strength, dict) and strength.get("premise_refusal"):
+        # A premise of the story model was refused: no strength exists, whatever the number of stories (with one
+        # story the loop below is empty and the record would otherwise read as complete).
+        strength_problems.append("story strength not calculated: " + str(strength["premise_refusal"].get("reason")))
     for axis in ("x", "y"):
         for k in range(1, nf):
             try:
@@ -664,18 +682,41 @@ def vertical_regularity(drift_screen, elf, strength, ledger):
                 strength_problems.append(f"story {k} direction {axis}: a story strength is not a finite positive number")
                 continue
             ratio = here / above
-            strengths.append({"story": k, "direction": axis, "story_strength_kip": here, "ratio_to_story_above": ratio,
+            here_row=by_story[k]["by_direction"][axis];above_row=by_story[k+1]["by_direction"][axis]
+            hl,hu=here_row.get("story_strength_lower_kip",here),here_row.get("story_strength_upper_kip",here)
+            al,au=above_row.get("story_strength_lower_kip",above),above_row.get("story_strength_upper_kip",above)
+            if not all(_finite_positive(v) for v in (hl,hu,al,au)) or hl>hu or al>au:
+                strength_problems.append(f"story {k} direction {axis}: incomplete or invalid certified strength interval")
+                continue
+            lower,upper=hl/au,hu/al
+            crossings=[t for t in (.65,.8,1.) if lower<t<=upper]
+            if any(t in crossings for t in (.65,.8)):
+                strength_problems.append(f"story {k} direction {axis}: strength ratio interval [{lower:.9g}, {upper:.9g}] crosses {crossings}")
+            # lower/lower is not a certified ratio. A wholly resolved interval
+            # can be classified conservatively; threshold crossings stay open.
+            ratio=lower
+            strengths.append({"story": k, "direction": axis, "story_strength_kip": here,
+                              "design_story_shear_kip": None if problems else shear.get(k),
+                              "ratio_to_story_above": ratio if lower==upper else None,
+                              "ratio_lower":lower,"ratio_upper":upper,"threshold_crossings":crossings,
+                              "conservative_type_4a_for_uncertain_1":1. in crossings,
                               "indicated_type": ("4b" if ratio < limits["extreme_weak_story_4b"]["ratio_to_story_above"] else
                                                  "4a" if ratio < limits["weak_story_4a"]["ratio_to_story_above"] else None),
                               "at_or_above_80_percent": ratio >= limits["weak_story_4a"]["sdc_e_f_permitted_at_or_above"]})
     applicability = ((strength or {}).get("applicability") or {}).get("status")
-    return {"num_stories": nf, "stiffness": stiffness, "strength": strengths,
+    full_cs=_finite_positive((elf or {}).get("cs_basic")) and math.isclose(elf["cs_basic"],sp.ASCE_SDS/(sp.ASCE_R/sp.ASCE_IE),rel_tol=1e-10,abs_tol=1e-12)
+    consequences={"asce_7_22_12_6_elf_permitted_with_type_4a":True,
+                  "12_8_1_3_sds_cap_not_used_for_cs":bool(full_cs),
+                  "12_8_1_3_sds_cap_not_used_for_ev":(strength or {}).get("unreduced_sds_for_vertical_ground_motion") is True,
+                  "basis":"ASCE7-22 12.3.3.1 Type4a permitted in E/F at ratio>=.8; Table12.3-2 footnote and12.8.1.3 require no irregularity-based SDS reduction;12.6 permits ELF"}
+    return {"num_stories": nf, "structural_height_in": nf * sp.STORY_H, "stiffness": stiffness, "strength": strengths,
             "story_weights": {"rows": weights,
                               "status": ("description only: ASCE 7-22 Table 12.3-2 has no weight (mass) irregularity; no threshold "
                                          "and no check is applied to these ratios")},
             "thresholds": limits,
             "evidence": {"stiffness_complete": not problems, "stiffness_problems": problems,
                          "strength_complete": not strength_problems, "strength_problems": strength_problems,
+                         "strength_irregularity_consequences":consequences,
                          "strength_model_status": applicability},
             "indicated": {"soft_story_1a": None if problems else soft, "extreme_soft_story_1b": None if problems else extreme_soft,
                           "drift_ratio_exception_holds": exception, "drift_ratio_exception_rows": exception_rows,
@@ -683,7 +724,7 @@ def vertical_regularity(drift_screen, elf, strength, ledger):
                           "weak_story_4a_provisional": [r for r in strengths if r["indicated_type"] == "4a"],
                           "extreme_weak_story_4b_provisional": [r for r in strengths if r["indicated_type"] == "4b"]},
             "basis": ("stiffness from the ELF story shear over the largest elastic story drift of the drift runs (accidental "
-                      "torsion included); strength from the provisional story-strength model (review item M1); story weights "
+                      "torsion included); strength from complete directional nominal equilibrium certificates; story weights "
                       "from the member-resolved seismic weight ledger, as a description. Vertical geometric irregularity "
                       "(Type 2) and in-plane discontinuity (Type 3) do not arise: every frame line runs the full height on "
                       "aligned centerlines with the same plan dimensions")}
@@ -706,7 +747,7 @@ def grouped_regularity(strength, vertical, state=None):
     return {"regular": None,
             "horizontal": f"rectangular plan, {frames}, rigid diaphragm without openings: no Type 2-5 "
                           "horizontal irregularities by construction; Type 1 (ASCE 7-22 Table 12.3-1) from the torsion "
-                          "assessment and the story-by-story strength distribution, whose model is provisional",
+                          "assessment and the independently rebuilt physical strength-distribution evidence",
             "vertical": "sections and reinforcement vary by story band: stiffness (ASCE 7-22 Table 12.3-2 Types 1a, 1b) and "
                         "strength (Types 4a, 4b) are evaluated story by story (vertical_evidence); Types 2 and 3 do not arise "
                         "by construction; no vertical regularity is claimed by construction",
@@ -715,13 +756,13 @@ def grouped_regularity(strength, vertical, state=None):
 
 
 def regularity_checks(vertical, sdc=None, strength_model_verified=False):
-    """Checks of the vertical evidence: what is established is evaluated, what is missing or rests on M1 stays open.
+    """Checks of the vertical evidence: established evidence is evaluated; missing proofs stay open.
 
     ``sdc`` is the seismic design category of the record ("B".."F"), which decides the consequences that
     12.3.3.1 and 12.3.3.2 attach to the extreme types and whether exception 2 of 12.3.2.2 covers a two-story
     frame (SDC B, C and D; a one-story frame in any SDC). ``strength_model_verified`` is whether the record
-    carries a valid assertion of the story-strength model (review item M1); without it the strength check
-    stays open whatever the block says about itself. A stiffness check passes only on complete story
+    has independently replayed its computed story-strength certificates (or the explicit legacy review
+    basis); without that proof the strength check stays open. A stiffness check passes only on complete story
     evidence. There is no weight (mass) check: ASCE 7-22 has no such irregularity.
     """
     indicated, evidence, limits = vertical["indicated"], vertical["evidence"], vertical["thresholds"]
@@ -787,9 +828,8 @@ def regularity_checks(vertical, sdc=None, strength_model_verified=False):
                                 category="incomplete story evidence", problems=evidence["strength_problems"], **details))
     elif not strength_model_verified:
         result.append(left_open(name, clause,
-                                "story strengths come from the provisional beam-sway model (review item M1: column, joint "
-                                "and shear limits, base and roof mechanisms not priced); a weak story is neither "
-                                "established nor excluded"
+                                "story-strength applicability remains incomplete (review item M1); computed nominal "
+                                "equilibrium bounds and their remaining scope gaps do not establish or exclude a weak story"
                                 + (f"; the provisional model indicates {len(weak)} Type 4a and {len(extreme_weak)} Type 4b "
                                    "row(s)" if weak or extreme_weak else ""),
                                 category="awaiting review item M1", **details))
@@ -802,6 +842,28 @@ def regularity_checks(vertical, sdc=None, strength_model_verified=False):
             result.append(make_check(name, clause, len(prohibited), 0, "==",
                                      details={**details, "prohibited_rows": prohibited,
                                               "basis": "a weak-story type that 12.3.3.1 or 12.3.3.2 does not permit in this SDC"}))
+        elif weak and not extreme_weak and sdc in ("B","C","D","E","F") and all(
+                evidence.get("strength_irregularity_consequences",{}).get(key) is True for key in (
+                    "asce_7_22_12_6_elf_permitted_with_type_4a","12_8_1_3_sds_cap_not_used_for_cs","12_8_1_3_sds_cap_not_used_for_ev")):
+            result.append(make_check(name,clause,0,0,"==",details={**details,
+                "basis":"Every indicated or conservatively assumed Type4a is permitted in this SDC; all explicit consequences are applied",
+                "consequences":evidence["strength_irregularity_consequences"],
+                "conservative_classification_rows":[r for r in weak if r.get("conservative_type_4a_for_uncertain_1")]}))
+        elif extreme_weak and sdc in ("B", "C") and all(
+                evidence.get("strength_irregularity_consequences", {}).get(key) is True for key in (
+                    "asce_7_22_12_6_elf_permitted_with_type_4a", "12_8_1_3_sds_cap_not_used_for_cs",
+                    "12_8_1_3_sds_cap_not_used_for_ev")):
+            # 12.3.3.3: Type 4b in SDC B or C limits the structure to two stories or 30 ft, unless the weak story resists
+            # Omega_0 times the 12.8 design force (2026-11-07).
+            from Design.SMRF_Conventional_Floor import OMEGA_0
+            low_rise = vertical.get("num_stories", 99) <= 2 or (vertical.get("structural_height_in") or float("inf")) <= 360.0
+            failing = [] if low_rise else [r for r in extreme_weak if not (
+                _finite_positive(r.get("design_story_shear_kip"))
+                and r["story_strength_kip"] >= OMEGA_0 * r["design_story_shear_kip"])]
+            result.append(make_check(name, "ASCE 7-22 12.3.3.3 (Type 4b in SDC B or C)", len(failing), 0, "==",
+                                     details={**details, "low_rise": low_rise, "omega_0": OMEGA_0, "failing_rows": failing,
+                                              "consequences": evidence["strength_irregularity_consequences"],
+                                              "basis": "two stories or 30 ft, or the weak story resists Omega_0 times the design force"}))
         else:
             result.append(left_open(name, clause, f"{len(weak)} Type 4a and {len(extreme_weak)} Type 4b row(s) are indicated; "
                                     "the consequences for this frame need engineering review"
@@ -813,9 +875,25 @@ def regularity_checks(vertical, sdc=None, strength_model_verified=False):
 
 
 # ---- quantities ----------------------------------------------------------------------------------------------
-def _hoop_set_length_in(design):
-    """Bar length of one hoop set: the perimeter hoop and its crossties, with seismic hook extensions."""
+def _hoop_set_length_in(design,coordinates=None):
+    """Fabricated hoop/crosstie cut length, including arcs and winding pitch."""
+    from Design import SMRF_Conventional_Detail as conventional
+    if conventional.active():
+        return conventional.hoop_set_length_in(design)
+    from Design.SMRF_Transition_Physical import rectangular_cage_geometry
+    from Design.SMRF_Transitions import bar_coordinates
+    from Design.SMRF_Splice_Physical import beam_cage_geometry
     cover = sp.COL_CLEAR_COVER_IN if design.is_column else sp.BEAM_CLEAR_COVER_IN
+    if design.is_column:
+        cage=rectangular_cage_geometry(design,bar_coordinates(design,cover),cover)
+    elif coordinates is not None:
+        cage=beam_cage_geometry(design,coordinates,cover)
+    else:
+        cage={}
+    if cage.get("total_length_in"):
+        return cage["total_length_in"]
+    # Rejected/undeclared geometry still gets a conservative finite cost
+    # bound. It cannot qualify: its physical-detail row fails or is unknown.
     db = sp.rebar_diameter(design.stirrup_bar_size)
     width, depth = design.b_in - 2.0 * cover, design.h_in - 2.0 * cover
     hook = max(6.0 * db, 3.0)
@@ -825,89 +903,139 @@ def _hoop_set_length_in(design):
         ties = (legs_b - 2) * (depth + 2.0 * hook) + (legs_h - 2) * (width + 2.0 * hook)
     else:
         ties = (design.stirrup_legs - 2) * (depth + 2.0 * hook)
-    return 2.0 * (width + depth) + 2.0 * hook + ties
+    return 2.0 * (width + depth) + 2.0 * hook + ties + math.pi*(design.stirrup_legs+2)*3*db
 
 
 def quantities(state=None, slab=None, slab_reinforcement=None, capacity=None):
     """Modeled concrete and reinforcement of the installed design, by group and in total.
 
-    Concrete: columns over the story height less the slab, beam drops between the faces of their own end
-    joints, and the slab over the centerline footprint (the weight ledger's volumes, so nothing is counted
-    twice). Longitudinal steel: every bar over the member's centerline length, plus the lower bars that run
-    on past a transition. Transverse steel: one hoop set (perimeter hoop and crossties, seismic hooks) at
-    the installed spacing along the whole member, as the model takes it. Slab mats: the common layout over
-    the floor area, when established; unknown (None), never zero, when it is not.
+    Concrete: full story columns less only their actual slab overlap, beam drops between their own
+    joint faces, actual outer-face floor slabs and the declared roof column extensions. Longitudinal
+    steel and actual curved hoop cut lengths are counted once, with physical splice/hook/transition
+    adjustments. Slab mats use exact global-phase bars and full perimeter-hook cut lengths.
     """
     state = state or mg.active()
+    from Design import SMRF_Conventional_Detail as conventional
+    from Model.Floor_Footprint import physical_floor,column_overlap
+    if conventional.active():
+        beam_lanes=None
+    else:
+        from Design.SMRF_Splice_Physical import group_beam_lanes
+        beam_lanes=group_beam_lanes(state)
     slab_t = sp.SLAB_THICKNESS_IN or 0.0
     groups, concrete, longitudinal, transverse = {}, 0.0, 0.0, 0.0
     for gid, group in sorted(state.groups.items()):
         design = state.designs[gid]
+        set_length=_hoop_set_length_in(design,None if design.is_column or beam_lanes is None else beam_lanes[gid]["coordinates"])
         volume = steel = hoops = 0.0
         for tag in group["member_tags"]:
             member = state.member(tag)
             if member.is_column:
-                volume += design.b_in * design.h_in * (sp.STORY_H - slab_t)
+                overlap=column_overlap(physical_floor(member.story_or_floor,state),member.grid_i*sp.BAY_X,
+                                       member.grid_j*sp.BAY_Y,design.h_in,design.b_in)
+                volume += design.b_in*design.h_in*sp.STORY_H-overlap["area_in2"]*slab_t
                 length = sp.STORY_H
             else:
                 volume += design.b_in * (design.h_in - slab_t) * mp.beam_clear_span_in(member)
                 length = mp.beam_span_in(member)
             steel += design.longitudinal_area_in2 * length
-            hoops += (sp.rebar_area(design.stirrup_bar_size) * _hoop_set_length_in(design)
-                      * length / design.stirrup_spacing_in)
+            hoops += sp.rebar_area(design.stirrup_bar_size)*set_length*math.ceil(length/design.stirrup_spacing_in)
         groups[gid] = {"member_type": design.member_type, "members": len(group["member_tags"]),
                        "section_in": [design.b_in, design.h_in], "fc_ksi": design.fc_ksi,
                        "concrete_in3": volume, "longitudinal_steel_in3": steel, "transverse_steel_in3": hoops,
                        "longitudinal_ratio": design.longitudinal_area_in2 / design.gross_area_in2}
         concrete, longitudinal, transverse = concrete + volume, longitudinal + steel, transverse + hoops
     transition_steel, transition_hoops, unpriced = 0.0, 0.0, []
+    splice_devices,splice_hoops,beam_hooks,roof_heads=0.,0.,0.,0.
+    from Design.Group_Capacity import joint_inventory
+    roof_quantities={}
+    for entry in joint_inventory(state)["joints"]:
+        if entry["above"] is not None:
+            continue
+        design=entry["core"].design
+        extension=sp.roof_column_extension_in(design.b_in,design.h_in)
+        roof_quantities[entry["id"]]={"extension_concrete_in3":design.b_in*design.h_in*extension,
+            "extension_longitudinal_steel_in3":design.longitudinal_area_in2*max(0.,extension-sp.COL_CLEAR_COVER_IN-sp.rebar_diameter(design.bar_size)/2),
+            "extension_transverse_steel_in3":math.ceil(extension/design.stirrup_spacing_in)*_hoop_set_length_in(design)*sp.rebar_area(design.stirrup_bar_size),
+            "physical_steel_inventory_available":extension<=0}
+    quantity_owners=[]
     if capacity is not None:
         for key, transition in capacity.get("transitions", {}).items():
-            joints = len(transition.get("joints", []))
-            lower_bar = transition["lower"]["bar_size"]
-            transition_steel += transition.get("extra_bar_length_in", 0.0) * sp.rebar_area(lower_bar) * joints
-            # The detail-dependent hoops of the transition: additional sets at the offset bends, and the lower
-            # column's hoops continued one column depth above the joint where they are closer than the upper's.
-            lower_gid, upper_gid = key.split(">", 1)
-            lower, upper = state.designs[lower_gid], state.designs[upper_gid]
-            lower_set = sp.rebar_area(lower.stirrup_bar_size) * _hoop_set_length_in(lower)
-            transition_hoops += transition.get("additional_hoop_sets_per_joint", 0) * lower_set * joints
-            depth = (transition.get("confinement") or {}).get("lower_hoops_continue_above_joint_in")
-            if depth is None:
-                if transition.get("kind") != "same_cage":
-                    unpriced.append(key)                 # a reduced column: no continuing-hoop detail is declared to price
-            else:
-                upper_set = sp.rebar_area(upper.stirrup_bar_size) * _hoop_set_length_in(upper)
-                transition_hoops += max(0.0, depth / lower.stirrup_spacing_in * lower_set
-                                        - depth / upper.stirrup_spacing_in * upper_set) * joints
-    slab_volume = slab_t * mp.floor_area_in2() * sp.NUM_FLOOR
+            for name,context in (transition.get("contexts") or {key:transition}).items():
+                physical=context.get("physical_detail") or {}
+                count=len(context.get("joints",[]))
+                if "longitudinal_quantity_adjustment_in3" not in physical:
+                    unpriced.append(f"{key}/{name}")
+                transition_steel+=count*physical.get("longitudinal_quantity_adjustment_in3",0.)
+                transition_hoops+=count*physical.get("additional_transverse_steel_volume_in3",0.)
+                splice_devices+=count*physical.get("mechanical_device_net_steel_volume_in3",0.)
+                quantity_owners.extend(f"transition/{joint}" for joint in context.get("joints",[]))
+        for gid,record in capacity.get("splices",{}).items():
+            for context in record.get("member_contexts",[]):
+                if context.get("quantity_owner")!="ordinary_member_splice":
+                    continue
+                detail=context.get("physical_detail") or {}
+                splice_devices+=detail.get("net_envelope_steel_volume_in3",0.)
+                splice_hoops+=detail.get("additional_transverse_steel_volume_in3",0.)
+                quantity_owners.append(f"ordinary/{context['member_tag']}")
+        for kind in capacity.get("joint_types",{}).values():
+            context=kind.get("physical_beam_context") or {}
+            beam_hooks+=len(kind.get("joints",[]))*context.get("beam_longitudinal_adjustment_in3",0.)
+            roof=kind.get("physical_roof_anchorage") or {}
+            roof_heads+=len(kind.get("joints",[]))*roof.get("net_head_steel_volume_in3",0.)
+            transition_hoops+=len(kind.get("joints",[]))*roof.get("additional_transverse_steel_volume_in3",0.)
+            if "extension_concrete_in3" in roof:
+                for joint in kind.get("joints",[]):
+                    roof_quantities[joint]={**{k:roof.get(k,0.) for k in
+                        ("extension_concrete_in3","extension_longitudinal_steel_in3","extension_transverse_steel_in3")},
+                        "physical_steel_inventory_available":roof.get("status")=="pass"}
+            quantity_owners.extend(f"beam_hooks/{joint}" for joint in kind.get("joints",[]))
+            if roof:
+                quantity_owners.extend(f"roof/{joint}" for joint in kind.get("joints",[]))
+    roof_extension_concrete=sum(v["extension_concrete_in3"] for v in roof_quantities.values())
+    roof_extension_longitudinal=sum(v["extension_longitudinal_steel_in3"] for v in roof_quantities.values())
+    roof_extension_transverse=sum(v["extension_transverse_steel_in3"] for v in roof_quantities.values())
+    slab_volume = slab_t * sum(mp.floor_area_in2(floor) for floor in range(1,sp.NUM_FLOOR+1))
     layout = (slab_reinforcement or {}).get("layout") if slab_reinforcement else None
-    slab_steel = None
-    if layout is not None:
-        area_in2 = mp.floor_area_in2()
-        slab_steel = 0.0
-        for layer in layout["layers"].values():
-            # bars at ``spacing_in`` across the floor, each running the floor's length in its own direction
-            slab_steel += layer["bar_area_in2"] / layer["spacing_in"] * area_in2
-        slab_steel *= sp.NUM_FLOOR
-    frame_steel = longitudinal + transverse + transition_steel + transition_hoops
+    slab_steel = None;slab_physical_quantities=None
+    if layout is not None and conventional.active():
+        slab_steel=conventional.slab_steel_volume_in3(layout,[mp.floor_area_in2(floor) for floor in range(1,sp.NUM_FLOOR+1)])
+        slab_physical_quantities={"method":"uniform_mats_area_per_foot_over_floor_area_v1","steel_volume_in3":slab_steel}
+    elif layout is not None:
+        from Design.SMRF_Joint_Mat_Physical import global_mat_placement,mat_quantities
+        installed=(sp.SLAB_REINFORCEMENT or {}).get("layout")
+        if layout!=installed:
+            raise ValueError("Slab quantities require the exact installed physical mat layout")
+        slab_physical_quantities=mat_quantities(global_mat_placement(state))
+        slab_steel=slab_physical_quantities["steel_volume_in3"]
+    frame_steel = longitudinal + transverse + transition_steel + transition_hoops+splice_devices+splice_hoops+beam_hooks+roof_heads+roof_extension_longitudinal+roof_extension_transverse
+    concrete+=roof_extension_concrete
     return {"groups": groups,
             "concrete_frame_in3": concrete, "concrete_slab_in3": slab_volume, "concrete_total_in3": concrete + slab_volume,
             "concrete_total_yd3": (concrete + slab_volume) / 46656.0,
             "longitudinal_steel_in3": longitudinal, "transverse_steel_in3": transverse,
             "transition_extra_steel_in3": transition_steel, "transition_extra_transverse_steel_in3": transition_hoops,
+            "splice_device_net_envelope_steel_in3":splice_devices,"splice_extra_transverse_steel_in3":splice_hoops,
+            "beam_hook_longitudinal_adjustment_in3":beam_hooks,"physical_quantity_owners":quantity_owners,
+            "roof_head_net_envelope_steel_in3":roof_heads,
+            "roof_extension_concrete_in3":roof_extension_concrete,"roof_extension_longitudinal_steel_in3":roof_extension_longitudinal,
+            "roof_extension_transverse_steel_in3":roof_extension_transverse,
+            "roof_extension_quantity_inventory":roof_quantities,
+            "roof_extensions_with_provisional_steel_quantities":[k for k,v in roof_quantities.items() if not v["physical_steel_inventory_available"]],
+            "physical_quantity_owners_unique":len(quantity_owners)==len(set(quantity_owners)),
             "transitions_without_priced_confinement": sorted(unpriced), "frame_steel_in3": frame_steel,
             "frame_steel_lb": frame_steel * STEEL_UNIT_WEIGHT_LB_PER_IN3,
             "slab_steel_in3": slab_steel,
+            "slab_physical_quantities":slab_physical_quantities,
             "slab_steel_lb": None if slab_steel is None else slab_steel * STEEL_UNIT_WEIGHT_LB_PER_IN3,
             "total_steel_in3": None if slab_steel is None else frame_steel + slab_steel,
             "distinct_form_sizes": state.distinct_form_sizes(),
             "distinct_form_size_count": sum(len(v) for v in state.distinct_form_sizes().values()),
-            "basis": ("modeled quantities for comparing candidates, not a takeoff: no laps, hooks of longitudinal bars or "
-                      "waste; joint hoops at the member spacing. At column transitions the terminated bars, the additional "
-                      "hoop sets at offset bends and the lower hoops continued above a joint of unchanged section are "
-                      "priced; above a reduced column no continuing-hoop detail is declared, so none is priced "
-                      "(transitions_without_priced_confinement); steel at 490 lb/ft3")}
+            "basis": ("Fabricated physical-detail comparison quantities: centerline bars plus actual hook/bend/lap/termination "
+                      "adjustments; rounded hoops and crossties with full arcs and conservative smooth winding length; integer hoop "
+                      "sets, explicit local splice ties, and one owner per physical transition or ordinary member splice. Device "
+                      "steel uses the solid circumscribed envelope less the centerline bar volume it replaces, a conservative upper "
+                      "bound, not manufacturer weight. No waste allowance. Steel at 490 lb/ft3.")}
 
 
 # ---- the reinforcement pass ---------------------------------------------------------------------------------
@@ -1197,7 +1325,7 @@ def slab_code_checks(slab, eligibility, cfg):
 
 
 def candidate_code_checks(state, cfg, *, strengths, capacity, joint_checks, drift_screen, vertical, strength,
-                          demand_basis, slab, eligibility, exhausted):
+                          demand_basis, slab, eligibility, exhausted, common_actions=None, elf=None, transfers=None):
     """Every check row of the final candidate, tagged with its family, as Design.Code_Check_Contract reads them.
 
     member strength (one row per group at its governing member), the capacity design's checks, the joint checks,
@@ -1235,14 +1363,21 @@ def candidate_code_checks(state, cfg, *, strengths, capacity, joint_checks, drif
         sdc = seismic_design_category(sp.ASCE_SDS, sp.ASCE_SD1, sp.ASCE_S1, cfg.demands.risk_category)
     except (ValueError, TypeError):
         sdc = None
-    verification = asdict(cfg.verification)
-    asserted = (assertion_provenance_valid(verification) and verification.get("story_strength_model_verified") is True
-                and ((strength or {}).get("applicability") or {}).get("status") == "verified")
-    add("regularity", regularity_checks(vertical, sdc, strength_model_verified=asserted))
+    from Design.SMRF_Story_Adapter import computed_verification_valid
+    from Design.SMRF_Conventional_Story import model_valid as story_mechanism_valid
+    add("regularity", regularity_checks(vertical, sdc, strength_model_verified=(computed_verification_valid(strength or {})
+                                                                                or story_mechanism_valid(strength or {}))))
     if cfg.demands.accidental_torsion_ratio:
         add("torsion", [torsional_amplification_check(demand_basis), *torsional_classification_review(demand_basis)])
     if cfg.floor_analysis.transfer_to_frame:
         add("slab", slab_code_checks(slab, eligibility, cfg))
+        from Design import SMRF_Computed_Coordination as common_coordination
+        if common_coordination.active(cfg):
+            from Design.SMRF_Common_Action_Contract import assess_common_actions
+            add("common_actions", assess_common_actions(state, common_actions)["checks"])
+        else:
+            from Design.SMRF_Conventional_Floor import floor_rows
+            add("floor", floor_rows(state, slab, elf, cfg, transfers))
     add("reinforcement", [make_check("reinforcement.selected_for_every_group",
                                      "ACI 318-19 18.6.3, 18.7.4 (an admissible cage for every group)", len(exhausted), 0, "==",
                                      details={"exhausted_groups": list(exhausted)})])
@@ -1262,17 +1397,28 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
     are available). Nonlinear performance is reported as not requested. The grouped design that results (cages
     and hoops selected for these sections) is under ``state``; it stays installed on return.
     """
+    validate_beam_practical_ceiling(cfg)
     context = {} if context is None else context
     started = time.perf_counter()
     record = {"version": EVALUATION_VERSION, "label": label, "sections": _section_table(state),
-              "seed_identity": state.identity(), "status": "evaluated", "feasible": False,
+              "detail_basis": None, "seed_identity": state.identity(), "status": "evaluated", "feasible": False,
               "candidate_screen_passed": False, "stages": {}}
     solves = {"frame": 0, "floor_before": context.get("floor_solves", 0)}
     kept = {}                       # the inputs of the reinforcement pass, kept for an incomplete outcome (keep_actions)
+    from Design import SMRF_Computed_Coordination as common_coordination
+    from Design import SMRF_Conventional_Detail as conventional_detail
+    computed_common=common_coordination.active(cfg)
+    declared=getattr(cfg.floor_analysis,"detail_basis",conventional_detail.BASIS)
+    if declared not in (conventional_detail.BASIS,conventional_detail.PHYSICAL_BASIS):
+        raise ValueError(f"unknown detailing basis {declared!r}")
+    sp.DETAIL_BASIS=conventional_detail.PHYSICAL_BASIS if computed_common else declared
+    sp.BEAM_TORSION_DESIGN=None
+    record["detail_basis"]=sp.DETAIL_BASIS
+    common_actions=None
     try:
         mg.install(state)
         _require_family_grades(state)
-        slab = slab_stage(cfg, context)
+        slab = common_coordination.prepare_slab(cfg,context) if computed_common else slab_stage(cfg, context)
         kept["slab"] = slab
         record["stages"]["slab"] = {"thickness_in": slab["slab"]["thickness_in"], "attempts": slab["attempts"],
                                     "distinct_floors": len(slab["description"]["distinct"]),
@@ -1294,12 +1440,14 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
         if not seed_audit["valid"]:
             raise CageArrangementError(*_seed_arrangement_outcome(state, seed_audit, slab))
         transfers = None
-        if slab["transfer"] is not None:
+        if slab["transfer"] is not None and not computed_common:
             from Design.SMRF_Floor_Transfer import validate_floor_transfers_by_floor
-            area = mp.floor_area_in2() / 144.0
+            from Loads.Perimeter_Strip import plate_loads_kip
+            # A transfer is solved for the centreline plate and is validated against that plate's load; the
+            # perimeter strip makes up the footprint the weights use (asserted by plate_loads_kip, 2026-11-05).
+            plate_dead_kip, plate_live_kip = plate_loads_kip(sp.floor_dead_load_ksf(), sp.FLOOR_LIVE_LOAD_KSF)
             transfers = validate_floor_transfers_by_floor(slab["transfer"], driver._slab_geometry(), slab["description"],
-                                                          sp.SLAB_THICKNESS_IN, sp.floor_dead_load_ksf() * area,
-                                                          sp.FLOOR_LIVE_LOAD_KSF * area)
+                                                          sp.SLAB_THICKNESS_IN, plate_dead_kip, plate_live_kip)
         kept["transfers"] = transfers
         from Design.SMRF_Demands import REDUNDANCY_FACTOR_STRENGTH, live_load_patterns, strength_load_combinations
         try:
@@ -1309,29 +1457,37 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
             # seismic combinations superpose by member system (Design.Perimeter_Systems).
             period = systems.model_period(state)
             solves["frame"] += 1
-            strength = story_strength_distribution(cfg)
-            torsion = systems.torsion_assessment(period, cfg, strength, state) if cfg.demands.accidental_torsion_ratio else None
-            solves["frame"] += 4 if torsion is not None else 0
-            patterns = (live_load_patterns(sp.NUM_BAY_X, sp.NUM_BAY_Y)
-                        if cfg.demands.live_load_patterning and sp.FLOOR_TRANSFER is not None else ())
-            combinations = strength_load_combinations(sp.ASCE_SDS, redundancy_factor=REDUNDANCY_FACTOR_STRENGTH,
-                                                      live_patterns=patterns)
-            expected_ids = [c["id"] for c in combinations]
-            actions, elf_used = [], None
-            solver = systems.CombinationSolver(period, torsion, state)
-            for combination in combinations:
-                solved = solver.analyze(combination)
-                elf = solved["elf"]
-                elf_used = elf if elf is not None else elf_used
-                actions.append({**combination, "analysis_succeeded": True, "axial_reference": "joint_faces",
-                                "analysis_models": solved["models"], "members": solved["members"]})
-            solves["frame"] += solver.solves
-            # Deformation compatibility of the gravity members (ACI 318-19 18.14.2.1, ASCE 7-22 12.12.5): the design
-            # displacement of the released frame imposed on the continuous frame with the 5.3 gravity combinations
-            # that carry the vertical ground motion. It depends on the sections only, so it is solved once here and
-            # the cages are selected on it; None under the band policy (every member is in the SFRS).
-            compatibility = systems.compatibility_run(period, torsion, cfg, state)
-            solves["frame"] += compatibility["solves"] if compatibility else 0
+            if computed_common:
+                common_actions=common_coordination.analyze(state,cfg,context,period)
+                if common_actions.get('status')!='responses_computed':
+                    raise CandidateInfeasible('member_actions','Complete physical action calculation is unresolved',
+                        {'outcome':'incomplete_common_actions','common_actions':common_actions})
+                torsion=common_actions['torsion'];elf_used=common_actions['elf'];actions=common_actions['actions']
+                expected_ids=[c['id'] for c in common_actions['combinations']]
+                compatibility=common_actions['compatibility_actions'];transfers=common_actions['capacity_gravity_transfer']
+                common_coordination.refresh_slab(state,slab,cfg,common_actions)
+            else:
+                strength = story_strength_distribution(cfg)
+                torsion = systems.torsion_assessment(period, cfg, strength, state) if cfg.demands.accidental_torsion_ratio else None
+                solves["frame"] += 4 if torsion is not None else 0
+                patterns = (live_load_patterns(sp.NUM_BAY_X, sp.NUM_BAY_Y)
+                            if cfg.demands.live_load_patterning and sp.FLOOR_TRANSFER is not None else ())
+                combinations = strength_load_combinations(sp.ASCE_SDS, redundancy_factor=REDUNDANCY_FACTOR_STRENGTH,
+                                                          live_patterns=patterns)
+                expected_ids = [c["id"] for c in combinations]
+                actions, elf_used = [], None
+                solver = systems.CombinationSolver(period, torsion, state)
+                for combination in combinations:
+                    solved = solver.analyze(combination)
+                    elf = solved["elf"]
+                    elf_used = elf if elf is not None else elf_used
+                    actions.append({**combination, "analysis_succeeded": True, "axial_reference": "joint_faces",
+                                    "analysis_models": solved["models"], "members": solved["members"]})
+                solves["frame"] += solver.solves
+                from Design.SMRF_Conventional_Floor import attach_floor_actions
+                attach_floor_actions(actions, state, transfers, elf_used, cfg)
+                compatibility = systems.compatibility_run(period, torsion, cfg, state)
+                solves["frame"] += compatibility["solves"] if compatibility else 0
             kept.update(period=period, torsion=torsion, elf=elf_used, actions=actions, expected_ids=expected_ids,
                         compatibility=compatibility)
         except RuntimeError as exc:
@@ -1341,12 +1497,24 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
         record["stages"]["demands"] = {"model_period_sec": period, "combinations": len(actions),
                                        "base_shear_kip": (elf_used or {}).get("base_shear_kip")}
         try:
-            settled = reinforcement_pass(state, actions, expected_ids, cfg, transfers, compatibility=compatibility)
+            if computed_common:
+                coordinated=common_coordination.coordinate(state,cfg,context,slab,period,common_actions)
+                state=coordinated['state'];slab=coordinated['slab'];period=coordinated['period'];common_actions=coordinated['common']
+                settled=coordinated['settled'];layout_settled=coordinated['layout_settled']
+                actions=common_actions['actions'];torsion=common_actions['torsion'];elf_used=common_actions['elf']
+                expected_ids=[c['id'] for c in common_actions['combinations']]
+                compatibility=common_actions['compatibility_actions'];transfers=common_actions['capacity_gravity_transfer']
+                record['stages']['common_coordination']=settled['common_coordination']
+                solves['frame']+=settled['common_coordination']['additional_period_solves']
+                kept.update(period=period,torsion=torsion,elf=elf_used,actions=actions,expected_ids=expected_ids,
+                    compatibility=compatibility,transfers=transfers,slab=slab,common_actions=common_actions)
+            else:
+                settled = reinforcement_pass(state, actions, expected_ids, cfg, transfers, compatibility=compatibility)
             # The slab completion context reads the installed perimeter hoops and column cores: re-price the
             # layout on the selected cages and, if it changed, the cages on the layout (bounded). The slab and
             # the cages are consistent only when a re-pricing on the final cages leaves the layout unchanged.
-            layout_settled = slab["reinforcement"] is None
-            for _ in range(SLAB_CAGE_PASSES):
+            if not computed_common:layout_settled = slab["reinforcement"] is None
+            for _ in range(0 if computed_common else SLAB_CAGE_PASSES):
                 if slab["reinforcement"] is None:
                     break
                 from Design.SMRF_Slab_Reinforcement import design_slab_reinforcement
@@ -1380,21 +1548,31 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
         if ((capacity.get("slab_eligibility_signature"), capacity.get("slab_eligibility_reason_code"))
                 != (eligibility.get("signature"), eligibility.get("reason_code"))):
             capacity = capacity_design.build_group_capacity_design(actions, expected_ids, cfg, transfers, state,
-                                                                   compatibility=compatibility, slab_eligibility=eligibility)
+                                                                   compatibility=compatibility, slab_eligibility=eligibility,
+                                                                   common_torsion=(common_actions or {}).get('common_torsion'))
             joint_checks = evaluate_joints(joint_check_inputs(capacity, state))
             capacity_current = not capacity_design.hoop_updates(capacity, state)
             record["stages"]["slab"]["capacity_rebuilt_on_final_slab_evidence"] = True
         slab_current = eligibility.get("context_current") is not False
         strengths = checks.strength_checks(actions, cfg, state)
-        drift_screen = systems.drift_screen(period, torsion, cfg, state)
-        solves["frame"] += 2
+        drift_screen = common_actions['drift_screen'] if computed_common else systems.drift_screen(period, torsion, cfg, state)
+        solves["frame"] += 0 if computed_common else 2
         induced = systems.gravity_induced_from_capacity(capacity)      # the gravity groups' branches on the final cages
         record["stages"]["compatibility"] = systems.compatibility_stage(compatibility, induced)
-        strength = story_strength_distribution(cfg)                # on the selected cages
         ledger = mp.weight_ledger()
-        vertical = vertical_regularity(drift_screen, elf_used, strength, ledger)
-        demand_basis = driver._demand_basis(cfg, torsion, elf_used, drift_screen, strength,
-                                            grouped_regularity(strength, vertical))
+        if computed_common:
+            from Design.SMRF_Final_Regularity import refresh_final_regularities
+            final_regularity=refresh_final_regularities(cfg,common_actions,capacity,ledger,state=state)
+            story_gravity_actions=common_actions['story_strength_gravity_actions']
+            strength=final_regularity['strength'];torsion=final_regularity['torsion']
+            vertical=final_regularity['vertical'];demand_basis=final_regularity['demand_basis']
+        else:
+            from Design.SMRF_Story_Adapter import collect_gravity_cases
+            story_gravity_actions=collect_gravity_cases(actions,solver)
+            strength = story_strength_distribution(cfg, actions=actions, expected_ids=expected_ids, transfers=transfers,
+                                                   capacity=capacity, state=state,gravity_actions=story_gravity_actions)
+            vertical = vertical_regularity(drift_screen, elf_used, strength, ledger)
+            demand_basis = driver._demand_basis(cfg, torsion, elf_used, drift_screen, strength,grouped_regularity(strength, vertical))
         scwb = scwb_constraint(joint_checks, capacity)
         exhausted = settled["selection"]["exhausted_groups"]
         joint_failed = [c for c in joint_checks if c["status"] == "fail"]
@@ -1484,7 +1662,8 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
         # own topology, present once and passing; the evaluation completed; the material objectives available.
         rows = candidate_code_checks(state, cfg, strengths=strengths, capacity=capacity, joint_checks=joint_checks,
                                      drift_screen=drift_screen, vertical=vertical, strength=strength,
-                                     demand_basis=demand_basis, slab=slab, eligibility=eligibility, exhausted=exhausted)
+                                     demand_basis=demand_basis, slab=slab, eligibility=eligibility, exhausted=exhausted,
+                                     common_actions=common_actions, elf=elf_used, transfers=transfers)
         expected = contract.expected_inventory(state, cfg)
         code_check = contract.code_check_result(rows, expected)
         complete = contract.numerical_completion(constraints, state.identity())[2]
@@ -1493,7 +1672,8 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
         record.update({
             "feasible": feasible, "candidate_screen_passed": screen, "constraints": constraints, "quantities": amounts,
             "code_check": code_check,
-            "code_checks": {"contract_version": contract.CONTRACT_VERSION, "scope": contract.SCOPE["id"],
+            "code_checks": {"contract_version": contract.CONTRACT_VERSION,
+                            "scope": contract.scope_for_common_actions(cfg.floor_analysis.transfer_to_frame)["id"],
                             "state_identity": state.identity(),
                             "realized_identity": contract.realized_identity(state.identity(), slab["slab"]["thickness_in"],
                                                                             slab["reinforcement"]),
@@ -1515,9 +1695,11 @@ def evaluate_candidate(state, cfg, context=None, label="candidate", keep_actions
         if keep_actions:
             record["evidence"] = {"state": state, "slab": slab, "transfers": transfers, "period": period, "torsion": torsion,
                                   "elf": elf_used, "actions": actions, "expected_ids": expected_ids, "strengths": strengths,
+                                  "story_strength_gravity_actions":story_gravity_actions,"story_strength":strength,
                                   "capacity": capacity, "joint_checks": joint_checks, "selection": settled["selection"],
                                   "drift_screen": drift_screen, "demand_basis": demand_basis, "ledger": ledger,
                                   "vertical": vertical, "compatibility": compatibility, "gravity_induced": induced}
+            if computed_common:record['evidence']['common_actions']=common_actions
         record["state"] = state
     except BeamBarRowsError as exc:
         bar_rows_outcome(record, exc, state, kept, keep_actions)

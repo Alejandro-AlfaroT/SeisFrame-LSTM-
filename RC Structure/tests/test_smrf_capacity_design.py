@@ -55,7 +55,9 @@ def single_load_transfer(load_kip=10.0, x_fraction=0.5):
             for span in range(spans):
                 beams.append({"axis": axis, "line_index": line, "span_index": span,
                               "node_loads": [[x_fraction, load_kip]]})
-    return {"unit_cases": {"dead": {"beams": beams}, "live": None}}
+    # No area pressure: the loads are the written point loads alone, so the perimeter strip beside the transfer
+    # (Loads.Perimeter_Strip, 2026-11-05) is zero and the edge families keep these hand numbers.
+    return {"dead_pressure_ksf": 0.0, "live_pressure_ksf": 0.0, "unit_cases": {"dead": {"beams": beams}, "live": None}}
 
 
 class ProbableStrengthTests(unittest.TestCase):

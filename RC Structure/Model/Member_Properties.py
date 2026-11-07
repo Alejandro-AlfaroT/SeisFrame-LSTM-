@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import Structure_Parameters as sp
 from Model import Member_Groups as mg
+from Model import Floor_Footprint as footprint
 
 JOINT_CORE_CONVENTION = "joint_core_takes_the_column_below_v1"
 
@@ -186,8 +187,41 @@ def column_self_weight_kip_per_in(member):
     design = member.design
     if sp.SLAB_THICKNESS_IN is not None:
         _validate_slab_state(member)
-        return _unit_weight_kci() * design.b_in * design.h_in * (sp.STORY_H - sp.SLAB_THICKNESS_IN) / sp.STORY_H
+        overlap = footprint.column_overlap_area_in2(footprint.physical_floor(member.story_or_floor),
+                    member.grid_i * sp.BAY_X, member.grid_j * sp.BAY_Y, design.h_in, design.b_in)
+        volume = design.b_in * design.h_in * sp.STORY_H - overlap * sp.SLAB_THICKNESS_IN
+        return _unit_weight_kci() * volume / sp.STORY_H
     return sp.CONCRETE_UNIT_WEIGHT_KCI * design.b_in * design.h_in
+
+
+def column_weight_eccentricity_kipin(member):
+    """Missing global gravity couple [Mx,My,Mz] from the clipped slab slice.
+
+    Apply at the top joint together with the equivalent column line weight.
+    This preserves the physical gravity wrench; it does not assert that a
+    uniformly smeared axial load reproduces every internal local stress.
+    """
+    if not member.is_column:
+        raise ValueError("Column weight eccentricity requires a column member")
+    if sp.SLAB_THICKNESS_IN is None:
+        return [0., 0., 0.]
+    d = member.design
+    x, y = member.grid_i * sp.BAY_X, member.grid_j * sp.BAY_Y
+    overlap = footprint.column_overlap(footprint.physical_floor(member.story_or_floor), x, y, d.h_in, d.b_in)
+    removed_weight = _unit_weight_kci() * sp.SLAB_THICKNESS_IN * overlap["area_in2"]
+    cx, cy = overlap["centroid_in"]
+    return [removed_weight * (cy-y), -removed_weight * (cx-x), 0.]
+
+
+def beam_weight_eccentricity_kipin(member):
+    """Gravity couple of actual clear-drop centroid relative to its smear."""
+    if member.is_column:
+        raise ValueError("Beam weight eccentricity requires a beam member")
+    if sp.SLAB_THICKNESS_IN is None:
+        return [0., 0., 0.]
+    fi, fj = beam_face_distances_in(member)
+    moment = member_self_weight_kip(member) * (fi-fj) / 2
+    return [0., moment, 0.] if beam_axis(member) == "x" else [-moment, 0., 0.]
 
 
 def beam_drop_weight_kip_per_in(member):
@@ -243,19 +277,46 @@ def members_at_floor(floor):
 
 
 def node_structural_self_weight_kip(floor, i, j):
-    """One column story (the column below the node) plus half of every incident beam's accounted weight.
+    """Consistent physical-volume mass, preserving both plan first moments.
 
     A mass and tributary-axial helper, not an extra nodal gravity load: Loads.Gravity_Loads applies the
     same member weights as distributed element loads.
     """
     if not (0 <= i <= sp.NUM_BAY_X and 0 <= j <= sp.NUM_BAY_Y and 1 <= floor <= sp.NUM_FLOOR):
         raise ValueError("Node indices must lie on the structural floor grid.")
+    if sp.SLAB_THICKNESS_IN is not None:
+        return (_unit_weight_kci() * floor_member_volume_ledger(floor)["nodal_volumes_in3"][i, j]
+                + roof_extension_weight_kip(floor, i, j))
     joint = mg.joint_members(floor, i, j)
     weight = member_self_weight_kip(joint["column_below"]) + roof_extension_weight_kip(floor, i, j)
     for key in ("beam_x_minus", "beam_x_plus", "beam_y_minus", "beam_y_plus"):
         if joint[key] is not None:
             weight += 0.5 * member_self_weight_kip(joint[key])
     return weight
+
+
+def floor_member_volume_ledger(floor):
+    """Non-slab concrete union expressed as disjoint prisms and clipped slices.
+
+    The full column prism includes any part outside the slab. Only its actual
+    slab intersection is subtracted. Beam drops stop at each actual joint
+    face; their width is retained for first-moment integration.
+    """
+    columns, beams = [], []
+    for member in members_at_floor(floor):
+        d = member.design
+        x, y = member.grid_i * sp.BAY_X, member.grid_j * sp.BAY_Y
+        if member.is_column:
+            columns.append({"x": x, "y": y, "h_x": d.h_in, "b_y": d.b_in})
+        else:
+            axis = beam_axis(member)
+            fi, fj = beam_face_distances_in(member)
+            start = x if axis == "x" else y
+            beams.append({"axis": axis, "line": y if axis == "x" else x,
+                          "start": start + fi, "end": start + beam_span_in(member) - fj,
+                          "b_in": d.b_in, "h_in": d.h_in})
+    return footprint.member_volume_ledger(footprint.geometry(), footprint.physical_floor(floor),
+                   columns, beams, float(sp.SLAB_THICKNESS_IN or 0.), sp.STORY_H)
 
 
 def roof_extension_weight_kip(floor, i, j):
@@ -276,15 +337,37 @@ def floor_structural_self_weight_kip(floor):
     return sum(member_self_weight_kip(member) for member in members_at_floor(floor)) + floor_roof_extension_weight_kip(floor)
 
 
-def floor_area_in2():
-    return sp.BAY_X * sp.NUM_BAY_X * sp.BAY_Y * sp.NUM_BAY_Y
+def floor_area_in2(floor=None):
+    """Actual area of one selected floor; no-floor form requires equal areas."""
+    if sp.SLAB_THICKNESS_IN is None:
+        return sp.BAY_X * sp.NUM_BAY_X * sp.BAY_Y * sp.NUM_BAY_Y
+    if floor is not None:
+        return footprint.physical_floor(floor)["area_in2"]
+    areas = {footprint.physical_floor(k)["area_in2"] for k in range(1, sp.NUM_FLOOR + 1)}
+    if len(areas) != 1:
+        raise ValueError("Actual slab areas vary by floor; an explicit floor index is required")
+    return areas.pop()
+
+
+def node_floor_area_in2(floor, i, j):
+    if sp.SLAB_THICKNESS_IN is None:
+        return sp.node_tributary_area_in2(i, j)
+    return footprint.consistent_nodal_areas(footprint.physical_floor(floor), footprint.geometry())[i, j]
+
+
+def node_gravity_load_kip(floor, i, j):
+    return sp.floor_load_ksi() * node_floor_area_in2(floor, i, j)
+
+
+def floor_gravity_load_kip(floor):
+    return sp.floor_load_ksi() * floor_area_in2(floor)
 
 
 def floor_seismic_weight_kip(floor):
     """Floor weight matching exactly the mass assigned to that floor's structural grid nodes."""
     if sp.SLAB_THICKNESS_IN is None:
         return sp.total_floor_gravity_load()
-    return ((sp.floor_dead_load_ksf() + sp.SEISMIC_LIVE_LOAD_FRACTION * sp.FLOOR_LIVE_LOAD_KSF) * floor_area_in2() / 144.0
+    return ((sp.floor_dead_load_ksf() + sp.SEISMIC_LIVE_LOAD_FRACTION * sp.FLOOR_LIVE_LOAD_KSF) * floor_area_in2(floor) / 144.0
             + floor_structural_self_weight_kip(floor))
 
 
@@ -293,13 +376,16 @@ def node_seismic_mass(floor, i, j):
     if sp.SLAB_THICKNESS_IN is None:
         return sp.node_gravity_load_kip(i, j) / sp.G
     area_weight = ((sp.floor_dead_load_ksf() + sp.SEISMIC_LIVE_LOAD_FRACTION * sp.FLOOR_LIVE_LOAD_KSF)
-                   * sp.node_tributary_area_in2(i, j) / 144.0)
-    return (area_weight + node_structural_self_weight_kip(floor, i, j)) / sp.G
+                   * node_floor_area_in2(floor, i, j) / 144.0)
+    mass = (area_weight + node_structural_self_weight_kip(floor, i, j)) / sp.G
+    if mass <= 0:
+        raise ValueError("Physical volume exceeds positive lumped floor-mass applicability")
+    return mass
 
 
 def story_gravity_weight_kip(floor):
     """D + L and member weight of one floor, for the story stability screen."""
-    return sp.total_floor_gravity_load() + floor_structural_self_weight_kip(floor)
+    return floor_gravity_load_kip(floor) + floor_structural_self_weight_kip(floor)
 
 
 def gravity_above_kip(story):
@@ -315,7 +401,7 @@ def column_gravity_axial(story, i, j):
     A tributary estimate for the hinge calibration, not a solved factored axial envelope.
     """
     floors = range(story, sp.NUM_FLOOR + 1)
-    floor_load = sp.node_gravity_load_kip(i, j) * len(floors)
+    floor_load = sum(node_gravity_load_kip(floor, i, j) for floor in floors)
     if sp.SLAB_THICKNESS_IN is not None:
         return floor_load + sum(node_structural_self_weight_kip(floor, i, j) for floor in floors)
     return floor_load + sum(member_self_weight_kip(mg.column_at(floor, i, j)) + roof_extension_weight_kip(floor, i, j)
@@ -333,7 +419,9 @@ def weight_ledger():
         floors.append({"floor": floor, "column_self_weight_kip": columns, "beam_x_self_weight_kip": beams_x,
                        "beam_y_self_weight_kip": beams_y, "member_self_weight_kip": columns + beams_x + beams_y,
                        "roof_column_extension_weight_kip": floor_roof_extension_weight_kip(floor),
-                       "floor_gravity_load_kip": sp.total_floor_gravity_load(),
+                       "physical_footprint": footprint.physical_floor(floor) if sp.SLAB_THICKNESS_IN is not None else None,
+                       "floor_area_in2": floor_area_in2(floor),
+                       "floor_gravity_load_kip": floor_gravity_load_kip(floor),
                        "seismic_weight_kip": floor_seismic_weight_kip(floor),
                        "mass_sum_kip": sum(node_seismic_mass(floor, i, j) for j in range(sp.NUM_BAY_Y + 1)
                                            for i in range(sp.NUM_BAY_X + 1)) * sp.G})
@@ -348,8 +436,9 @@ def weight_ledger():
             "total_gravity_kip": sum(f["floor_gravity_load_kip"] + f["member_self_weight_kip"]
                                      + f["roof_column_extension_weight_kip"] for f in floors),
             "grouped": mg.is_grouped(), "joint_core_convention": JOINT_CORE_CONVENTION,
-            "basis": ("slab over the centerline footprint; beam drops between the faces of their end joints; columns over the story "
-                      "height less the slab; one column story lumped at its upper floor with half of each incident beam"
+            "basis": ("slab bounded by actual perimeter beam outer faces; beam drops between actual end-joint faces; "
+                      "full column story volume minus its actual slab intersection; grid masses integrate physical "
+                      "volumes with linear shapes and preserve both plan first moments"
                       if sp.SLAB_THICKNESS_IN is not None else
                       "legacy bundled area dead load; full centerline member rectangles; seismic mass from the floor load only")}
 
@@ -357,14 +446,16 @@ def weight_ledger():
 def floor_load_metadata():
     """The load inventory of the installed grouped design (the member-resolved form of
     Structure_Parameters.floor_load_metadata): area loads as there, member weights from the member ledger."""
-    area_sqft = floor_area_in2() / 144.0
+    areas_sqft = {str(k): floor_area_in2(k) / 144.0 for k in range(1, sp.NUM_FLOOR + 1)}
+    area_sqft = next(iter(areas_sqft.values())) if len(set(areas_sqft.values())) == 1 else None
     dead = sp.floor_dead_load_ksf()
     return {"load_model": "slab_aware_v1", "slab_thickness_in": sp.SLAB_THICKNESS_IN,
             "floor_superimposed_dead_load_ksf": sp.FLOOR_SUPERIMPOSED_DEAD_LOAD_KSF,
             "slab_self_weight_ksf": sp.slab_self_weight_ksf(), "floor_dead_load_ksf": dead,
             "floor_live_load_ksf": sp.FLOOR_LIVE_LOAD_KSF, "seismic_live_load_fraction": sp.SEISMIC_LIVE_LOAD_FRACTION,
-            "floor_area_sqft": area_sqft, "floor_area_dead_weight_kip": dead * area_sqft,
-            "total_floor_gravity_load_kip": sp.total_floor_gravity_load(),
+            "floor_area_sqft": area_sqft, "floor_areas_sqft": areas_sqft,
+            "floor_area_dead_weight_kip": None if area_sqft is None else dead * area_sqft,
+            "total_floor_gravity_load_kip": None if area_sqft is None else sp.floor_load_ksi() * area_sqft * 144.,
             "member_weights": "by physical member (ledger): no one column or beam weight describes a grouped frame",
             "ledger": weight_ledger()}
 
@@ -542,7 +633,7 @@ def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
     thickness = sp.SLAB_THICKNESS_IN if slab_thickness_in is None else slab_thickness_in
     flange = effective_flange(member, thickness)
     family = composite_beam_strengths(beam, {"thickness_in": thickness, "fy_ksi": fy_factor * sp.SLAB_FY_KSI},
-                                      layout, None, axis, position, flange=flange)
+                                      layout, None, axis, position, flange={**flange,"member_tag":member.member_tag})
     exterior = exterior_ends(member)
     by_end = exterior_end_anchorage(member, layout)
     if by_end:
@@ -560,7 +651,9 @@ def beam_strengths(member, fy_factor=1.0, slab_thickness_in=None):
 
     def ends(rule):
         """Per-end hogging and sagging: the mats are dropped at an exterior end whose hook fails ``rule``."""
-        undeveloped = {end: end in by_end and not by_end[end][rule] for end in ("i", "j")}
+        physical=family.get("slab_physical_inventory")
+        undeveloped = {end: (physical is not None and physical["status"]!="pass") or
+                      (end in by_end and not by_end[end][rule]) for end in ("i", "j")}
         return ({end: family["mn_undeveloped_negative_kip_in"] if undeveloped[end] else hogging for end in ("i", "j")},
                 {end: family["mn_undeveloped_positive_kip_in"] if undeveloped[end] else sagging for end in ("i", "j")})
     # The hinges and the saved end strengths: the support face. The strong-column rule: either datum (D2, an

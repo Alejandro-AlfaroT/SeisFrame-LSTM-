@@ -14,6 +14,8 @@ combination whose capacity falls in the target band [DCR_MIN, DCR_MAX].
 All target DCR values are read from Structure_Parameters (DESIGN_DCR_MIN/MAX).
 """
 
+from Design.Config import validate_beam_practical_ceiling
+
 import contextlib
 import math
 import os
@@ -481,6 +483,7 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
     force one screen.
     """
     cfg        = cfg or DesignConfig()
+    validate_beam_practical_ceiling(cfg)
     if threading is None:
         if sp.SLAB_THICKNESS_IN is None:
             return _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg, threading=False)
@@ -542,7 +545,7 @@ def _beam_candidates(As_top_lo, As_top_hi, As_bot_lo, As_bot_hi, cfg=None, threa
                 # against 1.25 on the nominal depth).
                 code_min = max(code_min, _beam_As_min(sp.FC_BEAM_KSI, sp.FY_KSI, sp.B_BEAM,
                                                       sp.H_BEAM - sp.longitudinal_cover_in("beam", bar_size)))
-            rho_cap = min(sp.beam_rho_max_code(), getattr(cfg.rebar, "rho_beam_practical_max", 0.025))   # 18.6.3.1 by grade; 0.015 ceiling
+            rho_cap = min(sp.beam_rho_max_code(), cfg.rebar.rho_beam_practical_max)   # validated practical ceiling; 18.6.3.1 by grade
             if d <= 0 or As_top > rho_cap * sp.B_BEAM * d:
                 continue
             if not (max(As_top_lo, code_min) <= As_top <= As_top_hi):
@@ -803,6 +806,7 @@ def redesign_steel(design_results: dict, cfg: Optional[DesignConfig] = None):
     penalty_log : list[str] — reasons for any penalties applied this iteration
     """
     cfg         = cfg or DesignConfig()
+    validate_beam_practical_ceiling(cfg)
     DCR_MIN     = cfg.dcr.dcr_band_lo
     DCR_MAX     = cfg.dcr.dcr_hard_max
     penalty_log: List[str] = []
@@ -1119,6 +1123,7 @@ def run_iterative_redesign(
     design_results : dict  — legacy flat-dict schema (backward-compatible)
     """
     cfg = cfg or DesignConfig()
+    validate_beam_practical_ceiling(cfg)
 
     if verbose:
         print("\n" + "-" * 60)

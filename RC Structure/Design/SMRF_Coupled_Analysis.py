@@ -47,8 +47,10 @@ import openseespy.opensees as ops
 from Design import SMRF_Floor_Sections as floor_sections
 from Design.SMRF_Floor_Analysis import _inputs, _integer, _number, MAX_SHELLS
 from Design.SMRF_Floor_Mesh import coupled_floor_mesh
+from Model import Floor_Footprint as footprint
 
-METHOD_VERSION = "smrf_monolithic_eccentric_shell_web_column_gravity_v5_explicit_mesh"
+# v6 (2026-11-06): a column's weight leaves the slab layer out only inside the physical floor (_physical_floors).
+METHOD_VERSION = "smrf_monolithic_eccentric_shell_web_column_gravity_v6_footprint_column_weight"
 # Sections of a grouped design (2026-10-02): every floor described line by line, in ascending floor order.
 # The beams of floor k and the columns of story k (the supports of floor k: the column below it) are that
 # floor's. {"schema", "floors": [by-line floor, ...], "fc_col_ksi", modifiers}, and optionally
@@ -72,6 +74,22 @@ def _rectangle(b, h, fc, modifier, nu):
 def _frame_element(tag, ni, nj, section, transform):
     ops.element("elasticBeamColumn", tag, ni, nj, section["area_in2"], section["ec_ksi"],
                 section["g_ksi"], section["j_in4"], section["iy_in4"], section["iz_in4"], transform)
+
+
+def _physical_floors(floors, nf, nx, ny, lx, ly, b):
+    """The physical floor of every level: the outer faces of its perimeter beams (Model.Floor_Footprint), from the
+    by-line floors of a grouped design or, with ``floors`` None, the one beam width ``b``. The footprint the
+    frame's weights use (Model.Member_Properties); a stepped side is refused there and here alike."""
+    result = []
+    for k in range(nf):
+        def width(axis, line, span):
+            return b if floors is None else floor_sections.beam_line(floors[k], axis, line, span)["b_in"]
+        beams = [{"axis": "x", "line": j*ly, "start": i*lx, "end": (i+1)*lx, "b_in": width("x", j, i)}
+                 for j in (0, ny) for i in range(nx)]
+        beams += [{"axis": "y", "line": i*lx, "start": j*ly, "end": (j+1)*ly, "b_in": width("y", i, j)}
+                  for i in (0, nx) for j in range(ny)]
+        result.append(footprint.from_perimeter_beams({"nx": nx, "ny": ny, "lx": lx, "ly": ly}, beams))
+    return result
 
 
 def _vector(values, length, label):
@@ -247,7 +265,8 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
                               "production rigid diaphragm unchanged.",
                               "Gross shell stiffness; optional web/column modifiers are sensitivity assumptions, not a verified composite cracking model.",
                               "Beam web excludes slab flange, but centerline joint stiffness overlaps remain unmodeled in 3D solid detail.",
-                              "Member weight uses clear beam spans and slab-excluded column volumes, smeared on centerlines.",
+                              "Member weight uses clear beam spans and column volumes without the slab layer inside the "
+                              "physical floor (the outer faces of the perimeter beams), smeared on centerlines.",
                               "Iy+Iz torsion proxy retained; verify actual torsional stiffness, joint-face actions, cracking, creep and support-face resultants.",
                               "Web segment moments alone are NOT composite beam/slab design moments.",
                               "A declared rigid in-plane restraint is a comparison assumption, not a validated floor model."]}
@@ -370,13 +389,22 @@ def analyze_coupled_gravity(slab_record, geometry, sections, floor_loadcases,
             ops.load(n, 0., 0., -p, 0., 0., 0.)
         slab_force, slab_moment = applied_force.copy(), applied_moment.copy()
         if include_member_weight:
+            # The slab layer is left out of a column only where the column stands inside the physical floor. The
+            # part of a perimeter column outside that footprint (a column wider than its perimeter beam) is column
+            # concrete through the slab depth and belongs to the column weight: the clipped volume of
+            # Model.Member_Properties.column_self_weight_kip_per_in, so this model and the bare frame hold one
+            # column weight (2026-11-06). Inside the footprint ``outside`` is zero and the weight is as before.
+            physical = _physical_floors(floors if by_member else None, nf, nx, ny, lx, ly, b)
             for item in columns:
                 factor = floor_loadcases[item["story"]-1]["dead_factor"]
                 if by_member:
                     col = column_of(item["story"], item["grid_i"], item["grid_j"])[1]
-                    p = factor*col["b_in"]*col["h_in"]*(sh-hs)*gamma
+                    cb, ch = col["b_in"], col["h_in"]
                 else:
-                    p = factor*bc*hc*(sh-hs)*gamma
+                    cb, ch = bc, hc
+                outside = cb*ch-footprint.column_overlap_area_in2(physical[item["story"]-1], item["grid_i"]*lx,
+                                                                  item["grid_j"]*ly, ch, cb)
+                p = factor*(cb*ch*(sh-hs)+outside*hs)*gamma
                 ops.eleLoad("-ele", item["tag"], "-type", "-beamUniform", 0., 0., -p/sh)
                 weight_ledger["column_weight_kip"] += p
                 gravity_resultant(p, item["grid_i"]*lx, item["grid_j"]*ly)

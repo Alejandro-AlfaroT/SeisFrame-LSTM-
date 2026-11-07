@@ -47,7 +47,7 @@ class UniformEquivalence(unittest.TestCase):
             with frame(slab):
                 for member in mg.all_members():
                     if member.is_column:
-                        close(self, mp.column_self_weight_kip_per_in(member), sp.col_self_weight_kip_per_in())
+                        close(self, mp.column_self_weight_kip_per_in(member), sp.col_self_weight_kip_per_in(member.grid_i, member.grid_j))
                         section = mp.elastic_section(member)
                         close(self, section["iy"], sp.rect_iy(sp.B_COL, sp.H_COL))
                         close(self, section["iz"], sp.rect_iz(sp.B_COL, sp.H_COL))
@@ -128,7 +128,11 @@ class GroupedHandTotals(unittest.TestCase):
             if member.is_column:
                 b, h = (20.0, 22.0) if member.member_tag in changed_columns else (26.0, 30.0)
                 self.assertEqual((member.design.b_in, member.design.h_in), (b, h))
-                close(self, mp.column_self_weight_kip_per_in(member), gamma * b * h * (168.0 - 7.0) / 168.0)
+                half_x=12.0 if member.story_or_floor in (1,2) else 9.0
+                cx,cy=member.grid_i*240.0,member.grid_j*216.0
+                overlap_x=min(cx+h/2,480+half_x)-max(cx-h/2,-half_x)
+                overlap_y=min(cy+b/2,648+9)-max(cy-b/2,-9)
+                close(self, mp.column_self_weight_kip_per_in(member), gamma * (b*h*168.0-overlap_x*overlap_y*7.0) / 168.0)
             else:
                 b, h = (24.0, 32.0) if member.member_tag in changed_beams else (18.0, 28.0)
                 self.assertEqual((member.design.b_in, member.design.h_in), (b, h))
@@ -188,7 +192,11 @@ class GroupedHandTotals(unittest.TestCase):
                 for i in range(nx + 1):
                     interior = 0 < i < nx and 0 < j < ny
                     b, h = (20.0, 22.0) if (interior and floor in (3, 4)) else (26.0, 30.0)
-                    total += gamma * b * h * (168.0 - 7.0)
+                    half_x=12.0 if floor in (1,2) else 9.0
+                    cx,cy=i*240.0,j*216.0
+                    overlap_x=min(cx+h/2,480+half_x)-max(cx-h/2,-half_x)
+                    overlap_y=min(cy+b/2,648+9)-max(cy-b/2,-9)
+                    total += gamma * (b*h*168.0-overlap_x*overlap_y*7.0)
             def core(level, i, j):                      # the joint core is the column below the floor
                 interior = 0 < i < nx and 0 < j < ny
                 return (22.0, 20.0) if (interior and level in (3, 4)) else (30.0, 26.0)
@@ -208,20 +216,24 @@ class GroupedHandTotals(unittest.TestCase):
         self.assertNotAlmostEqual(mp.floor_structural_self_weight_kip(1), mp.floor_structural_self_weight_kip(3), places=3)
         ledger = mp.weight_ledger()
         self.assertTrue(ledger["grouped"])
-        area_weight = (sp.floor_dead_load_ksf() + sp.SEISMIC_LIVE_LOAD_FRACTION * sp.FLOOR_LIVE_LOAD_KSF) * (240.0 * 2 * 216.0 * 3) / 144.0
         for row in ledger["floors"]:
+            width_x=504.0 if row['floor'] in (1,2) else 498.0
+            area_weight=(sp.floor_dead_load_ksf()+sp.SEISMIC_LIVE_LOAD_FRACTION*sp.FLOOR_LIVE_LOAD_KSF)*width_x*666.0/144.0
             close(self, row["seismic_weight_kip"], area_weight + hand_floor(row["floor"]), rel=1e-11)
             close(self, row["mass_sum_kip"], row["seismic_weight_kip"], rel=1e-11)      # nodal masses sum to the floor's seismic weight
         close(self, ledger["total_member_self_weight_kip"], sum(hand_floor(f) for f in range(1, 5)), rel=1e-11)
         # the interior base column carries its own (26 x 30) weight for stories 1-2 and the lighter column for 3-4
         axial = mp.column_gravity_axial(1, 1, 1)
-        hand = sp.node_gravity_load_kip(1, 1) * 4 + sum(mp.node_structural_self_weight_kip(f, 1, 1) for f in (1, 2, 3, 4))
+        # Exact integrated linear grid hats at the selected interior node,
+        # including the negative extrapolated outer-edge triangular pieces.
+        area=sum((240.0-half_x**2/240.0)*(216.0-9.0**2/(2*216.0)) for half_x in (12.,12.,9.,9.))
+        hand=sp.floor_load_ksi()*area+sum(mp.node_structural_self_weight_kip(f,1,1) for f in (1,2,3,4))
         close(self, axial, hand)
         self.assertLess(mp.node_structural_self_weight_kip(3, 1, 1), mp.node_structural_self_weight_kip(1, 1, 1))
         close(self, mp.gravity_above_kip(3), sum(mp.story_gravity_weight_kip(f) for f in (3, 4)))
 
     def test_the_one_section_helpers_refuse_to_answer_for_a_grouped_design(self):
-        for helper in (sp.col_self_weight_kip_per_in, lambda: sp.beam_self_weight_kip_per_in("x"), sp.total_structural_self_weight_per_floor,
+        for helper in (lambda:sp.col_self_weight_kip_per_in(0,0), lambda: sp.beam_self_weight_kip_per_in("x"), sp.total_structural_self_weight_per_floor,
                        sp.total_floor_seismic_weight, lambda: sp.beam_flexural_section("x", "edge"), lambda: sp.node_seismic_mass(0, 0),
                        sp.floor_load_metadata, lambda: sp.beam_flange_geometry("x", "interior")):
             with self.assertRaises(mg.GroupedStateError):

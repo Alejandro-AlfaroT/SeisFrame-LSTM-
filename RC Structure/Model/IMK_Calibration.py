@@ -209,7 +209,7 @@ def column_gravity_axial(story_index, grid_i, grid_j):
         # estimate, NOT a solved factored joint axial-force envelope.
         self_weight = sp.node_structural_self_weight_kip(grid_i, grid_j) * floors_above
     else:
-        self_weight = sp.col_self_weight_kip_per_in() * sp.STORY_H * floors_above
+        self_weight = sp.col_self_weight_kip_per_in(grid_i, grid_j) * sp.STORY_H * floors_above
     return floor_load + self_weight + roof.weight_kip(grid_i, grid_j)
 
 

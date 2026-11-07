@@ -1,4 +1,4 @@
-"""The bar position grid (design-basis rule 2026-10-14): first bars in the hoop corners on the 0.5 in grid, grid
+"""The bar position grid (2026-10-14), revised curved hoop corners (2026-11-03): first bars in the hoop corners on the 0.5 in grid, grid
 pitches along a face, grid layer pitches, hoops that follow the bars, and the beam proportion rules."""
 import contextlib
 import math
@@ -23,12 +23,12 @@ class GridHelpers(unittest.TestCase):
         from Design.SMRF_Capacity_Design import LAYOUT_HOOP_DB_IN
         self.assertEqual(sp.BAR_LAYOUT_HOOP_DB_IN, 0.625)
         self.assertEqual(LAYOUT_HOOP_DB_IN, sp.BAR_LAYOUT_HOOP_DB_IN)
-        self.assertEqual(sp.first_bar_offset_in(1.5, 0.5, 0.75), 2.5)          # #6 bar: 2.5 exactly with the #5 hoop
+        self.assertEqual(sp.first_bar_offset_in(1.5, 0.5, 0.75), 3.0)          # #6 now3in: rounded #5 hoop corner containment, not the sharp-corner bound
         self.assertEqual(sp.first_bar_offset_in(1.5, 0.5, 1.0), 3.0)           # #8 bar: 2.625 -> 3.0
         self.assertEqual(sp.first_bar_offset_in(1.5, 0.625, 1.0), 3.0)         # the same with a #5 hoop selected
         self.assertEqual(sp.first_bar_offset_in(1.5, 0.625, 1.128), 3.0)       # #9 bar, #5 hoop
         self.assertEqual(sp.first_bar_offset_in(1.5, 0.5, 1.41), 3.0)          # #11 bar: 2.83 -> 3.0
-        self.assertEqual(sp.first_bar_offset_in(1.5, 0.5, 1.0, grid_in=None), 2.5)    # pre-rule records: exact
+        self.assertAlmostEqual(sp.first_bar_offset_in(1.5, 0.5, 1.0, grid_in=None), 3.0-.5/math.sqrt(2), places=12)    # no grid: exact circular corner containment
         with self.assertRaises(ValueError):
             sp.snap_up_to_grid(math.nan)
 
@@ -57,10 +57,10 @@ class GridHelpers(unittest.TestCase):
             sp.face_bar_positions_in(10.25, 2.5, 3)                         # span off the grid
 
     def test_cage_layout_uses_the_grid(self):
-        self.assertEqual(face_bar_positions(20.0, 1.5, 0.5, 0.75, 5), [2.5, 6.0, 10.0, 14.0, 17.5])
+        self.assertEqual(face_bar_positions(20.0, 1.5, 0.5, 0.75, 5), [3.0, 6.5, 10.0, 13.5, 17.0])
         plan = column_bars_plan(20.0, 20.0, 1.5, 0.5, 0.75, 4, 2)
-        self.assertIn((2.5, 2.5), plan)
-        self.assertIn((17.5, 17.5), plan)
+        self.assertIn((3.0, 3.0), plan)
+        self.assertIn((17.0, 17.0), plan)
         self.assertTrue(all(abs(v / 0.5 - round(v / 0.5)) < 1e-9 for xy in plan for v in xy))
         self.assertEqual(beam_cage(12.0, 1.5, 0.5, 0.875, 3, 2)["faces"], {"top": [3.0, 6.0, 9.0], "bottom": [3.0, 9.0]})
         cage = column_cage(20.0, 20.0, 1.5, 0.5, 0.75, 4, 2, legs=4)
@@ -75,7 +75,7 @@ class GridHelpers(unittest.TestCase):
 
     def test_cb_uses_the_least_grid_pitch(self):
         cb = column_bar_cb_in(20.0, 20.0, 1.5, 4, 6, 5, 2)
-        self.assertEqual(cb["edge_distance_in"], 2.5)
+        self.assertEqual(cb["edge_distance_in"], 3.0)
         self.assertEqual(cb["min_center_spacing_in"], 3.5)
         self.assertEqual(cb["cb_in"], 1.75)
 
@@ -91,12 +91,12 @@ class CoverAsBuilt(unittest.TestCase):
         self.addCleanup(self.stack.close)
 
     def test_offsets_and_covers(self):
-        self.assertEqual(sp.longitudinal_cover_in("column"), 2.5)
-        self.assertEqual(sp.clear_cover_provided_in("column"), 2.5 - 0.5 - 0.375)
-        self.assertEqual(sp.core_cover_in("column"), 2.5 - 0.5 - 0.375)
+        self.assertEqual(sp.longitudinal_cover_in("column"), 3.0)
+        self.assertEqual(sp.clear_cover_provided_in("column"), 3.0 - (1.5 - (1.0-.375)/math.sqrt(2)))
+        self.assertEqual(sp.core_cover_in("column"), 3.0 - (1.5 - (1.0-.375)/math.sqrt(2)))
         self.assertEqual(sp.specified_clear_cover_in("column"), 1.5)
         self.assertEqual(sp.longitudinal_cover_in("beam"), 3.0)                  # #7 bar: 2.5625 -> 3.0 (layout hoop #5)
-        self.assertEqual(sp.clear_cover_provided_in("beam"), 3.0 - 0.5 - 0.4375)
+        self.assertEqual(sp.clear_cover_provided_in("beam"), 3.0 - (1.5 - (1.0-.4375)/math.sqrt(2)))
         self.assertGreaterEqual(sp.clear_cover_provided_in("beam"), 1.5)
         self.assertEqual(sp.longitudinal_cover_in("beam", 9, 5), 3.0)
         self.assertEqual(sp.beam_bar_layer_pitch_in(7), 2.0)
@@ -114,8 +114,8 @@ class CoverAsBuilt(unittest.TestCase):
         offsets = sp.beam_bar_layers()
         for axis in ("x", "y"):
             for face in ("top", "bottom"):
-                self.assertAlmostEqual(offsets[axis][face]["offsets_in"][0] - 0.5 - 0.4375, covers[axis][face])
-        self.assertAlmostEqual(side, 3.0 - 0.5 - 0.4375)
+                self.assertAlmostEqual(offsets[axis][face]["offsets_in"][0] - (1.5 - (1.0-.4375)/math.sqrt(2)), covers[axis][face])
+        self.assertAlmostEqual(side, 3.0 - (1.5 - (1.0-.4375)/math.sqrt(2)))
 
     def test_legacy_route_untouched(self):
         sp.SLAB_THICKNESS_IN = None

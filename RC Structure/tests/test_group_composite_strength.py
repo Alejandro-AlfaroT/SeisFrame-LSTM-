@@ -55,8 +55,9 @@ class CompositeGroupedStrength(unittest.TestCase):
         flange_depth=min(a,t); web_depth=max(0,a-t)
         cc=.85*member.design.fc_ksi*(bf*flange_depth+bw*web_depth)
         cc_m=.85*member.design.fc_ksi*(bf*flange_depth**2/2+bw*web_depth*(t+web_depth/2))
-        self.assertAlmostEqual(cc+sum(force for _,force in sec['steel_forces_kip']),0.,places=8)
-        self.assertAlmostEqual(-(cc_m+sum(y*force for y,force in sec['steel_forces_kip'])),sec['mn_kip_in'],places=8)
+        removed=sec['displaced_concrete_forces_kip']
+        self.assertAlmostEqual(cc+sum(force for _,force in sec['steel_forces_kip'])-sum(force for _,force in removed),0.,places=8)
+        self.assertAlmostEqual(-(cc_m+sum(y*force for y,force in sec['steel_forces_kip'])-sum(y*force for y,force in removed)),sec['mn_kip_in'],places=8)
 
     def test_developed_mats_add_hogging_capacity(self):
         before=self.strength(self.beam())

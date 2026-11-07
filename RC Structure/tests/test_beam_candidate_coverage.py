@@ -36,7 +36,8 @@ class BeamCandidateCoverage(unittest.TestCase):
 
     def test_case0048_iteration8_has_a_strength_candidate_beyond_seven_bars(self):
         with self.frame():
-            cfg = DesignConfig()
+            from Design.Config import with_beam_practical_ratio
+            cfg = with_beam_practical_ratio(DesignConfig(), 0.015)     # the earlier ceiling, set explicitly
             mu = 18149.554457353763  # saved iteration 8, kip-in
             d = sp.H_BEAM - sp.beam_worst_centroid_offset_in(max_layers=1)
             lo = rd._beam_As_for_Mu(mu, 8., 60., 30., d)
@@ -45,8 +46,8 @@ class BeamCandidateCoverage(unittest.TestCase):
             # percent of bw d on its stacked depth) is refused: the beam grows instead of carrying it.
             self.assertEqual(cfg.rebar.rho_beam_practical_max, 0.015)
             self.assertEqual(rd._beam_candidates(lo, math.inf, lo, math.inf, cfg, threading=True), [])
-            # At the code limit the coverage of the dense cages is as before.
-            cfg.rebar.rho_beam_practical_max = 0.025
+            # The authorized 1.75 percent ceiling permits this 1.54 percent cage.
+            cfg.rebar.rho_beam_practical_max = 0.0175
             candidates = rd._beam_candidates(lo, math.inf, lo, math.inf, cfg, threading=True)
             self.assertTrue(candidates)
             best = rd._pick_beam(candidates, mu, mu, cfg)
@@ -86,7 +87,7 @@ class BeamCandidateCoverage(unittest.TestCase):
     def test_dense_cage_outside_hoop_ladder_does_not_displace_supported_alternative(self):
         with self.frame():
             cfg = DesignConfig()
-            cfg.rebar.rho_beam_practical_max = 0.025                   # the hoop-ladder rule is tested at the code ceiling
+            cfg.rebar.rho_beam_practical_max = 0.0175                  # the hoop-ladder rule stays inside the authorized ceiling
             offered = rd._beam_candidates(11.12, math.inf, 11.12, math.inf, cfg, threading=True)
             self.assertIn((11, 8, 8), offered)
             self.assertFalse(any(c[0] == 9 and c[1] >= 12 for c in offered))

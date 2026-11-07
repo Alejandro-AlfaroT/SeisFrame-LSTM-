@@ -1,0 +1,35 @@
+Built-in image editing tool used for both edits.
+
+Final widescreen output: AI_Seismic_Workflow_GA_Widescreen_1920x1080.png (16:9, 1920 x 1080).
+Source-preserving master: AI_Seismic_Workflow_GA.png.
+
+The master uses only the edited text region, composited into the supplied original. All pixels outside x=36..263, y=216..296 are retained. The widescreen image is a layout adaptation, uniformly fitted to 1920 x 1080 without cropping.
+
+CAPTION EDIT PROMPT
+
+undefined
+
+WIDESCREEN LAYOUT PROMPT
+
+Use case: text-localization / layout reformatting of an existing scientific infographic.
+Edit target: the attached completed "AI-Assisted Seismic Response Prediction Workflow" infographic, which already contains the corrected genetic-algorithm caption.
+Create a landscape WIDESCREEN 16:9 version for a standard PowerPoint slide, preferably 1920 x 1080 or 2048 x 1152. Reflow the four columns to use the full wider slide. Do not merely add side margins, crop the image, or stretch/distort the buildings. Preserve the original navy serif typography, blue/orange/green/purple four-stage color scheme, rounded cards, realistic RC frame illustrations, graphs, colored node network, arrows, and pink goal banner. This is a faithful layout adaptation, not a redesign.
+
+Keep every stage and its scientific content. Use wider panels and tighter vertical spacing to fit. Preserve all graphs with their axes/labels. Keep all four example structures and their labels in stage 1. Keep the same title, subtitle, and final banner text verbatim. Keep the second, third and fourth stages' text and subject matter unchanged.
+
+Stage 1 title: "Automated Structure Generation". Caption exactly:
+"Genetic algorithm (GA)"
+"Engineering-guided mutation operators"
+Keep the circular-arrow gear icon. Do NOT restore "Iterative design workflow".
+Stage 1 example labels exactly: "3-story / 3×3 bays", "6-story / 4×3 bays", "9-story / 3×4 bays", "12-story / 4×4 bays". Preserve the two bullets below.
+
+Stage 2 title: "Nonlinear Earthquake Simulation"; preserve finite-element / nonlinear time-history analysis, original undeformed / deformed frame visualization, ground-motion input, and the four response plots: roof displacement, interstory drift, member moment-rotation, floor acceleration.
+
+Stage 3 title: "Train Spatiotemporal Surrogate"; preserve graph with node and edge key, GNN + LSTM diagram, structure / ground-motion / global-demand inputs, and the local/global response statement.
+
+Stage 4 title: "Rapid Prediction"; preserve the unseen RC SMRF illustration and label, all four example response plots, timing comparison, and the concluding local/global statement.
+
+Footer verbatim: "Goal: Replace repeated expensive nonlinear analyses with fast, accurate predictions of seismic response."
+Second footer line verbatim: "AI is used to predict structural response — not to generate the structures."
+No new claims, no omitted content, no changed numbers, no extra branding. Use the wide format to keep text comfortably readable.
+

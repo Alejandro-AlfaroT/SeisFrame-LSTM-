@@ -45,12 +45,13 @@ from Design.SMRF_Joints import (MPR_BASIS, JOINT_SHEAR_BASES, JOINT_SHEAR_PHI,
                                 beam_capacity_shear_envelope, rectangular_joint_area)
 from Design.SMRF_Slab_Reinforcement import slab_strength_eligibility
 from Design.SMRF_Transitions import column_transition
+from Loads import Perimeter_Strip as perimeter_strip
 from Model import Member_Bar_Layers as bar_layers
 from Model import Member_Groups as mg
 from Model import Member_Properties as mp
 from RC_Design_Check import _design_col_steel_layers
 
-METHOD_VERSION = "aci318_19_group_capacity_design_v3_roof_exception_two_datum_hooks"
+METHOD_VERSION = "aci318_19_group_capacity_design_v6_common_torsion_readback"
 # The beam axial applicability and the splice placement are the shared ones of Design.SMRF_Capacity_Design.
 splice_placement, splice_location_check, beam_axial_check = cd.splice_placement, cd.splice_location_check, cd.beam_axial_check
 GRAVITY_FAMILIES = (("seismic_high_gravity", lambda sds: 1.2 + 0.2 * sds, 1.0),
@@ -90,10 +91,12 @@ def beam_probable_strengths(member):
     probable = mp.beam_strengths(member, cd.PROBABLE_FY_FACTOR, thickness)
     design = member.design
     ab = sp.rebar_area(design.bar_size)
+    from Design.SMRF_Conventional_Floor import side_bar_strength_increment
+    side_n, side_pr = side_bar_strength_increment(member, 1.0), side_bar_strength_increment(member, cd.PROBABLE_FY_FACTOR)
     return {"member_tag": member.member_tag, "group_id": member.group_id, "axis": mp.beam_axis(member),
             "position": member.location_class,
-            "mn_positive_kip_in": nominal["sagging"], "mn_negative_kip_in": nominal["hogging"],
-            "mpr_positive_kip_in": probable["sagging"], "mpr_negative_kip_in": probable["hogging"],
+            "mn_positive_kip_in": nominal["sagging"] + side_n, "mn_negative_kip_in": nominal["hogging"] + side_n,
+            "mpr_positive_kip_in": probable["sagging"] + side_pr, "mpr_negative_kip_in": probable["hogging"] + side_pr,
             "effective_flange_width_in": probable["family"]["effective_flange_width_in"],
             "tension_steel_hogging_in2": design.top_bars * ab + probable["family"]["slab_steel_in_flange_in2"],
             "tension_steel_sagging_in2": design.bot_bars * ab,
@@ -117,12 +120,19 @@ def _span_face_reactions(entry, span_in, face_i_in, face_j_in, factor):
     return left, right
 
 
-def member_face_reactions(transfer, member, factor_dead, factor_live):
+def member_face_reactions(transfer, member, factor_dead, factor_live, strips=None):
     """Factored gravity face reactions [left, right] of one beam from its own floor's transfer.
 
     Dead once, live as the envelope per end over the all-panel case and every saved pattern, plus the
-    beam's own drop weight on its own clear span.
+    beam's own drop weight on its own clear span. A perimeter beam also carries, in every unit case, the
+    perimeter strip of the physical floor on its clear span: the line load the frame receives
+    (Loads.Perimeter_Strip, 2026-11-05); the transfer is the centreline plate's alone. ``strips`` is the
+    caller's {floor: strip pieces}: a floor's footprint is built once and reused over the beams and families of
+    one capacity build; without it the pieces are built once in this call (2026-11-06).
     """
+    if transfer is not None and 'physical_gravity_member_actions' in transfer:
+        from Design.SMRF_Physical_Member_Actions import physical_face_reactions
+        return physical_face_reactions(transfer,member,factor_dead,factor_live)
     axis = mp.beam_axis(member)
     key = (axis, member.grid_j, member.grid_i) if axis == "x" else (axis, member.grid_i, member.grid_j)
     span = mp.beam_span_in(member)
@@ -132,6 +142,8 @@ def member_face_reactions(transfer, member, factor_dead, factor_live):
     if not cases:
         return [self_weight, self_weight], "member self-weight only; no slab transfer supplied"
     dead, live = [0.0, 0.0], None
+    strip_loaded = False
+    strip = perimeter_strip.beam_floor_pieces(member.story_or_floor, key, strips)
     for name, case in cases.items():
         factor = factor_dead if name == "dead" else factor_live
         if factor == 0.0 or not case:
@@ -140,6 +152,11 @@ def member_face_reactions(transfer, member, factor_dead, factor_live):
         if entry is None:
             raise ValueError(f"Floor transfer case {name!r} has no loads for beam {member.member_tag} {key}.")
         left, right = _span_face_reactions(entry, span, face_i, face_j, factor)
+        strip_end = (factor * perimeter_strip.line_load_kip_per_in(strip, transfer, key, name)
+                     * (span - face_i - face_j) / 2.0)
+        if strip_end:
+            strip_loaded = True
+            left, right = left + strip_end, right + strip_end
         if name == "dead":
             dead = [left, right]
         else:
@@ -147,7 +164,8 @@ def member_face_reactions(transfer, member, factor_dead, factor_live):
     live = live or [0.0, 0.0]
     return ([dead[0] + live[0] + self_weight, dead[1] + live[1] + self_weight],
             f"joint-face free body over this beam's own clear span (faces {face_i:g} and {face_j:g} in); live enveloped over "
-            f"{len([n for n in cases if n != 'dead'])} unit case(s) of its own floor's transfer; plus its own drop weight")
+            f"{len([n for n in cases if n != 'dead'])} unit case(s) of its own floor's transfer; plus its own drop weight"
+            + (perimeter_strip.SHEAR_BASIS_CLAUSE if strip_loaded else ""))
 
 
 def is_gravity_beam_group(state, gid):
@@ -157,9 +175,11 @@ def is_gravity_beam_group(state, gid):
             and state.system_of(gid) == mg.SYSTEM_GRAVITY)
 
 
-def beam_group_capacity(gid, state, transfers, sds):
+def beam_group_capacity(gid, state, transfers, sds, strips=None):
     """Capacity shear of every member of one beam group and the group's transverse steel: hinge-zone hoops for a
-    perimeter-frame group, stirrups throughout at <= d/2 for a gravity-system group (18.14.3.2(a), 2026-10-18)."""
+    perimeter-frame group, stirrups throughout at <= d/2 for a gravity-system group (18.14.3.2(a), 2026-10-18).
+    ``strips`` is the {floor: perimeter strip pieces} store one capacity build shares between its groups."""
+    strips = {} if strips is None else strips
     transverse_rule = cd.BEAM_TRANSVERSE_GRAVITY if is_gravity_beam_group(state, gid) else cd.BEAM_TRANSVERSE_SFRS
     design = state.designs[gid]
     rows = bar_layers.group_rows(gid)
@@ -168,10 +188,10 @@ def beam_group_capacity(gid, state, transfers, sds):
     for tag in state.groups[gid]["member_tags"]:
         member = state.member(tag)
         strengths = beam_probable_strengths(member)
-        transfer = None if transfers is None else transfers[member.story_or_floor]
+        transfer = None if transfers is None else transfers if 'physical_gravity_member_actions' in transfers else transfers[member.story_or_floor]
         for family_name, dead_of, live in GRAVITY_FAMILIES:
             dead = dead_of(sds)
-            reactions, basis = member_face_reactions(transfer, member, dead, live)
+            reactions, basis = member_face_reactions(transfer, member, dead, live, strips)
             data = {"id": f"{gid}/member_{tag}/{family_name}", "member_tag": tag, "group_id": gid,
                     "clear_span_in": strengths["clear_span_in"],
                     "mpr_left_positive_kip_in": strengths["mpr_positive_kip_in"], "mpr_left_negative_kip_in": strengths["mpr_negative_kip_in"],
@@ -187,7 +207,14 @@ def beam_group_capacity(gid, state, transfers, sds):
             worst_mechanism = max(worst_mechanism, envelope["mechanism_shear_positive_kip"], envelope["mechanism_shear_negative_kip"])
     result = {"group_id": gid, "members": members, "effective_depth_in": d,
               **cd.select_beam_hoops(design.b_in, d, design.fc_ksi, sp.FYT_KSI, design.bar_size, sp.BEAM_CLEAR_COVER_IN,
-                                     design.top_bars, design.bot_bars, worst_ve, worst_mechanism, transverse_rule=transverse_rule)}
+                                     design.top_bars, design.bot_bars, worst_ve, worst_mechanism, transverse_rule=transverse_rule,
+                                     torsion_at_per_in=float((((sp.BEAM_TORSION_DESIGN or {}).get(gid) or {}).get("at_per_in2")) or 0.0),
+                                     torsion_spacing_limit_in=((sp.BEAM_TORSION_DESIGN or {}).get(gid) or {}).get("spacing_limit_in"))}
+    from Design import SMRF_Conventional_Detail as conventional
+    if not conventional.active():
+        from Design.SMRF_Actual_Hoop_Selection import beam_selection
+        from Design.SMRF_Splice_Physical import group_beam_lanes
+        result=beam_selection(design,group_beam_lanes(state)[gid]["coordinates"],sp.BEAM_CLEAR_COVER_IN,result)
     selected = result["hoops"]
     for data in members:
         data["phi_vn_left_kip"] = selected["phi_vn_kip"] if selected else 0.0
@@ -250,6 +277,8 @@ def column_group_capacity(gid, state, actions, cfg):
         "column_axial_envelope": envelopes["axial"], "column_shear_demand": envelopes["shear"],
         "column_action_envelopes": envelopes["detail"],
         "column_shear_method": cd.COLUMN_SHEAR_METHOD_COLUMN_OWN,
+        # 18.7.5.2(f): the high-axial Pu is the largest compression of the combinations including E (2026-11-07).
+        "column_seismic_axial_max_kip": cd.seismic_column_compression_kip(actions, tags),
         "column_clear_height_convention": getattr(policy, "column_clear_height_convention", None),
         "stories": sorted(group["stories_or_floors"]), "clear_heights_in": heights,
     }
@@ -260,6 +289,10 @@ def column_group_capacity(gid, state, actions, cfg):
                                    f"{cd.COLUMN_SHEAR_METHOD_COLUMN_OWN!r}.")
     try:
         result = cd.design_column_shear(local, None)
+        from Design import SMRF_Conventional_Detail as conventional
+        if not conventional.active():
+            from Design.SMRF_Actual_Hoop_Selection import column_selection
+            result=column_selection(design,sp.COL_CLEAR_COVER_IN,result,mp.longitudinal_cover_in(design))
     except SectionAxialDomainError as exc:
         # The factored axial range of this group's own members leaves its section's strength domain: the group
         # that owns the section is named so the search can reject the candidate for the right reason.
@@ -283,6 +316,9 @@ def joint_inventory(state=None):
     or the roof, X beam group and count, Y beam group and count); its id is the first joint that has it.
     """
     state = state or mg.active()
+    from Model.Floor_Footprint import physical_floor
+    footprints={floor:physical_floor(floor,state) for floor in range(1,sp.NUM_FLOOR+1)}
+    mat_layers=((sp.SLAB_REINFORCEMENT or {}).get("layout") or {}).get("layers",{})
     joints, types = [], {}
     for level in range(1, sp.NUM_FLOOR + 1):
         for j in range(sp.NUM_BAY_Y + 1):
@@ -299,9 +335,18 @@ def joint_inventory(state=None):
                                                    "different groups; no along-line reinforcement transition is declared.")
                 # A core corner of the perimeter-core layout is the one declared along-line transition: the beams of
                 # both groups terminate in the joint with standard hooks (18.8.2.2); the type keys both groups.
+                # Physical equivalence also needs hook direction and local
+                # phase of every globally continuous mat. Incident groups
+                # alone conflate opposite corners and noncommensurate bays.
+                local_phases=tuple((name,round(((j*sp.BAY_Y if name.startswith("x_") else i*sp.BAY_X)
+                                                %float(layer["spacing_in"])),9))
+                                   for name,layer in sorted(mat_layers.items()) if layer.get("spacing_in",0)>0)
+                footprint=footprints[level]
+                physical_key=((i==0,i==sp.NUM_BAY_X,j==0,j==sp.NUM_BAY_Y),local_phases,
+                              tuple(footprint[k] for k in ("x_min_in","x_max_in","y_min_in","y_max_in")))
                 key = (core.group_id, None if above is None else above.group_id,
                        tuple(sorted({b.group_id for b in beams["x"]})) if beams["x"] else None, len(beams["x"]),
-                       tuple(sorted({b.group_id for b in beams["y"]})) if beams["y"] else None, len(beams["y"]))
+                       tuple(sorted({b.group_id for b in beams["y"]})) if beams["y"] else None, len(beams["y"]),physical_key)
                 node = level * (sp.NUM_BAY_X + 1) * (sp.NUM_BAY_Y + 1) + j * (sp.NUM_BAY_X + 1) + i + 1
                 entry = {"id": f"joint_{node}", "node_tag": node, "level": level, "grid_i": i, "grid_j": j,
                          "is_roof": above is None, "core": core, "above": above, "below": joint["column_below"],
@@ -313,16 +358,26 @@ def joint_inventory(state=None):
     return {"joints": joints, "types": {kind["type_id"]: kind for kind in types.values()}}
 
 
-def joint_transition(entry, column_hoops=None):
+def joint_transition(entry, column_hoops=None, column_axial=None):
     """The column transition at one joint (None at the roof), with the lower group's installed hoop spacing."""
     core, above = entry["core"], entry["above"]
     if above is None:
         return None
     upper_clear = column_clear_heights(above)["physical"]
     depths = [b.design.h_in for axis in ("x", "y") for b in entry["beams"][axis]]
-    return column_transition(core.design, above.design, fy_ksi=sp.FY_KSI, clear_cover_in=sp.COL_CLEAR_COVER_IN,
-                             upper_clear_height_in=upper_clear, joint_depth_in=min(depths),
-                             lower_hoop_spacing_in=(column_hoops or {}).get(core.group_id))
+    kwargs=dict(fy_ksi=sp.FY_KSI,clear_cover_in=sp.COL_CLEAR_COVER_IN,upper_clear_height_in=upper_clear,
+                joint_depth_in=min(depths),lower_hoop_spacing_in=(column_hoops or {}).get(core.group_id))
+    from Design import SMRF_Conventional_Detail as conventional
+    if conventional.active():
+        return column_transition(core.design,above.design,**kwargs,physical_context={
+            "conventional":True,"aggregate_max_size_in":sp.AGGREGATE_MAX_SIZE_IN,
+            "longitudinal_specification":sp.REINFORCEMENT_SPECIFICATION})
+    preliminary=column_transition(core.design,above.design,**kwargs)
+    from Design.SMRF_Transition_Context import beam_context
+    context=beam_context(entry,preliminary,column_hoops)
+    values=[(column_axial or {}).get(m.group_id) for m in (core,above)]
+    context["axial_max_kip"]=max(values) if all(v is not None for v in values) else None
+    return column_transition(core.design,above.design,**kwargs,physical_context=context)
 
 
 def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_SFRS):
@@ -396,7 +451,16 @@ def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_
     parallel = len(beams) if bw >= cd.CONFINING_BEAM_WIDTH_RATIO * width else 0
     perpendicular = (len(transverse) if transverse_design is not None
                      and transverse_design.b_in >= cd.CONFINING_BEAM_WIDTH_RATIO * depth else 0)
-    aj = rectangular_joint_area(column_depth_in=depth, column_width_in=width, beam_width_in=bw, beam_center_offset_in=0.0)
+    # A reduced column's drawn confinement cannot justify using the entire
+    # larger lower-column area. Use the lesser physical section dimensions;
+    # retain the classification calculated above so shrinking the area cannot
+    # manufacture a more favorable beam-confinement classification.
+    area_depth, area_width = depth, width
+    if above is not None:
+        upper_depth, upper_width = ((above.design.h_in, above.design.b_in) if axis == 'x'
+                                    else (above.design.b_in, above.design.h_in))
+        area_depth, area_width = min(depth, upper_depth), min(width, upper_width)
+    aj = rectangular_joint_area(column_depth_in=area_depth, column_width_in=area_width, beam_width_in=bw, beam_center_offset_in=0.0)
     vn = gamma * math.sqrt(core.fc_ksi * 1000.0) * aj / 1000.0
     return {"id": f"joint_shear/{entry['type_id']}/{axis}", "type_id": entry["type_id"], "level": level, "axis": axis,
             "core_group": entry["core"].group_id, "column_above_group": None if above is None else above.group_id,
@@ -406,6 +470,8 @@ def joint_shear(entry, axis, strengths, transition, beam_hoops, rule=JOINT_RULE_
             "beam_face_forces_kip": forces, "column_shear_kip": vcol, "hogging_beam_tag": hogging_beam,
             "probable_face_forces_complete": True, "column_shear_consistent_with_mpr": True,
             "nominal_vn_kip": vn, "capacity_basis": JOINT_SHEAR_BASES[rule],
+            'joint_area_dimensions_in': {'parallel': area_depth, 'transverse': area_width},
+            'joint_area_basis': 'lesser actual lower/upper section; original classification retained; physical confinement checked separately',
             "rule": rule, "clause": JOINT_RULE_CLAUSE[rule], "steel_stress_factor": steel_factor,
             "beam_moment_basis": "probable (1.25 fy)" if rule == JOINT_RULE_SFRS else "nominal (fy)",
             "capacity_topology_and_confinement_checked": False,
@@ -642,11 +708,18 @@ def scwb_evidence(inventory, actions, expected_ids, state=None, slab_eligibility
                         cap.update(reason_code="no_slab_in_model",
                                    reason="no slab in the model: the developed beam-plus-slab strength is not defined")
                     else:
-                        rectangular = family["rectangular"][flexure]["mn_kip_in"]
+                        from Design.SMRF_Conventional_Floor import side_bar_strength_increment
+                        rectangular = family["rectangular"][flexure]["mn_kip_in"] + side_bar_strength_increment(beam, 1.0)
                         exterior = basis["exterior_ends"][end]
                         hook = (basis.get("exterior_anchorage_by_end") or {}).get(end)
+                        computed_end=((eligibility.get('member_development') or {}).get(str(beam.member_tag),{}).get('ends') or {}).get(end)
+                        computed_route=eligibility.get('version')=='computed_physical_slab_detailing_and_nominal_development_v1'
                         undeveloped = (eligibility.get("layout_selected") and exterior and hook is not None
                                        and not hook["developed_either"])
+                        if computed_route:
+                            # Unknown nominal credit is never interpreted as zero
+                            # slab steel or used to lower probable-strength demands.
+                            undeveloped=False
                         cap.update(mn_kip_in=rectangular, capacity_basis=family["basis"])
                         if hook is not None:
                             cap.update(slab_hook={
@@ -662,18 +735,23 @@ def scwb_evidence(inventory, actions, expected_ids, state=None, slab_eligibility
                                                    + str(eligibility.get("reason")))
                         elif undeveloped:
                             # The perimeter hook does not fit: a known basis that needs no development (no slab bars in
-                            # either sign, the flange concrete in compression under sagging).
+                            # either sign; retain any flange concrete reached by the compression block).
                             total = family["undeveloped"][flexure]["mn_kip_in"]
-                            cap.update(slab_basis=("terminated_undeveloped" if flexure == "negative"
-                                                   else "flange_concrete_undeveloped_bars"),
-                                       slab_mn_kip_in=0.0 if flexure == "negative" else max(0.0, total - rectangular))
-                        elif eligibility.get("credit") != "developed":
+                            increment = max(0.0, total - rectangular)
+                            cap.update(slab_basis=("flange_concrete_undeveloped_bars" if increment > 1e-9
+                                                   else "terminated_undeveloped"),
+                                       slab_mn_kip_in=increment)
+                        elif ((computed_route and not (computed_end or {}).get('developed_either')) or
+                              (not computed_route and eligibility.get("credit") != "developed")):
                             cap.update(slab_reason_code=eligibility.get("reason_code") or "slab_credit_not_established",
                                        slab_reason="The slab mats are in the flange but their development is not "
                                                    "established: " + str(eligibility.get("reason")))
                         else:
                             cap.update(slab_basis="developed_effective_width",
                                        slab_mn_kip_in=max(0.0, family[f"slab_increment_{flexure}_kip_in"]))
+                            if computed_route:
+                                cap['computed_nominal_development']=computed_end
+                                cap['slab_hook_datum_basis']='Actual full-fy per-bar evidence; either support or joint face for SCWB'
                     beam_caps.append(cap)
                 states[sign] = {"nominal_strengths": True, "column_capacities": column_caps, "beam_capacities": beam_caps,
                                 "connection": dict(connection)}
@@ -707,8 +785,14 @@ def _includes_earthquake(action):
 
 
 # ---- the whole capacity design ------------------------------------------------------------------------------
+def beam_torsion_evidence(state,expected_ids,beam_capacity,common_torsion=None,common_actions=None):
+    """Required concurrent torsion row; legacy actions never imply Tu=0."""
+    from Design.SMRF_Beam_Torsion_Adapter import evidence
+    return evidence(state,expected_ids,beam_capacity,common_torsion,common_actions=common_actions)
+
+
 def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, state=None, compatibility=None,
-                                slab_eligibility=None):
+                                slab_eligibility=None, common_torsion=None,common_actions=None):
     """Capacity-design evidence and checks of the installed grouped design.
 
     ``actions`` are the solved combinations (Group_Checks.capture_member_actions per combination);
@@ -732,7 +816,15 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
             f"the capacity design needs valid bar rows; the complete arrangement leaves rows that do not fit in {groups[:6]}",
             {"outcome": "capacity_refused_invalid_rows", "group_ids": groups, "audit": audit}, {"rejected_state": state})
     sds = sp.ASCE_SDS
-    beams = {gid: beam_group_capacity(gid, state, transfers, sds)
+    from Design import SMRF_Conventional_Detail as conventional
+    detail_conventional = conventional.active()
+    torsion_designs = None
+    if detail_conventional:
+        from Design.SMRF_Conventional_Floor import group_torsion_designs, torsion_rows
+        torsion_designs = group_torsion_designs(state, actions)
+        sp.BEAM_TORSION_DESIGN = torsion_designs
+    strips = {}                     # each floor's perimeter strip pieces, built once for this build (2026-11-06)
+    beams = {gid: beam_group_capacity(gid, state, transfers, sds, strips)
              for gid, group in sorted(state.groups.items()) if group["member_type"] != "column"}
     for gid, data in beams.items():
         # Frame beams (18.6): the signed axial envelope of the strength combinations. Gravity beams keep their own
@@ -743,16 +835,47 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
                for gid, group in sorted(state.groups.items()) if group["member_type"] == "column"}
     beam_hoops = {gid: data["hoops"] or {} for gid, data in beams.items()}
     column_spacing = {gid: (data["hoops"] or {}).get("spacing_in") for gid, data in columns.items()}
+    column_axial = {gid:max((row["axial_max_kip"] for per_story in data.get("stories",{}).values()
+                            for row in per_story.values()),default=None) for gid,data in columns.items()}
     inventory = joint_inventory(state)
     strengths = {tag: beam_probable_strengths(state.member(tag))
                  for gid, group in state.groups.items() if group["member_type"] != "column" for tag in group["member_tags"]}
     joint_types, transitions = {}, {}
     for type_id, kind in sorted(inventory["types"].items()):
         entry = kind["representative"]
-        transition = joint_transition(entry, column_spacing)
+        transition = joint_transition(entry, column_spacing,column_axial)
+        if detail_conventional:
+            actual_beam_context=conventional.beam_joint_detail(entry)
+        else:
+            from Design.SMRF_Transition_Context import beam_context
+            actual_beam_context=beam_context(entry,transition,column_spacing)
+        roof_anchorage=None
+        if entry["above"] is None and detail_conventional:
+            core=entry["core"]
+            roof_anchorage=conventional.roof_detail(core.design,extension_in=sp.roof_column_extension_in(core.design.b_in,core.design.h_in),
+                joint_depth_in=min(b.design.h_in for members in entry["beams"].values() for b in members),
+                fy_ksi=sp.FY_KSI,clear_cover_in=sp.COL_CLEAR_COVER_IN,
+                spacing_in=column_spacing.get(core.group_id) or core.design.stirrup_spacing_in,
+                normalweight=sp.CONCRETE_UNIT_WEIGHT_KCF==.150)
+        elif entry["above"] is None:
+            from Design.SMRF_Roof_Anchorage import verify_declared_roof
+            core=entry["core"]
+            roof_anchorage=verify_declared_roof(core.design,extension_in=sp.roof_column_extension_in(core.design.b_in,core.design.h_in),
+                joint_depth_in=min(b.design.h_in for members in entry["beams"].values() for b in members),
+                fy_ksi=sp.FY_KSI,clear_cover_in=sp.COL_CLEAR_COVER_IN,
+                spacing_in=column_spacing.get(core.group_id) or core.design.stirrup_spacing_in,
+                specification=sp.REINFORCEMENT_SPECIFICATION,physical_context=actual_beam_context,
+                axial_max_kip=column_axial.get(core.group_id),normalweight=sp.CONCRETE_UNIT_WEIGHT_KCF==.150)
         if transition is not None and entry["above"].group_id != entry["core"].group_id:
-            transitions[f"{entry['core'].group_id}>{entry['above'].group_id}"] = {**transition, "type_id": type_id,
-                                                                                 "joints": list(kind["joints"])}
+            key = f"{entry['core'].group_id}>{entry['above'].group_id}"
+            contextual = {**transition, 'type_id': type_id, 'joints': list(kind['joints'])}
+            if key not in transitions:
+                transitions[key] = {**contextual, 'contexts': {}}
+            aggregate = transitions[key]
+            aggregate['contexts'][type_id] = contextual
+            aggregate['joints'] = sorted({j for item in aggregate['contexts'].values() for j in item['joints']})
+            aggregate['supported'] = all(item['supported'] for item in aggregate['contexts'].values())
+            aggregate['physically_verified'] = all(item.get('physically_verified', False) for item in aggregate['contexts'].values())
         shear = {axis: joint_shear(entry, axis, strengths, transition, beam_hoops, joint_rule(entry, axis, state))
                  for axis in ("x", "y") if entry["beams"][axis]}
         hoop_bar = (columns[entry["core"].group_id]["hoops"] or {}).get("bar_size")
@@ -760,6 +883,9 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
             "type_id": type_id, "joints": list(kind["joints"]), "level": entry["level"],
             "core_group": entry["core"].group_id, "column_above_group": None if entry["above"] is None else entry["above"].group_id,
             "transition": None if transition is None else {k: transition[k] for k in ("kind", "supported", "column_reinforcement_continuous")},
+            'physical_transition': None if transition is None else transition.get('physical_detail'),
+            'physical_beam_context': actual_beam_context,
+            'physical_roof_anchorage': roof_anchorage,
             "shear": shear,
             "anchorage": {axis: joint_anchorage(entry, axis, hoop_bar) for axis in ("x", "y") if entry["beams"][axis]},
             "threading": {axis: joint_threading(entry, axis) for axis in ("x", "y") if entry["beams"][axis]},
@@ -769,11 +895,38 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
     # Joint transverse steel designed and every Table 18.8.4.3 input on evidence: only then is the nominal strength usable.
     for kind in joint_types.values():
         for item in kind["shear"].values():
-            item["capacity_topology_and_confinement_checked"] = bool(kind["joint_hoops"] is not None and item["evidence_complete"])
+            physical = kind.get('physical_transition')
+            item["capacity_topology_and_confinement_checked"] = bool(kind["joint_hoops"] is not None and item["evidence_complete"]
+                and (detail_conventional or (((kind.get('physical_roof_anchorage') or {}).get('status')=='pass') if kind['column_above_group'] is None
+                     else (physical or {}).get('status') == 'pass')))
     scwb = scwb_evidence(inventory, actions, expected_ids, state=state, slab_eligibility=slab_eligibility)
 
-    checks = []
+    if detail_conventional:
+        torsion={"method":"conventional_torsion_v1","designs":torsion_designs,"checks":torsion_rows(state,beams,torsion_designs)}
+    else:
+        torsion=beam_torsion_evidence(state,expected_ids,beams,common_torsion,common_actions)
+    checks = list(torsion['checks'])
     for gid, data in beams.items():
+        if detail_conventional:
+            mat_inventory=[]
+        else:
+            from Design.SMRF_Joint_Mat_Physical import member_slab_inventory
+            mat_inventory=[member_slab_inventory(state.member(tag),mp.effective_flange(state.member(tag)))
+                           for tag in state.groups[gid]["member_tags"]] if _layout() is not None else []
+        data["slab_physical_inventory"]=mat_inventory
+        statuses=[r["status"] for r in mat_inventory]
+        if detail_conventional and _layout() is not None:
+            physical_row=make_check("beam.slab_physical_inventory","ACI 318-19 6.3.2;18.7.3.2;25.4",1,1,"==",location=gid)
+        elif "fail" in statuses:
+            physical_row=make_check("beam.slab_physical_inventory","ACI 318-19 6.3.2;18.7.3.2;25.4",0,1,"==",location=gid)
+        elif not mat_inventory or any(s not in ("pass","fail") for s in statuses):
+            physical_row=not_evaluated("beam.slab_physical_inventory","ACI 318-19 6.3.2;18.7.3.2;25.4",
+                                      "Actual globally placed slab bars in every effective flange are not established",gid)
+        else:
+            physical_row=make_check("beam.slab_physical_inventory","ACI 318-19 6.3.2;18.7.3.2;25.4",
+                                    int(all(s=="pass" for s in statuses)),1,"==",location=gid)
+        physical_row["details"].update(member_inventories=mat_inventory)
+        checks.append(physical_row)
         checks.append(make_check("beam.capacity_shear_section", "ACI 318-19 22.5.1.2 with 18.6.5.1 Ve",
                                  data["vs_required_kip"], data["vs_limit_kip"], "<=", "kip", gid))
         checks.append(make_check("beam.hoops_selected", "ACI 318-19 18.6.4.4 / 18.6.5", int(data["hoops"] is not None), 1, "==",
@@ -802,6 +955,34 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
                                  details={"kind": transition["kind"], "detail": transition["detail"], "items": transition["items"],
                                           "joints": transition["joints"]}))
     for type_id, kind in joint_types.items():
+        beam_physical=kind.get("physical_beam_context") or {}
+        if not beam_physical.get("beam_geometry_complete"):
+            row=not_evaluated("beam.joint_physical_detail","ACI 318-19 18.8.5;25.2--25.3","Actual beam bars are incomplete",type_id)
+        else:
+            row=make_check("beam.joint_physical_detail","ACI 318-19 18.8.5;25.2--25.3",
+                           int(beam_physical.get("status")=="pass"),1,"==",location=type_id,
+                           details={k:v for k,v in beam_physical.items() if k!="beam_segments"})
+        checks.append(row)
+        if kind['column_above_group'] is None:
+            roof=kind.get('physical_roof_anchorage') or {}
+            clause='ACI 318-19 18.8.3;18.8.5.1--18.8.5.4;25.4.9;25.4.4 and ER-0188 where headed bars are selected'
+            if roof.get('status') not in ('pass','fail'):
+                row=not_evaluated('column.roof_anchorage_physical_detail',clause,'Roof product or physical premises are incomplete',type_id)
+                row['details'].update(roof)
+            else:
+                row=make_check('column.roof_anchorage_physical_detail',clause,int(roof['status']=='pass'),1,'==',location=type_id,details=roof)
+            checks.append(row)
+        if kind['column_above_group'] is not None:
+            physical = kind.get('physical_transition') or {}
+            clause = 'ACI 318-19 10.7.4, 10.7.6.4, 18.7.5, 18.8.3, 20.5, 25.2--25.5; actual transition geometry'
+            if physical.get('status') not in ('pass', 'fail'):
+                row = not_evaluated('column.transition_physical_detail', clause,
+                                    'Physical transition premises are incomplete', type_id)
+                row['details'].update(physical)
+            else:
+                row = make_check('column.transition_physical_detail', clause,
+                                 int(physical['status'] == 'pass'), 1, '==', location=type_id, details=physical)
+            checks.append(row)
         for axis, item in kind["shear"].items():
             checks.append(make_check("joint.shear_screen", item["clause"], item["vj_kip"], item["phi_vn_kip"], "<=", "kip", item["id"],
                                      details={"rule": item["rule"], "beam_moment_basis": item["beam_moment_basis"]}))
@@ -844,9 +1025,18 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
     # Splices after the gravity branches: a gravity group under 18.14.3.3 takes the special splice rules (18.14.3.3(a)).
     branches = {gid: row.get("branch") for gid, row in ((gravity or {}).get("groups") or {}).items()}
     splices = group_splices(state, beam_hoops={gid: (data.get("hoops") or {}).get("spacing_in") for gid, data in beams.items()},
-                            gravity_branches=branches)
+                            gravity_branches=branches, transitions=transitions,
+                            column_hoops={gid: data.get("hoops") for gid, data in columns.items()})
     for gid, splice in splices.items():
         checks.append(splice_location_check(gid, splice))
+        physical=splice.get("physical_detail") or {}
+        clause="ACI 318-19 18.2.7;18.6.3.3;18.7.4.4;25.2--25.5; actual splice inventory"
+        if physical.get("status") not in ("pass","fail"):
+            row=not_evaluated("detailing.splice_physical_detail",clause,"Splice physical evidence is incomplete",gid)
+            row["details"].update(physical)
+        else:
+            row=make_check("detailing.splice_physical_detail",clause,int(physical["status"]=="pass"),1,"==",location=gid,details=physical)
+        checks.append(row)
     couplers = transition_splices(state, transitions, branches)
     for key, splice in couplers.items():
         check = splice_location_check(key, splice)
@@ -866,7 +1056,7 @@ def build_group_capacity_design(actions, expected_ids, cfg, transfers=None, stat
             "slab_eligibility_reason_code": scwb["slab_eligibility"].get("reason_code"),
             "beams": beams, "columns": columns, "beam_strengths": strengths, "joint_types": joint_types,
             "transitions": transitions, "scwb": scwb, "splices": splices, "transition_splices": couplers, "transverse": hoops,
-            "gravity_frame": gravity,
+            "gravity_frame": gravity,"beam_torsion":torsion,"common_torsion_input":common_torsion,
             "joint_rules": {type_id: {axis: item["rule"] for axis, item in kind["shear"].items()} for type_id, kind in joint_types.items()},
             "joint_evidence": {"beam_capacity_shear": [m for data in beams.values() for m in data["governing_members"]],
                                "joint_shear": [item for kind in joint_types.values() for item in kind["shear"].values()]},
@@ -908,7 +1098,7 @@ def special_splice_rules(state, gid, gravity_branches=None):
     return (gravity_branches or {}).get(gid) != BRANCH_WITHIN_STRENGTH
 
 
-def group_splices(state, beam_hoops=None, gravity_branches=None):
+def group_splices(state, beam_hoops=None, gravity_branches=None, transitions=None, column_hoops=None):
     """Splice type, permitted interval and proposed location of every group's own bars (18.6.3.3, 18.7.4.4, 25.5, 18.2.7).
 
     A Type 2 mechanical splice is selected when the lap does not fit or the bar is too large to lap (25.5.1.1); the
@@ -970,7 +1160,149 @@ def group_splices(state, beam_hoops=None, gravity_branches=None):
                                            "Type 2 mechanical splice (ACI 318-19 18.2.7; Class S in 318-25): " + reason),
                            "placement": splice_placement("beam", clear, design.h_in, sp.FY_KSI, kind,
                                                          max(lap_top, lap_bot), db, sfrs)}
+    from Design import SMRF_Conventional_Detail as conventional
+    detail_conventional=conventional.active()
+    if not detail_conventional:
+        from Design.SMRF_Splice_Physical import group_beam_lanes,verify_beam_mechanical_splice
+        from Design.SMRF_Transition_Physical import verify_mechanical_splice
+        lanes=group_beam_lanes(state)
+    # A changing-band transition already declares the starts/continuations
+    # of the upper bars. It owns that upper member's splice detail; a second
+    # nominal group splice at the same elevation would duplicate the bars.
+    managed={}
+    by_joint={e["id"]:e for e in joint_inventory(state)["joints"]}
+    for key,t in (transitions or {}).items():
+        if t.get("kind")=="same_cage":
+            continue
+        for context in (t.get("contexts") or {key:t}).values():
+            for joint in context.get("joints",[]):
+                member=by_joint[joint]["above"]
+                managed[member.member_tag]=(key,context)
+    memo={}
+    for gid,record in result.items():
+        design=state.designs[gid]
+        contexts=[]
+        for tag in state.groups[gid]["member_tags"]:
+            if tag in managed:
+                key,transition=managed[tag]
+                detail=transition.get("physical_detail") or {"status":"not_evaluated"}
+                clear=column_clear_heights(state.member(tag))["physical"]
+                selected=(transition.get("splice") or {}).get("splice_type","none")
+                placement=splice_placement("column",clear,max(design.b_in,design.h_in),sp.FY_KSI,
+                    "class_B_lap_center_half" if selected.startswith("class_B") else "type_2_mechanical_18.2.7",
+                    (transition.get("splice") or {}).get("class_b_lap_in"),sp.rebar_diameter(design.bar_size),
+                    special_splice_rules(state,gid,gravity_branches))
+                if selected=="none":
+                    placement.update(legal_placement=True,splice_length_in=0.,proposed_interval_in=[clear/2,clear/2],
+                                     length_basis="No splice: the transition declares continuous or terminated bars.")
+                else:
+                    placement=_actual_device_placement(placement,detail.get("mechanical_splice_detail") or {})
+                contexts.append({"member_tag":tag,"owner":"column_transition","transition_key":key,
+                                 "transition_type_id":transition.get("type_id"),"physical_detail":detail,
+                                 "clear_length_in":clear,"placement":placement,"splice_type":selected,"quantity_owner":"transition_context"})
+                continue
+            member=state.member(tag)
+            clear=column_clear_heights(member)["physical"] if design.is_column else mp.beam_clear_span_in(member)
+            spacing=(beam_hoops or {}).get(gid) or design.stirrup_spacing_in
+            hoops_record=(column_hoops or {}).get(gid) or {}
+            shear_spacing=(hoops_record.get("spacing_from_shear_beyond_l0_in",hoops_record.get("spacing_from_shear_in"))
+                           if design.is_column else None)
+            cache=(design,clear,spacing,shear_spacing)
+            if not design.is_column:
+                cache+=(gid,)
+            if cache not in memo:
+                if detail_conventional:
+                    detail=_conventional_member_splice(design,gid,record,clear,spacing,shear_spacing=shear_spacing)
+                elif design.is_column:
+                    detail=verify_mechanical_splice(design,fy_ksi=sp.FY_KSI,clear_cover_in=sp.COL_CLEAR_COVER_IN,
+                        clear_height_in=clear,spacing_in=spacing,specification=sp.REINFORCEMENT_SPECIFICATION,
+                        aggregate_in=sp.AGGREGATE_MAX_SIZE_IN)
+                else:
+                    lane=lanes[gid]
+                    if lane["status"]!="pass":
+                        detail={"status":lane["status"],"reason":"No complete common straight beam-lane inventory.","lane_inventory":lane}
+                    else:
+                        detail=verify_beam_mechanical_splice(design,lane["coordinates"],clear_span_in=clear,
+                            spacing_in=spacing,fy_ksi=sp.FY_KSI,specification=sp.REINFORCEMENT_SPECIFICATION,
+                            clear_cover_in=sp.BEAM_CLEAR_COVER_IN,aggregate_in=sp.AGGREGATE_MAX_SIZE_IN)
+                memo[cache]=detail
+            detail=memo[cache]
+            if detail_conventional and detail.get("splice")=="class_b_lap":
+                lap_kind="class_B_lap_center_half" if design.is_column else "class_B_lap_outside_hinge_zones"
+                lap_length=record["class_b_lap_in"] if design.is_column else max(record["class_b_lap_top_in"],record["class_b_lap_bottom_in"])
+                contexts.append({"member_tag":tag,"owner":"ordinary_member_splice","clear_length_in":clear,"physical_detail":detail,
+                                 "placement":splice_placement("column" if design.is_column else "beam",clear,
+                                     max(design.b_in,design.h_in) if design.is_column else design.h_in,sp.FY_KSI,lap_kind,lap_length,
+                                     sp.rebar_diameter(design.bar_size),special_splice_rules(state,gid,gravity_branches)),
+                                 "splice_type":lap_kind,"quantity_owner":"ordinary_member_splice"})
+                continue
+            placement=_actual_device_placement(splice_placement("column" if design.is_column else "beam",clear,
+                max(design.b_in,design.h_in) if design.is_column else design.h_in,sp.FY_KSI,"type_2_mechanical_18.2.7",None,
+                sp.rebar_diameter(design.bar_size),special_splice_rules(state,gid,gravity_branches)),detail)
+            contexts.append({"member_tag":tag,"owner":"ordinary_member_splice","clear_length_in":clear,
+                             "physical_detail":detail,"placement":placement,"splice_type":"type_2_mechanical_18.2.7",
+                             "quantity_owner":"ordinary_member_splice"})
+        statuses=[v["physical_detail"].get("status","not_evaluated") for v in contexts]
+        status="fail" if "fail" in statuses else "not_evaluated" if "not_evaluated" in statuses else "pass"
+        record["lap_alternative"]=dict(record)
+        kinds={v["splice_type"] for v in contexts}
+        record["splice_type"]=next(iter(kinds)) if len(kinds)==1 else "mixed_actual_member_contexts"
+        record["splice_rule"]=("Class B lap where the lap groups keep the 25.2.1 spacing, a Type 2 coupler otherwise; transition-managed members retain their declared transition paths." if detail_conventional else
+                              "Explicit documented coaxial Type2 device with actual stagger and local transverse steel; transition-managed members retain their declared transition paths.")
+        governing=min(contexts,key=lambda v:(v["placement"]["legal_placement"],v["clear_length_in"]))
+        record["placement"]={**governing["placement"],"governing_member_tag":governing["member_tag"],
+                              "all_member_placements_checked":len(contexts)}
+        record["member_contexts"]=contexts
+        record["physical_detail"]={"status":status,"method":"actual_member_splice_inventory_v1",
+                                    "members":len(contexts),"failed_members":[v["member_tag"] for v in contexts if v["physical_detail"].get("status")=="fail"],
+                                    "unknown_members":[v["member_tag"] for v in contexts if v["physical_detail"].get("status") not in ("pass","fail")],
+                                    "context_owners":{str(v["member_tag"]):v["owner"] for v in contexts}}
     return result
+
+
+def _conventional_member_splice(design,gid,record,clear,spacing,shear_spacing=None):
+    """A member's own splice on the conventional basis: a lap where it fits and keeps its spacing, otherwise a coupler.
+    A lap in a special-frame beam takes hoops at min(d/4, 4 in) over its length (18.6.3.3); where the member's hoops are wider,
+    the extra sets over the lap are counted in the quantities."""
+    from Design import SMRF_Conventional_Detail as conventional
+    if design.is_column:
+        lap,zone,rows=record["class_b_lap_in"],record["center_half_clear_height_in"],None
+        cover,outside=sp.COL_CLEAR_COVER_IN,min(6.,(5. if sp.FY_KSI>=80. else 6.)*sp.rebar_diameter(design.bar_size))
+        # Beyond l0 (18.7.5.1) the hoops need 18.7.5.5: s <= min(6 db, 6 in) unless shear (18.7.6) asks for less. The
+        # coupler sits between the two l0 zones and may take a local gap within those limits (2026-11-07).
+        l0=max(design.b_in,design.h_in,clear/6.,18.)
+        local_gap=None if shear_spacing is None else {
+            "limit_in":min(outside,float(shear_spacing)),"zone_in":clear-2.*l0,"l0_in":l0,"shear_spacing_in":shear_spacing,
+            "basis":"18.7.5.5 beyond l0, no larger than the shear spacing of the selected hoops with Vc per 22.5.5.1 "
+                    "(18.7.6.2.1 applies over l0 only)"}
+    else:
+        lap,zone,rows=max(record["class_b_lap_top_in"],record["class_b_lap_bottom_in"]),record["available_between_hinge_zones_in"],bar_layers.group_rows(gid)
+        d=design.h_in-max(rows["top"]["centroid_in"],rows["bottom"]["centroid_in"])
+        cover,outside=sp.BEAM_CLEAR_COVER_IN,d/2.
+        local_gap=None
+    detail=conventional.lap_or_device(design,lap_in=lap,zone_in=zone,rows=rows,clear_cover_in=cover,spacing_in=spacing,
+        fy_ksi=sp.FY_KSI,specification=sp.REINFORCEMENT_SPECIFICATION,aggregate_in=sp.AGGREGATE_MAX_SIZE_IN,outside_limit_in=outside,
+        local_gap=local_gap)
+    enclosure=(record.get("lap_enclosure") or {})
+    if detail.get("splice")=="class_b_lap" and enclosure.get("applies") and not enclosure.get("satisfied"):
+        required=enclosure["required_spacing_in"]
+        extra=max(0,math.ceil(lap/required)-math.ceil(lap/max(spacing,1e-9)))
+        detail["additional_hoop_sets_over_lap"]=extra
+        detail["additional_transverse_steel_volume_in3"]=extra*conventional.hoop_set_length_in(design)*sp.rebar_area(design.stirrup_bar_size)
+    return detail
+
+
+def _actual_device_placement(placement,detail):
+    """Replace the preliminary 8db envelope by the actual staggered bodies."""
+    bodies=detail.get("bodies") or []
+    if not bodies:
+        return placement
+    interval=[min(b["z_interval_in"][0] for b in bodies),max(b["z_interval_in"][1] for b in bodies)]
+    permitted=placement["permitted_interval_in"]
+    return {**placement,"proposed_interval_in":interval,"splice_length_in":interval[1]-interval[0],
+            "legal_placement":interval[0]>=permitted[0]-1e-9 and interval[1]<=permitted[1]+1e-9,
+            "length_basis":"Actual published product bodies including the explicit axial stagger.",
+            "product_qualification":detail.get("product")}
 
 
 def transition_splices(state, transitions, gravity_branches=None):
@@ -992,6 +1324,15 @@ def transition_splices(state, transitions, gravity_branches=None):
                        "placement": splice_placement("column", clear, max(upper.b_in, upper.h_in), sp.FY_KSI,
                                                      "type_2_mechanical_18.2.7", None, db,
                                                      special_splice_rules(state, upper_gid, gravity_branches))}
+        result[key]["contexts"]={name:{"joints":item.get("joints",[]),"physical_detail":
+                                      (item.get("physical_detail") or {}).get("mechanical_splice_detail",{"status":"not_evaluated"})}
+                                 for name,item in (transition.get("contexts") or {key:transition}).items()}
+        for context in result[key]["contexts"].values():
+            context["placement"]=_actual_device_placement(result[key]["placement"],context["physical_detail"])
+        if result[key]["contexts"]:
+            result[key]["placement"]=min((v["placement"] for v in result[key]["contexts"].values()),key=lambda p:p["legal_placement"])
+        statuses=[v["physical_detail"].get("status") for v in result[key]["contexts"].values()]
+        result[key]["physical_detail"]={"status":"fail" if "fail" in statuses else "pass" if statuses and all(s=="pass" for s in statuses) else "not_evaluated"}
     return result
 
 

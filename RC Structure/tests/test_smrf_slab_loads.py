@@ -46,15 +46,43 @@ class SlabLoadTests(unittest.TestCase):
 
     def test_hand_computed_drop_clearspan_and_column_weights(self):
         unit_weight = 0.150 / 1728
-        column = unit_weight * 24 * 30 * (144 - 8)
+        columns={}
+        for i,j in self.nodes():
+            cx,cy=i*240.,j*300.
+            ox=min(cx+15,489)-max(cx-15,-9)
+            oy=min(cy+12,909)-max(cy-12,-9)
+            columns[i,j]=unit_weight*(24*30*144-ox*oy*8)
         beam_x = unit_weight * 18 * (28 - 8) * (240 - 30)
         beam_y = unit_weight * 18 * (28 - 8) * (300 - 24)
-        self.assertAlmostEqual(sp.col_self_weight_kip_per_in() * 144, column)
+        for (i,j),column in columns.items():self.assertAlmostEqual(sp.col_self_weight_kip_per_in(i,j)*144,column)
         self.assertAlmostEqual(sp.beam_self_weight_kip_per_in("x") * 240, beam_x)
         self.assertAlmostEqual(sp.beam_self_weight_kip_per_in("y") * 300, beam_y)
-        self.assertAlmostEqual(sp.total_structural_self_weight_per_floor(), 12 * column + 8 * beam_x + 9 * beam_y)
-        self.assertAlmostEqual(sp.node_structural_self_weight_kip(0, 0), column + (beam_x + beam_y) / 2)
-        self.assertAlmostEqual(sp.node_structural_self_weight_kip(1, 1), column + beam_x + beam_y)
+        self.assertAlmostEqual(sp.total_structural_self_weight_per_floor(),sum(columns.values())+8*beam_x+9*beam_y)
+        for i,j in ((0,0),(1,1)):
+            self.assertAlmostEqual(sp.node_structural_self_weight_kip(i,j),self.independent_member_projection(i,j))
+
+    def independent_member_projection(self,i,j):
+        """Independent3point quadrature of physical prisms against grid hats."""
+        gauss=((-math.sqrt(3/5),5/9),(0.,8/9),(math.sqrt(3/5),5/9))
+        def integral(low,high,length,count,node):
+            cuts=[low]+[k*length for k in range(count+1) if low<k*length<high]+[high];answer=0.
+            for a,b in zip(cuts[:-1],cuts[1:]):
+                for xi,w in gauss:
+                    x=(a+b)/2+xi*(b-a)/2;cell=max(0,min(count-1,math.floor(x/length)));r=(x-cell*length)/length
+                    shape=(1-r) if node==cell else r if node==cell+1 else 0.
+                    answer+=w*(b-a)/2*shape
+            return answer
+        def volume(x0,x1,y0,y1,depth):return depth*integral(x0,x1,240.,2,i)*integral(y0,y1,300.,3,j)
+        total=0.
+        for ci,cj in self.nodes():
+            x,y=ci*240.,cj*300.
+            total+=volume(x-15,x+15,y-12,y+12,144)
+            total-=volume(max(x-15,-9),min(x+15,489),max(y-12,-9),min(y+12,909),8)
+        for cj in range(4):
+            for ci in range(2):total+=volume(ci*240+15,(ci+1)*240-15,cj*300-9,cj*300+9,20)
+        for ci in range(3):
+            for cj in range(3):total+=volume(ci*240-9,ci*240+9,cj*300+12,(cj+1)*300-12,20)
+        return total*.150/1728
 
     def test_member_mass_and_elf_conservation(self):
         sp.SEISMIC_LIVE_LOAD_FRACTION = 0.25
@@ -63,7 +91,7 @@ class SlabLoadTests(unittest.TestCase):
         nodal_weight = sum(sp.node_seismic_mass(i, j) * sp.G for i, j in self.nodes())
         self.assertAlmostEqual(nodal_weight, sp.total_floor_seismic_weight())
         self.assertEqual(seismic_weight_per_floor(), [sp.total_floor_seismic_weight()] * 4)
-        area_sqft = 240 * 2 * 300 * 3 / 144
+        area_sqft = (240*2+18)*(300*3+18)/144
         self.assertAlmostEqual(nodal_weight, (0.15 + 0.25 * 0.05) * area_sqft
                                + sp.total_structural_self_weight_per_floor())
 
@@ -166,7 +194,9 @@ class SlabLoadTests(unittest.TestCase):
                                result["column_self_weight_per_floor_kip"]
                                + result["beam_x_self_weight_per_floor_kip"]
                                + result["beam_y_self_weight_per_floor_kip"])
-        self.assertIn("not a physical quantity takeoff", result["load_accounting_basis"])
+        self.assertIn("outer perimeter beam faces", result["load_accounting_basis"])
+        self.assertIn("only the actual column/slab overlap", result["load_accounting_basis"])
+        self.assertAlmostEqual(result['floor_area_sqft'],498*918/144)
         self.assertEqual(result["total_floor_seismic_weight_kip"], sp.total_floor_seismic_weight())
 
     def test_elastic_model_base_reactions_balance_slab_aware_gravity(self):

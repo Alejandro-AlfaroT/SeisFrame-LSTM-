@@ -1,0 +1,372 @@
+{
+  "schema": "seisframe_day1_acceptance_contract_v1",
+  "prepared_local": "2026-10-20T23:26:26.381678-07:00",
+  "purpose": "Day1 repository/SSD reconciliation and October31 production modeling scope; documentation contract, not an implemented validator or release certificate.",
+  "source_baseline": {
+    "repository": "C:\\Users\\andro\\Documents\\GitHub\\StructGNN-OpenSeesPy-Integrated",
+    "branch": "Verification1",
+    "commit": "d2f6ed2aaa917e4001c77d0cf279a213c328a610",
+    "live_source_manifest": "live_rc_source_at_audit.sha256",
+    "live_source_manifest_sha256": "9dedc38dd38064d6e1d92fc474f290e710a53421971bb144a4ae1d570bf6d10a",
+    "ssd_handoff_manifest_sha256": "6162f293767c434c96321c32f5eeab6c0c7b00c7ff3d9ca57c7747c99c758308"
+  },
+  "user_decisions": {
+    "scope": "Flexural-response dataset; validate its limits.",
+    "scope_confirmed": true,
+    "eligible_structures": 500,
+    "distinct_ground_motion_pairs_per_structure": 3,
+    "interpretation": "Each ground motion is one two-component horizontal pair, consistent with prior biaxial plan.",
+    "planned_nonlinear_jobs": 1500,
+    "launch_target": "2026-10-31",
+    "shards": 8
+  },
+  "production_status": {
+    "released": false,
+    "generation_release_ready": false,
+    "criteria_status": "Predeclared project targets for RA/professor review, not code limits; no review approval claimed.",
+    "current_eligible_verified_36in_structures": 0,
+    "eligible_36in_count_basis": "No actual current36in result found on SSD; this is verified inventory, not a claim no other machine has run."
+  },
+  "population": {
+    "bay_and_story_height_increment_ft": 0.5,
+    "risk_category": "III",
+    "importance_factor": 1.25,
+    "num_bay_x": [
+      3,
+      7
+    ],
+    "num_bay_y": [
+      3,
+      7
+    ],
+    "num_floor": [
+      4,
+      9
+    ],
+    "story_height_ft": [
+      12.0,
+      18.0
+    ],
+    "bay_x_width_ft": [
+      18.0,
+      30.0
+    ],
+    "bay_y_width_ft": [
+      18.0,
+      30.0
+    ],
+    "max_height_to_width_ratio": 2.25,
+    "site_class": "C",
+    "population_basis": "v2_bays3_7_18_30ft_stories_12_18ft_half_foot_steps_aspect_le_2p25_sdc_c_d_20261018"
+  },
+  "verification_package_policy": {
+    "population_bays": [
+      3,
+      7
+    ],
+    "cases": 100,
+    "shards": 8,
+    "seed": 20261019,
+    "stages": [
+      "design",
+      "gravity_modal"
+    ],
+    "grouping": "system_three_story_v1",
+    "layout_ladder": [
+      "perimeter",
+      "perimeter_core",
+      "perimeter_core_lines"
+    ],
+    "layout_column_caps_in": {
+      "perimeter": 36,
+      "perimeter_core": 36,
+      "perimeter_core_lines": 36
+    },
+    "story_bands": 3,
+    "no_upward_width_or_depth_growth": true,
+    "grade80_height_and_limit_policies": true,
+    "max_feasibility_trials": 16,
+    "max_reduction_trials": 6,
+    "budget_basis": "per grade within each layout",
+    "shell_budget": 130000,
+    "probe_date": "2026-10-19",
+    "default_workers_per_shard": 1,
+    "maximum_workers_per_shard": 4,
+    "scope": "100 new sampled design attempts, not 100 guaranteed passing or production-accepted designs.",
+    "analyses_launched": 0,
+    "policy_revision": "36-inch columns for every layout, 2026-10-19"
+  },
+  "model_scope": {
+    "include": [
+      "3D flexural member response with deterioration supported by evidence",
+      "Gravity and column P-Delta",
+      "Rigid centerline joints and rigid diaphragm, fixed base",
+      "Two horizontal ground-motion components applied simultaneously",
+      "All installed frames participate in NTHA",
+      "Mandatory joint, shear, anchorage, confinement and detailing screening"
+    ],
+    "exclude": [
+      "Explicit joint-panel damage/deformation",
+      "Explicit anchorage-slip springs",
+      "Nonlinear member shear failure",
+      "Soil/foundation flexibility",
+      "Flexible-diaphragm response",
+      "Changing axial-load coupled P-M-M in current column formulation",
+      "Physical collapse labels inferred solely from solver failure"
+    ],
+    "deformation_ownership": "Member hinge retains empirical slip share until a separately calibrated face interface explicitly owns it; do not double count or silently remove it.",
+    "applicability_rule": "Any member family, material, axial/confinement state or response outside the reviewed domain prevents accepted in-scope labeling. Preserve evidence and mark out_of_scope or unresolved."
+  },
+  "targets": {
+    "primary": [
+      "roof displacement X/Y time histories"
+    ],
+    "audit_and_secondary": [
+      "all-floor displacements/drifts and accelerations with relative/absolute convention",
+      "base shear and reactions",
+      "member end forces",
+      "synchronized hinge moment/rotation and physical direction labels",
+      "final sections, reinforcement, materials, layout, qualification and runtime"
+    ],
+    "claim": "Emulation of the reviewed model within its validated domain; no unvalidated joint damage/collapse prediction."
+  },
+  "production_manifest_pending": {
+    "motion_pool": "82 pairs catalogued;54 meet existing15000point policy,108processedfiles present; waveform/scale validation pending.",
+    "pair_assignment": "Three distinct pair IDs per eligible structure; reproducible assignment and seed to freeze before pilot.",
+    "intensity_policy": "Not yet selected. Define objective physical intensity measure, target spectrum/hazard or fixed intensity strata, reference period/range, bounds and actual scale factors before pilot. No response-target tuning of each production case.",
+    "count_rule": "500 is eligible structures, not attempted searches. Preserve failures and replenish deterministically under unchanged population; no forced acceptance.",
+    "success_rule": "1500 is scheduled job target, not guaranteed1500 accepted histories. Report valid, failed, censored and out-of-scope counts without replacing difficult records silently.",
+    "splits": "Freeze disjoint structure and motion-pair pools for independent generalization testing before assignments; no leakage through repeated pairs/structure. Train-only normalization.",
+    "shard_plan": "Assign whole structures to shards:4shards63structures/189jobs and4shards62structures/186jobs. Final labels/IDs must be unique."
+  },
+  "family_matrix": [
+    {
+      "family": "Beam rectangular / Grade 60",
+      "current_basis": "Regression + mechanics basis available",
+      "required_evidence": "Independent cyclic holdouts; deformation and energy mapping",
+      "status": "BLOCKED"
+    },
+    {
+      "family": "Beam T / Grade 60",
+      "current_basis": "Slab-aware strength; capping transfer unresolved",
+      "required_evidence": "Slab reinforcement/asymmetry and directional cap evidence",
+      "status": "BLOCKED"
+    },
+    {
+      "family": "Beam L / Grade 60",
+      "current_basis": "Beam103 12x24 in diagnostic exists",
+      "required_evidence": "Directional test applicability; no promotion of 0.030-rad trial",
+      "status": "BLOCKED"
+    },
+    {
+      "family": "Beam rectangular / Grade 80",
+      "current_basis": "Design implementation exists",
+      "required_evidence": "Grade80 strength, cap and cyclic evidence",
+      "status": "BLOCKED"
+    },
+    {
+      "family": "Beam T / Grade 80",
+      "current_basis": "Design implementation exists",
+      "required_evidence": "Grade80 plus slab/branch evidence or justified transfer",
+      "status": "BLOCKED"
+    },
+    {
+      "family": "Beam L / Grade 80",
+      "current_basis": "Design implementation exists",
+      "required_evidence": "Grade80 plus edge-beam branch evidence or justified transfer",
+      "status": "BLOCKED"
+    },
+    {
+      "family": "Column rectangular / Grade 60",
+      "current_basis": "Haselton basis; fixed axial / independent axes",
+      "required_evidence": "Confinement/axial domain, cyclic holdouts, P-M-M sensitivity",
+      "status": "BLOCKED"
+    },
+    {
+      "family": "Column rectangular / Grade 80",
+      "current_basis": "Design implementation exists",
+      "required_evidence": "Grade80 and axial/confinement domain; P-M-M sensitivity",
+      "status": "BLOCKED"
+    }
+  ],
+  "proposed_metrics": [
+    {
+      "id": "C01",
+      "observable": "Yield and peak force or moment, each direction",
+      "limit": 0.1,
+      "metric": "abs(pred-observed)/abs(observed)",
+      "condition": "Same declared extraction rule; use actual measured section/material/fixture and matching deformation coordinate."
+    },
+    {
+      "id": "C02",
+      "observable": "Yield and capping rotation, each direction",
+      "limit": 0.2,
+      "metric": "abs(pred-observed)/abs(observed)",
+      "condition": "Only resolved, measurable features. Unobserved peak or censored cap is a bound, not a passing point estimate."
+    },
+    {
+      "id": "C03",
+      "observable": "Initial/secant and unloading stiffness",
+      "limit": 0.2,
+      "metric": "abs(pred-observed)/abs(observed)",
+      "condition": "Prespecify common displacement intervals and unloading segments; exclude instrument-invalid intervals only with documented masks."
+    },
+    {
+      "id": "C04",
+      "observable": "Per-cycle and cumulative hysteretic energy",
+      "limit": 0.2,
+      "metric": "abs(E_pred-E_obs)/abs(E_obs)",
+      "condition": "For per-cycle E_obs >= max(measured noise energy,0.01*F_ref*u_ref); smaller loops use abs energy error/(F_ref*u_ref)<=0.01. Apply analogous noise floor to cumulative energy."
+    },
+    {
+      "id": "C05",
+      "observable": "Complete force history",
+      "limit": 0.2,
+      "metric": "sqrt(mean((F_pred-F_obs)^2))/max(abs(F_obs))",
+      "condition": "Matched full protocol and sampling; report each direction, all valid cycles, and holdout specimens separately."
+    },
+    {
+      "id": "N01",
+      "observable": "dt versus dt/2 peak drift, floor acceleration, base shear",
+      "limit": 0.05,
+      "metric": "abs(Q_dt-Q_half)/max(abs(Q_half),Q_floor)",
+      "normalization_floors": {
+        "drift_ratio": 1e-05,
+        "floor_acceleration_g": 0.0001,
+        "base_shear_fraction_of_total_gravity_weight": 0.0001
+      },
+      "condition": "Each response channel of each representative full-duration pilot; acceleration at full rate with identical absolute/relative convention. Floors are proposed project normalization choices, not physical detection or capacity limits."
+    },
+    {
+      "id": "N02",
+      "observable": "Residual interstory drift",
+      "limit": 0.001,
+      "metric": "absolute difference in drift ratio",
+      "condition": "Common zero-input settling tail >=max(20 s,10*T1); signed mean over final max(5 s,2*T1). When abs(reference)>=0.005, additionally require relative difference<=0.10. Unsettled tail is unresolved."
+    },
+    {
+      "id": "N03",
+      "observable": "Elastic member flexibility / periods in analytical fixture",
+      "limit": 0.01,
+      "metric": "relative error against independently calculated target",
+      "condition": "Model-form matched fixture; test both bending axes and n=10/20 alternatives before any change. Not an empirical period formula target."
+    }
+  ],
+  "calibration_rules": [
+    "Freeze extraction and metrics before fitting; score independent holdout specimens/protocols separately.",
+    "A domain needs an independent holdout or an explicitly supported transfer with independent evidence; matching nominal steel grade alone is insufficient.",
+    "Capping/postcap/residual/ultimate need observed evidence or a bounded response-domain restriction; terminated tests are not failure capacities.",
+    "Do not score synthetic recorder replay as experimental validation.",
+    "If uncertainty exceeds a proposed tolerance, revise the criterion prospectively with rationale and reviewer decision; retain original results.",
+    "A/K deterioration suppression and any pinching omission require explicit reviewed support.",
+    "Numerical nonfinite material behavior must be resolved or excluded from validated domain; never relabeled physical collapse."
+  ],
+  "gates": [
+    "source/profile/design/motion identity complete",
+    "all required design checks pass, no fail or not_evaluated and no PROBE substitutes",
+    "family and response-domain applicability reviewed",
+    "component holdouts meet predeclared criteria",
+    "numerical pilot and damping assessment meet reviewed limits",
+    "full duration and finite histories; failed/truncated remain separate",
+    "schema and real surrogate ingestion pass",
+    "RA/professor review recorded and explicit release decision"
+  ],
+  "existing_tolerances": [
+    {
+      "name": "NTHA NormDispIncr primary/fallback",
+      "value": "1e-6/25 iterations; 1e-4/50 iterations; last recovery dt/10",
+      "reference": "RC Structure/Analysis/NTHA.py:79",
+      "caveat": "Solver convergence settings, not experimental accuracy."
+    },
+    {
+      "name": "PROBE slab final-pair refinement",
+      "value": "moment and shear 0.05;130000 shells;4 levels+at most2local extensions",
+      "reference": "RC Structure/Design/Config.py:494",
+      "caveat": "Declared investigation screen, not an ACI limit nor production approval."
+    },
+    {
+      "name": "Full-rate diagnostic recorder comparison",
+      "value": "relative1e-9;moment absolute1e-7 kip-in;rotation absolute1e-11 rad;time absolute1e-7 sec",
+      "reference": "RC Structure/Data_Generation/Run_Weighted_Seismic_Calibration.py:41",
+      "caveat": "Float64 export consistency, not physics accuracy."
+    },
+    {
+      "name": "Pushover diagnostic equilibrium",
+      "value": "1e-4 kip absolute;1e-4 joint moment relative;gravity1e-6 relative",
+      "reference": "RC Structure/Analysis/Pushover_Diagnostic.py:125",
+      "caveat": "Existing diagnostic defaults only."
+    },
+    {
+      "name": "Current inelastic screen",
+      "value": "interstory0.010 and roof0.00775 and plastic_rotation/theta_p>=0.25 and yielded fraction>=0.10",
+      "reference": "RC Structure/Data_Generation/Hybrid_Exporter.py:235",
+      "caveat": "Dataset classification convention, not physical material validation."
+    },
+    {
+      "name": "Current collapse/divergence screening",
+      "value": "collapse>=0.10 interstory or failed solver with>=0.010;physical-drift filtering0.20;damage proxy ceiling20",
+      "reference": "RC Structure/Data_Generation/Hybrid_Exporter.py:239",
+      "caveat": "Heuristic screen; numerical failure is not established physical collapse. Production must retain failed/out-of-domain evidence, not clean it into accepted labels."
+    }
+  ],
+  "work_items": [
+    {
+      "gate": "G0 / before school launch",
+      "action": "Rebuild a new 36-inch package revision with consistent plan, runtime policy, README and hashes. Preserve sampled geometry and old results.",
+      "files": "Design/Screening_Manifest.py; staged plans and run_policy.json",
+      "current_state": "Current 302-file package intact; contradictory plan metadata remains."
+    },
+    {
+      "gate": "G1 / Oct22-25",
+      "action": "Selectively port directional capacity/sign recorder changes; reconcile slab/bar-row mapping. Validate stiffness partition and energy adapter with independent experimental holdouts.",
+      "files": "Model/IMK_Calibration.py; Model/IMK_Hinges.py; Model/IMK_Materials.py",
+      "current_state": "47 SSD implementation/config differences; no bulk merge."
+    },
+    {
+      "gate": "G2 / by Oct26",
+      "action": "Close regularity/transition/joint checks and human review evidence; audit final grouped designs under the chosen profile.",
+      "files": "Design/SMRF_Qualification.py; Design/Grouped_Record.py",
+      "current_state": "Returned V6 seven designs have open qualification; zero accepted."
+    },
+    {
+      "gate": "G3 / by Oct27",
+      "action": "Bridge V6 grouped_design.json and reviewed profile into NTHA planning/validation. Freeze 500-structure manifest, 3 pairs each, scales, units and splits.",
+      "files": "Data_Generation/Run_Weighted_Seismic_Calibration.py; Analysis/Fixed_Design_Diagnostics.py",
+      "current_state": "Current controller expects legacy design.json/V2 research profile."
+    },
+    {
+      "gate": "G4 / by Oct28",
+      "action": "Complete full-duration 6-12-job numerical pilot, bounds checks and real exporter-to-loader smoke.",
+      "files": "Analysis/NTHA.py; Data_Generation/Hybrid_Exporter.py; RC Hybrid Surrogate Model/rc_hybrid_surrogate",
+      "current_state": "Current loader uses roof X/Y; richer outputs need explicit contracts."
+    },
+    {
+      "gate": "G5 / Oct29-30",
+      "action": "Rehearse eight shards, review evidence with RA/professor, freeze source/runtime/manifest and record release decision.",
+      "files": "New reviewed release profile and immutable launch manifest",
+      "current_state": "No release flag change based on this document."
+    }
+  ],
+  "review": {
+    "reviewer": null,
+    "review_date": null,
+    "scope_user_confirmed": true,
+    "numeric_targets_independently_reviewed": false,
+    "unresolved": [
+      "Motion/intensity/seed/split manifest",
+      "Experimental applicability for all included families including Grade80",
+      "Column fixed-axial/biaxial and rigid-joint response limits",
+      "Damping basis and sensitivity acceptance",
+      "Validated physical failure versus numerical failure taxonomy"
+    ]
+  },
+  "evidence_files": [
+    "handoff_reconciliation_assessment.json",
+    "handoff_reconciliation.json",
+    "live_rc_source_at_audit.sha256",
+    "school_inventory.json",
+    "scope_matrix.json"
+  ],
+  "source_code_modified": false,
+  "structural_analyses_run": false
+}

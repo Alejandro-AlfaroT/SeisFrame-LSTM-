@@ -1,0 +1,1400 @@
+{
+  "checked_utc": "2026-10-21T06:16:53.130068+00:00",
+  "scope": "Read-only inventory and hashes; no analysis reruns; no SSD mutations.",
+  "ssd_roots": [
+    "SeisFrame_V4_Design100_2026-10-12",
+    "SFCalV3_D1",
+    "SFCalV3_D2",
+    "SFCalV3_D4",
+    "SFCalV3_D3",
+    "SeisFrameRuns",
+    "SeisFrame_V5_Design100_2026-10-13",
+    "SeisFrame_Seismic75_V5_2026-10-14",
+    "SFCalV5B_D8",
+    "SFCalV5_D2",
+    "SFCalV5_D1",
+    "SFCalV5_D5",
+    "SFCalV5_D6",
+    "SFCalV5_D7",
+    "SeisFrame_DesignVerification100_8Shards_20261019",
+    "SeisFrame_V6_Design100_2026-10-19",
+    "SeisFrame_V6_Design100_36in_2026-10-19",
+    "Beam103_Handoff_20261020"
+  ],
+  "package_policy": {
+    "population_bays": [
+      3,
+      7
+    ],
+    "cases": 100,
+    "shards": 8,
+    "seed": 20261019,
+    "stages": [
+      "design",
+      "gravity_modal"
+    ],
+    "grouping": "system_three_story_v1",
+    "layout_ladder": [
+      "perimeter",
+      "perimeter_core",
+      "perimeter_core_lines"
+    ],
+    "layout_column_caps_in": {
+      "perimeter": 36,
+      "perimeter_core": 36,
+      "perimeter_core_lines": 36
+    },
+    "story_bands": 3,
+    "no_upward_width_or_depth_growth": true,
+    "grade80_height_and_limit_policies": true,
+    "max_feasibility_trials": 16,
+    "max_reduction_trials": 6,
+    "budget_basis": "per grade within each layout",
+    "shell_budget": 130000,
+    "probe_date": "2026-10-19",
+    "default_workers_per_shard": 1,
+    "maximum_workers_per_shard": 4,
+    "scope": "100 new sampled design attempts, not 100 guaranteed passing or production-accepted designs.",
+    "analyses_launched": 0,
+    "policy_revision": "36-inch columns for every layout, 2026-10-19"
+  },
+  "package_plan_design_basis": {
+    "bay_and_story_height_increment_ft": 0.5,
+    "risk_category": "III",
+    "importance_factor": 1.25,
+    "num_bay_x": [
+      3,
+      7
+    ],
+    "num_bay_y": [
+      3,
+      7
+    ],
+    "num_floor": [
+      4,
+      9
+    ],
+    "story_height_ft": [
+      12.0,
+      18.0
+    ],
+    "bay_x_width_ft": [
+      18.0,
+      30.0
+    ],
+    "bay_y_width_ft": [
+      18.0,
+      30.0
+    ],
+    "max_height_to_width_ratio": 2.25,
+    "site_class": "C",
+    "population_basis": "v2_bays3_7_18_30ft_stories_12_18ft_half_foot_steps_aspect_le_2p25_sdc_c_d_20261018"
+  },
+  "package_plan_nonlinear_profile": {
+    "element_formulation": "imk",
+    "member_material": "IMKPeakOriented",
+    "apply_to_beams": true,
+    "apply_to_columns": true,
+    "joint_model": "rigid_centerline",
+    "explicit_face_slip_interfaces": false
+  },
+  "package_plan_embedded_search_policy": {
+    "population_bays": [
+      3,
+      7
+    ],
+    "cases": 100,
+    "shards": 8,
+    "seed": 20261019,
+    "stages": [
+      "design",
+      "gravity_modal"
+    ],
+    "grouping": "system_three_story_v1",
+    "layout_ladder": [
+      "perimeter",
+      "perimeter_core",
+      "perimeter_core_lines"
+    ],
+    "layout_column_caps_in": {
+      "perimeter": 32,
+      "perimeter_core": 40,
+      "perimeter_core_lines": 40
+    },
+    "story_bands": 3,
+    "no_upward_width_or_depth_growth": true,
+    "grade80_height_and_limit_policies": true,
+    "max_feasibility_trials": 16,
+    "max_reduction_trials": 6,
+    "budget_basis": "per grade within each layout",
+    "shell_budget": 130000,
+    "probe_date": "2026-10-19",
+    "default_workers_per_shard": 1,
+    "maximum_workers_per_shard": 4,
+    "scope": "100 new sampled design attempts, not 100 guaranteed passing or production-accepted designs.",
+    "analyses_launched": 0
+  },
+  "package_manifest_discrepancy": "36-inch runtime policy/code; unchanged saved screening plans still embed predecessor 32/40-inch caps. Historical example_report and opening README wording must not be interpreted as current36in run evidence.",
+  "package_integrity": {
+    "listed_files": 302,
+    "package_id": "9d625f9616fc3e540209eb7c9861b37b9b2a1a5d53898ce659de6c0692d8571c",
+    "mismatches": []
+  },
+  "current36in_actual_results": [],
+  "current36in_example_results": [
+    "D:\\SeisFrame_V6_Design100_36in_2026-10-19\\example_report\\result.json"
+  ],
+  "v6_return_copies": [
+    {
+      "root": "D:\\SeisFrame_V6_Design100_2026-10-19\\shard_06",
+      "count": 12,
+      "result_hashes": {
+        "case_0006": "f5723b399e965cfec13bd6797fc0cff81b783ffb54b53369ddd0fb0144b27abf",
+        "case_0014": "42df64380793989ce661b93e58150c325e4cca6b02f00329748e8042fd31bf25",
+        "case_0022": "1c99bf183739db7a070b5b3a96e595ff965fc7ed4e0426a3d39bb0a20398a874",
+        "case_0030": "039692ed85153f1804a7b52a85c6879d076023e327553bf29ffa5c7995422f80",
+        "case_0038": "75f6f4c7f9236c99db628e90129138dc3cf3c8f83c8d926e8b2b0636951cd3c6",
+        "case_0046": "2037e151ebb2d35e473fb6144c44a34a096f65f933605afd7a1b883193b734ce",
+        "case_0054": "76bd5b3ec8af630f494b8cb2c8dcfdbe332221a6947a9afba9b6d69b52d115e3",
+        "case_0062": "ebb27d3002e5e555a2e0a77637b361c6e49a767fab43201b0a762492c7885191",
+        "case_0070": "bebcad792c062c430ec187eadc4f4ac5783cb78d087553def22ebbb1b4749415",
+        "case_0078": "8f147347e3147664a89b9a5688d83102659f5b816bf1a5202a7bc5acc1afd196",
+        "case_0086": "0714c5a156a670a90064b860abbe3dfa44a921458f9cd3207145e0c56625e131",
+        "case_0094": "f707ec7f159fd08ec5505c783c8e14a7b69e4896e1ef3fe93d14226897db10f4"
+      }
+    },
+    {
+      "root": "D:\\SeisFrame_DesignVerification100_8Shards_20261019\\results\\shard_06",
+      "count": 12,
+      "result_hashes": {
+        "case_0006": "f5723b399e965cfec13bd6797fc0cff81b783ffb54b53369ddd0fb0144b27abf",
+        "case_0014": "42df64380793989ce661b93e58150c325e4cca6b02f00329748e8042fd31bf25",
+        "case_0022": "1c99bf183739db7a070b5b3a96e595ff965fc7ed4e0426a3d39bb0a20398a874",
+        "case_0030": "039692ed85153f1804a7b52a85c6879d076023e327553bf29ffa5c7995422f80",
+        "case_0038": "75f6f4c7f9236c99db628e90129138dc3cf3c8f83c8d926e8b2b0636951cd3c6",
+        "case_0046": "2037e151ebb2d35e473fb6144c44a34a096f65f933605afd7a1b883193b734ce",
+        "case_0054": "76bd5b3ec8af630f494b8cb2c8dcfdbe332221a6947a9afba9b6d69b52d115e3",
+        "case_0062": "ebb27d3002e5e555a2e0a77637b361c6e49a767fab43201b0a762492c7885191",
+        "case_0070": "bebcad792c062c430ec187eadc4f4ac5783cb78d087553def22ebbb1b4749415",
+        "case_0078": "8f147347e3147664a89b9a5688d83102659f5b816bf1a5202a7bc5acc1afd196",
+        "case_0086": "0714c5a156a670a90064b860abbe3dfa44a921458f9cd3207145e0c56625e131",
+        "case_0094": "f707ec7f159fd08ec5505c783c8e14a7b69e4896e1ef3fe93d14226897db10f4"
+      }
+    },
+    {
+      "root": "D:\\SeisFrame_DesignVerification100_8Shards_20261019\\SeisFrame_DesignVerification100_8Shards_20261019\\results\\shard_06",
+      "count": 12,
+      "result_hashes": {
+        "case_0006": "f5723b399e965cfec13bd6797fc0cff81b783ffb54b53369ddd0fb0144b27abf",
+        "case_0014": "42df64380793989ce661b93e58150c325e4cca6b02f00329748e8042fd31bf25",
+        "case_0022": "1c99bf183739db7a070b5b3a96e595ff965fc7ed4e0426a3d39bb0a20398a874",
+        "case_0030": "039692ed85153f1804a7b52a85c6879d076023e327553bf29ffa5c7995422f80",
+        "case_0038": "75f6f4c7f9236c99db628e90129138dc3cf3c8f83c8d926e8b2b0636951cd3c6",
+        "case_0046": "2037e151ebb2d35e473fb6144c44a34a096f65f933605afd7a1b883193b734ce",
+        "case_0054": "76bd5b3ec8af630f494b8cb2c8dcfdbe332221a6947a9afba9b6d69b52d115e3",
+        "case_0062": "ebb27d3002e5e555a2e0a77637b361c6e49a767fab43201b0a762492c7885191",
+        "case_0070": "bebcad792c062c430ec187eadc4f4ac5783cb78d087553def22ebbb1b4749415",
+        "case_0078": "8f147347e3147664a89b9a5688d83102659f5b816bf1a5202a7bc5acc1afd196",
+        "case_0086": "0714c5a156a670a90064b860abbe3dfa44a921458f9cd3207145e0c56625e131",
+        "case_0094": "f707ec7f159fd08ec5505c783c8e14a7b69e4896e1ef3fe93d14226897db10f4"
+      }
+    }
+  ],
+  "v6_return_copies_byte_identical": true,
+  "v6_return_identity": {
+    "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+    "shard": 6,
+    "manifest_sha256": "8ac14d367816025611b1eaf4eba1dc2a488825b5b974d6b004a2ebf8ca931d79",
+    "policy": {
+      "population_bays": [
+        3,
+        7
+      ],
+      "cases": 100,
+      "shards": 8,
+      "seed": 20261019,
+      "stages": [
+        "design",
+        "gravity_modal"
+      ],
+      "grouping": "system_three_story_v1",
+      "layout_ladder": [
+        "perimeter",
+        "perimeter_core",
+        "perimeter_core_lines"
+      ],
+      "layout_column_caps_in": {
+        "perimeter": 32,
+        "perimeter_core": 40,
+        "perimeter_core_lines": 40
+      },
+      "story_bands": 3,
+      "no_upward_width_or_depth_growth": true,
+      "grade80_height_and_limit_policies": true,
+      "max_feasibility_trials": 16,
+      "max_reduction_trials": 6,
+      "budget_basis": "per grade within each layout",
+      "shell_budget": 130000,
+      "probe_date": "2026-10-19",
+      "default_workers_per_shard": 1,
+      "maximum_workers_per_shard": 4,
+      "scope": "100 new sampled design attempts, not 100 guaranteed passing or production-accepted designs.",
+      "analyses_launched": 0
+    }
+  },
+  "v6_return_completion": {
+    "finished_utc": "2026-10-20T04:52:03Z",
+    "workers_finished": 12,
+    "expected": 12,
+    "source_unchanged": true,
+    "results_present": 12,
+    "scope": "All requested workers have ended; inspect case results and open checks."
+  },
+  "v6_return_cases": [
+    {
+      "case_id": "case_0006",
+      "geometry": {
+        "case_id": "case_0006",
+        "num_bay_x": 5,
+        "num_bay_y": 7,
+        "num_floor": 8,
+        "story_height_ft": 15.0,
+        "bay_x_width_ft": 21.0,
+        "bay_y_width_ft": 26.5,
+        "seismic_site": "sdc_c",
+        "geometry_name": "lhs_bx5_by7_s8_sh15_bwx21_bwy26p5_sdc_c",
+        "label": "lhs_006",
+        "purpose": "Latin hypercube point 6 of 100, seed 20261019."
+      },
+      "status": "designed",
+      "accepted": false,
+      "production_acceptance": {
+        "accepted": false,
+        "generation_release_ready": false,
+        "reason": "GENERATION_RELEASE_READY is False"
+      },
+      "counts": {
+        "pass": 2483,
+        "fail": 0,
+        "not_evaluated": 3
+      },
+      "fail_ids": [],
+      "not_evaluated_ids": [
+        "demands.torsional_irregularity",
+        "demands.vertical_strength_regularity",
+        "detailing.column_transition_rules_reviewed"
+      ],
+      "grade_ksi": 80.0,
+      "grouping_policy_selected": "system_three_story_v1",
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed",
+        "design_search_stop_reason": "reduction_budget_exhausted",
+        "design_search_budget_exhausted": true,
+        "slab_refinement_status": "passed",
+        "gravity_modal": "completed",
+        "figures": "not_run",
+        "stages_requested": [
+          "design",
+          "gravity_modal"
+        ],
+        "note": "a search that ran to its stop reason is completed whatever it found; reduction_budget_exhausted means smaller sections may remain untried, not that the design is wrong; no stop reason is evidence of an optimum",
+        "design_search_counts": {
+          "feasibility_candidates": 14,
+          "reduction_candidates": 6,
+          "skipped_moves": 4,
+          "accepted_reductions": 2,
+          "tradeoffs": 2
+        }
+      },
+      "gravity_modal_status": "completed",
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-19T23:01:41Z"
+      },
+      "result_sha256": "f5723b399e965cfec13bd6797fc0cff81b783ffb54b53369ddd0fb0144b27abf"
+    },
+    {
+      "case_id": "case_0014",
+      "geometry": {
+        "case_id": "case_0014",
+        "num_bay_x": 4,
+        "num_bay_y": 4,
+        "num_floor": 4,
+        "story_height_ft": 14.5,
+        "bay_x_width_ft": 27.0,
+        "bay_y_width_ft": 25.0,
+        "seismic_site": "sdc_c",
+        "geometry_name": "lhs_bx4_by4_s4_sh14p5_bwx27_bwy25_sdc_c",
+        "label": "lhs_014",
+        "purpose": "Latin hypercube point 14 of 100, seed 20261019."
+      },
+      "status": "designed",
+      "accepted": false,
+      "production_acceptance": {
+        "accepted": false,
+        "generation_release_ready": false,
+        "reason": "GENERATION_RELEASE_READY is False"
+      },
+      "counts": {
+        "pass": 1259,
+        "fail": 0,
+        "not_evaluated": 2
+      },
+      "fail_ids": [],
+      "not_evaluated_ids": [
+        "demands.torsional_irregularity",
+        "demands.vertical_strength_regularity"
+      ],
+      "grade_ksi": 60.0,
+      "grouping_policy_selected": "system_three_story_v1",
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed",
+        "design_search_stop_reason": "reduction_sweep_without_accepted_move",
+        "design_search_budget_exhausted": false,
+        "slab_refinement_status": "passed",
+        "gravity_modal": "completed",
+        "figures": "not_run",
+        "stages_requested": [
+          "design",
+          "gravity_modal"
+        ],
+        "note": "a search that ran to its stop reason is completed whatever it found; reduction_budget_exhausted means smaller sections may remain untried, not that the design is wrong; no stop reason is evidence of an optimum",
+        "design_search_counts": {
+          "feasibility_candidates": 8,
+          "reduction_candidates": 4,
+          "skipped_moves": 9,
+          "accepted_reductions": 0,
+          "tradeoffs": 1
+        }
+      },
+      "gravity_modal_status": "completed",
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-19T23:24:40Z"
+      },
+      "result_sha256": "42df64380793989ce661b93e58150c325e4cca6b02f00329748e8042fd31bf25"
+    },
+    {
+      "case_id": "case_0022",
+      "geometry": {
+        "case_id": "case_0022",
+        "num_bay_x": 6,
+        "num_bay_y": 3,
+        "num_floor": 5,
+        "story_height_ft": 16.5,
+        "bay_x_width_ft": 28.0,
+        "bay_y_width_ft": 22.0,
+        "seismic_site": "sdc_d_high",
+        "geometry_name": "lhs_bx6_by3_s5_sh16p5_bwx28_bwy22_sdc_d_high",
+        "label": "lhs_022",
+        "purpose": "Latin hypercube point 22 of 100, seed 20261019."
+      },
+      "status": "no_feasible_design",
+      "accepted": null,
+      "production_acceptance": {
+        "accepted": false,
+        "reason": "no design record"
+      },
+      "counts": null,
+      "fail_ids": null,
+      "not_evaluated_ids": null,
+      "grade_ksi": null,
+      "grouping_policy_selected": null,
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed_without_a_feasible_design",
+        "design_search_stop_reason": "feasibility_no_growth_move",
+        "design_search_budget_exhausted": false,
+        "note": "every candidate is in grouped_candidates.jsonl with its failed constraints; a budget stop is not evidence that no feasible frame exists"
+      },
+      "gravity_modal_status": null,
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T00:23:43Z"
+      },
+      "result_sha256": "1c99bf183739db7a070b5b3a96e595ff965fc7ed4e0426a3d39bb0a20398a874"
+    },
+    {
+      "case_id": "case_0030",
+      "geometry": {
+        "case_id": "case_0030",
+        "num_bay_x": 4,
+        "num_bay_y": 6,
+        "num_floor": 6,
+        "story_height_ft": 12.5,
+        "bay_x_width_ft": 23.5,
+        "bay_y_width_ft": 20.5,
+        "seismic_site": "sdc_d_high",
+        "geometry_name": "lhs_bx4_by6_s6_sh12p5_bwx23p5_bwy20p5_sdc_d_high",
+        "label": "lhs_030",
+        "purpose": "Latin hypercube point 30 of 100, seed 20261019."
+      },
+      "status": "no_feasible_design",
+      "accepted": null,
+      "production_acceptance": {
+        "accepted": false,
+        "reason": "no design record"
+      },
+      "counts": null,
+      "fail_ids": null,
+      "not_evaluated_ids": null,
+      "grade_ksi": null,
+      "grouping_policy_selected": null,
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed_without_a_feasible_design",
+        "design_search_stop_reason": "feasibility_no_growth_move",
+        "design_search_budget_exhausted": false,
+        "note": "every candidate is in grouped_candidates.jsonl with its failed constraints; a budget stop is not evidence that no feasible frame exists"
+      },
+      "gravity_modal_status": null,
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T04:44:20Z"
+      },
+      "result_sha256": "039692ed85153f1804a7b52a85c6879d076023e327553bf29ffa5c7995422f80"
+    },
+    {
+      "case_id": "case_0038",
+      "geometry": {
+        "case_id": "case_0038",
+        "num_bay_x": 3,
+        "num_bay_y": 4,
+        "num_floor": 7,
+        "story_height_ft": 14.5,
+        "bay_x_width_ft": 19.5,
+        "bay_y_width_ft": 27.0,
+        "seismic_site": "sdc_d_low",
+        "geometry_name": "lhs_bx3_by4_s7_sh14p5_bwx19p5_bwy27_sdc_d_low",
+        "label": "lhs_038",
+        "purpose": "Latin hypercube point 38 of 100, seed 20261019."
+      },
+      "status": "designed",
+      "accepted": false,
+      "production_acceptance": {
+        "accepted": false,
+        "generation_release_ready": false,
+        "reason": "GENERATION_RELEASE_READY is False"
+      },
+      "counts": {
+        "pass": 1584,
+        "fail": 0,
+        "not_evaluated": 3
+      },
+      "fail_ids": [],
+      "not_evaluated_ids": [
+        "demands.torsional_irregularity",
+        "demands.vertical_strength_regularity",
+        "detailing.column_transition_rules_reviewed"
+      ],
+      "grade_ksi": 80.0,
+      "grouping_policy_selected": "system_three_story_v1",
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed",
+        "design_search_stop_reason": "reduction_sweep_without_accepted_move",
+        "design_search_budget_exhausted": false,
+        "slab_refinement_status": "passed",
+        "gravity_modal": "completed",
+        "figures": "not_run",
+        "stages_requested": [
+          "design",
+          "gravity_modal"
+        ],
+        "note": "a search that ran to its stop reason is completed whatever it found; reduction_budget_exhausted means smaller sections may remain untried, not that the design is wrong; no stop reason is evidence of an optimum",
+        "design_search_counts": {
+          "feasibility_candidates": 14,
+          "reduction_candidates": 4,
+          "skipped_moves": 18,
+          "accepted_reductions": 0,
+          "tradeoffs": 2
+        }
+      },
+      "gravity_modal_status": "completed",
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-19T23:43:18Z"
+      },
+      "result_sha256": "75f6f4c7f9236c99db628e90129138dc3cf3c8f83c8d926e8b2b0636951cd3c6"
+    },
+    {
+      "case_id": "case_0046",
+      "geometry": {
+        "case_id": "case_0046",
+        "num_bay_x": 4,
+        "num_bay_y": 4,
+        "num_floor": 7,
+        "story_height_ft": 13.0,
+        "bay_x_width_ft": 30.0,
+        "bay_y_width_ft": 19.0,
+        "seismic_site": "sdc_d_low",
+        "geometry_name": "lhs_bx4_by4_s7_sh13_bwx30_bwy19_sdc_d_low",
+        "label": "lhs_046",
+        "purpose": "Latin hypercube point 46 of 100, seed 20261019."
+      },
+      "status": "designed",
+      "accepted": false,
+      "production_acceptance": {
+        "accepted": false,
+        "generation_release_ready": false,
+        "reason": "GENERATION_RELEASE_READY is False"
+      },
+      "counts": {
+        "pass": 1705,
+        "fail": 0,
+        "not_evaluated": 3
+      },
+      "fail_ids": [],
+      "not_evaluated_ids": [
+        "demands.torsional_irregularity",
+        "demands.vertical_strength_regularity",
+        "detailing.column_transition_rules_reviewed"
+      ],
+      "grade_ksi": 60.0,
+      "grouping_policy_selected": "system_three_story_v1",
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed",
+        "design_search_stop_reason": "reduction_budget_exhausted",
+        "design_search_budget_exhausted": true,
+        "slab_refinement_status": "passed",
+        "gravity_modal": "completed",
+        "figures": "not_run",
+        "stages_requested": [
+          "design",
+          "gravity_modal"
+        ],
+        "note": "a search that ran to its stop reason is completed whatever it found; reduction_budget_exhausted means smaller sections may remain untried, not that the design is wrong; no stop reason is evidence of an optimum",
+        "design_search_counts": {
+          "feasibility_candidates": 6,
+          "reduction_candidates": 6,
+          "skipped_moves": 11,
+          "accepted_reductions": 2,
+          "tradeoffs": 1
+        }
+      },
+      "gravity_modal_status": "completed",
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T00:05:58Z"
+      },
+      "result_sha256": "2037e151ebb2d35e473fb6144c44a34a096f65f933605afd7a1b883193b734ce"
+    },
+    {
+      "case_id": "case_0054",
+      "geometry": {
+        "case_id": "case_0054",
+        "num_bay_x": 4,
+        "num_bay_y": 7,
+        "num_floor": 6,
+        "story_height_ft": 16.5,
+        "bay_x_width_ft": 29.0,
+        "bay_y_width_ft": 19.0,
+        "seismic_site": "sdc_d_low",
+        "geometry_name": "lhs_bx4_by7_s6_sh16p5_bwx29_bwy19_sdc_d_low",
+        "label": "lhs_054",
+        "purpose": "Latin hypercube point 54 of 100, seed 20261019."
+      },
+      "status": "designed",
+      "accepted": false,
+      "production_acceptance": {
+        "accepted": false,
+        "generation_release_ready": false,
+        "reason": "GENERATION_RELEASE_READY is False"
+      },
+      "counts": {
+        "pass": 2262,
+        "fail": 0,
+        "not_evaluated": 2
+      },
+      "fail_ids": [],
+      "not_evaluated_ids": [
+        "demands.torsional_irregularity",
+        "demands.vertical_strength_regularity"
+      ],
+      "grade_ksi": 80.0,
+      "grouping_policy_selected": "system_perimeter_core_three_story_v1",
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed",
+        "design_search_stop_reason": "reduction_budget_exhausted",
+        "design_search_budget_exhausted": true,
+        "slab_refinement_status": "passed",
+        "gravity_modal": "completed",
+        "figures": "not_run",
+        "stages_requested": [
+          "design",
+          "gravity_modal"
+        ],
+        "note": "a search that ran to its stop reason is completed whatever it found; reduction_budget_exhausted means smaller sections may remain untried, not that the design is wrong; no stop reason is evidence of an optimum",
+        "design_search_counts": {
+          "feasibility_candidates": 21,
+          "reduction_candidates": 6,
+          "skipped_moves": 2,
+          "accepted_reductions": 2,
+          "tradeoffs": 1
+        }
+      },
+      "gravity_modal_status": "completed",
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T01:52:18Z"
+      },
+      "result_sha256": "76bd5b3ec8af630f494b8cb2c8dcfdbe332221a6947a9afba9b6d69b52d115e3"
+    },
+    {
+      "case_id": "case_0062",
+      "geometry": {
+        "case_id": "case_0062",
+        "num_bay_x": 7,
+        "num_bay_y": 6,
+        "num_floor": 9,
+        "story_height_ft": 13.0,
+        "bay_x_width_ft": 25.0,
+        "bay_y_width_ft": 26.5,
+        "seismic_site": "sdc_c",
+        "geometry_name": "lhs_bx7_by6_s9_sh13_bwx25_bwy26p5_sdc_c",
+        "label": "lhs_062",
+        "purpose": "Latin hypercube point 62 of 100, seed 20261019."
+      },
+      "status": "no_feasible_design",
+      "accepted": null,
+      "production_acceptance": {
+        "accepted": false,
+        "reason": "no design record"
+      },
+      "counts": null,
+      "fail_ids": null,
+      "not_evaluated_ids": null,
+      "grade_ksi": null,
+      "grouping_policy_selected": null,
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed_without_a_feasible_design",
+        "design_search_stop_reason": "feasibility_no_growth_move",
+        "design_search_budget_exhausted": false,
+        "note": "every candidate is in grouped_candidates.jsonl with its failed constraints; a budget stop is not evidence that no feasible frame exists"
+      },
+      "gravity_modal_status": null,
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T00:06:52Z"
+      },
+      "result_sha256": "ebb27d3002e5e555a2e0a77637b361c6e49a767fab43201b0a762492c7885191"
+    },
+    {
+      "case_id": "case_0070",
+      "geometry": {
+        "case_id": "case_0070",
+        "num_bay_x": 3,
+        "num_bay_y": 6,
+        "num_floor": 6,
+        "story_height_ft": 14.0,
+        "bay_x_width_ft": 19.0,
+        "bay_y_width_ft": 24.0,
+        "seismic_site": "sdc_c",
+        "geometry_name": "lhs_bx3_by6_s6_sh14_bwx19_bwy24_sdc_c",
+        "label": "lhs_070",
+        "purpose": "Latin hypercube point 70 of 100, seed 20261019."
+      },
+      "status": "designed",
+      "accepted": false,
+      "production_acceptance": {
+        "accepted": false,
+        "generation_release_ready": false,
+        "reason": "GENERATION_RELEASE_READY is False"
+      },
+      "counts": {
+        "pass": 1480,
+        "fail": 0,
+        "not_evaluated": 3
+      },
+      "fail_ids": [],
+      "not_evaluated_ids": [
+        "demands.torsional_irregularity",
+        "demands.vertical_strength_regularity",
+        "detailing.column_transition_rules_reviewed"
+      ],
+      "grade_ksi": 60.0,
+      "grouping_policy_selected": "system_three_story_v1",
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed",
+        "design_search_stop_reason": "reduction_budget_exhausted",
+        "design_search_budget_exhausted": true,
+        "slab_refinement_status": "passed",
+        "gravity_modal": "completed",
+        "figures": "not_run",
+        "stages_requested": [
+          "design",
+          "gravity_modal"
+        ],
+        "note": "a search that ran to its stop reason is completed whatever it found; reduction_budget_exhausted means smaller sections may remain untried, not that the design is wrong; no stop reason is evidence of an optimum",
+        "design_search_counts": {
+          "feasibility_candidates": 9,
+          "reduction_candidates": 6,
+          "skipped_moves": 0,
+          "accepted_reductions": 4,
+          "tradeoffs": 0
+        }
+      },
+      "gravity_modal_status": "completed",
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T00:37:52Z"
+      },
+      "result_sha256": "bebcad792c062c430ec187eadc4f4ac5783cb78d087553def22ebbb1b4749415"
+    },
+    {
+      "case_id": "case_0078",
+      "geometry": {
+        "case_id": "case_0078",
+        "num_bay_x": 5,
+        "num_bay_y": 7,
+        "num_floor": 9,
+        "story_height_ft": 15.5,
+        "bay_x_width_ft": 21.0,
+        "bay_y_width_ft": 24.0,
+        "seismic_site": "sdc_c",
+        "geometry_name": "lhs_bx5_by7_s9_sh15p5_bwx21_bwy24_sdc_c",
+        "label": "lhs_078",
+        "purpose": "Latin hypercube point 78 of 100, seed 20261019."
+      },
+      "status": "designed",
+      "accepted": false,
+      "production_acceptance": {
+        "accepted": false,
+        "generation_release_ready": false,
+        "reason": "GENERATION_RELEASE_READY is False"
+      },
+      "counts": {
+        "pass": 2545,
+        "fail": 0,
+        "not_evaluated": 3
+      },
+      "fail_ids": [],
+      "not_evaluated_ids": [
+        "demands.torsional_irregularity",
+        "demands.vertical_strength_regularity",
+        "detailing.column_transition_rules_reviewed"
+      ],
+      "grade_ksi": 80.0,
+      "grouping_policy_selected": "system_three_story_v1",
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed",
+        "design_search_stop_reason": "reduction_budget_exhausted",
+        "design_search_budget_exhausted": true,
+        "slab_refinement_status": "passed",
+        "gravity_modal": "completed",
+        "figures": "not_run",
+        "stages_requested": [
+          "design",
+          "gravity_modal"
+        ],
+        "note": "a search that ran to its stop reason is completed whatever it found; reduction_budget_exhausted means smaller sections may remain untried, not that the design is wrong; no stop reason is evidence of an optimum",
+        "design_search_counts": {
+          "feasibility_candidates": 24,
+          "reduction_candidates": 6,
+          "skipped_moves": 4,
+          "accepted_reductions": 2,
+          "tradeoffs": 2
+        }
+      },
+      "gravity_modal_status": "completed",
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T04:52:02Z"
+      },
+      "result_sha256": "8f147347e3147664a89b9a5688d83102659f5b816bf1a5202a7bc5acc1afd196"
+    },
+    {
+      "case_id": "case_0086",
+      "geometry": {
+        "case_id": "case_0086",
+        "num_bay_x": 7,
+        "num_bay_y": 6,
+        "num_floor": 9,
+        "story_height_ft": 16.0,
+        "bay_x_width_ft": 26.0,
+        "bay_y_width_ft": 26.5,
+        "seismic_site": "sdc_d_low",
+        "geometry_name": "lhs_bx7_by6_s9_sh16_bwx26_bwy26p5_sdc_d_low",
+        "label": "lhs_086",
+        "purpose": "Latin hypercube point 86 of 100, seed 20261019."
+      },
+      "status": "no_feasible_design",
+      "accepted": null,
+      "production_acceptance": {
+        "accepted": false,
+        "reason": "no design record"
+      },
+      "counts": null,
+      "fail_ids": null,
+      "not_evaluated_ids": null,
+      "grade_ksi": null,
+      "grouping_policy_selected": null,
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed_without_a_feasible_design",
+        "design_search_stop_reason": "feasibility_no_growth_move",
+        "design_search_budget_exhausted": false,
+        "note": "every candidate is in grouped_candidates.jsonl with its failed constraints; a budget stop is not evidence that no feasible frame exists"
+      },
+      "gravity_modal_status": null,
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T00:38:47Z"
+      },
+      "result_sha256": "0714c5a156a670a90064b860abbe3dfa44a921458f9cd3207145e0c56625e131"
+    },
+    {
+      "case_id": "case_0094",
+      "geometry": {
+        "case_id": "case_0094",
+        "num_bay_x": 6,
+        "num_bay_y": 7,
+        "num_floor": 4,
+        "story_height_ft": 18.0,
+        "bay_x_width_ft": 25.5,
+        "bay_y_width_ft": 26.5,
+        "seismic_site": "sdc_d_low",
+        "geometry_name": "lhs_bx6_by7_s4_sh18_bwx25p5_bwy26p5_sdc_d_low",
+        "label": "lhs_094",
+        "purpose": "Latin hypercube point 94 of 100, seed 20261019."
+      },
+      "status": "no_feasible_design",
+      "accepted": null,
+      "production_acceptance": {
+        "accepted": false,
+        "reason": "no design record"
+      },
+      "counts": null,
+      "fail_ids": null,
+      "not_evaluated_ids": null,
+      "grade_ksi": null,
+      "grouping_policy_selected": null,
+      "selected_layout": null,
+      "numerical_completion": {
+        "design": "completed_without_a_feasible_design",
+        "design_search_stop_reason": "feasibility_no_growth_move",
+        "design_search_budget_exhausted": false,
+        "note": "every candidate is in grouped_candidates.jsonl with its failed constraints; a budget stop is not evidence that no feasible frame exists"
+      },
+      "gravity_modal_status": null,
+      "source_pin": {
+        "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+        "source_unchanged": true,
+        "checked_utc": "2026-10-20T00:39:40Z"
+      },
+      "result_sha256": "f707ec7f159fd08ec5505c783c8e14a7b69e4896e1ef3fe93d14226897db10f4"
+    }
+  ],
+  "v6_return_counts": {
+    "unique_returned_cases": 12,
+    "status_counts": {
+      "designed": 7,
+      "no_feasible_design": 5
+    },
+    "accepted_count": 0,
+    "production_acceptance_count": 0,
+    "gravity_modal_completed": 7,
+    "pin_match_all": true
+  },
+  "v6_original_package_integrity": {
+    "package_id": "b7b3d8c0420eabe307cc88e2d735219a7ea07508cd4d2e15f75d97986256115c",
+    "matches_return_identity": true,
+    "listed_files": 263,
+    "mismatches": []
+  },
+  "v5_historical_returns": [
+    {
+      "root": "D:\\SeisFrameRuns\\v5DesignVerification100_Repairs_20261013_shard_01",
+      "count": 13,
+      "status_counts": {
+        "designed": 13
+      },
+      "ids": [
+        "case_0001",
+        "case_0009",
+        "case_0017",
+        "case_0025",
+        "case_0033",
+        "case_0041",
+        "case_0049",
+        "case_0057",
+        "case_0065",
+        "case_0073",
+        "case_0081",
+        "case_0089",
+        "case_0097"
+      ]
+    },
+    {
+      "root": "D:\\SeisFrameRuns\\v5DesignVerification100_Repairs_20261013_shard_02",
+      "count": 13,
+      "status_counts": {
+        "designed": 13
+      },
+      "ids": [
+        "case_0002",
+        "case_0010",
+        "case_0018",
+        "case_0026",
+        "case_0034",
+        "case_0042",
+        "case_0050",
+        "case_0058",
+        "case_0066",
+        "case_0074",
+        "case_0082",
+        "case_0090",
+        "case_0098"
+      ]
+    },
+    {
+      "root": "D:\\SeisFrameRuns\\v5DesignVerification100_Repairs_20261013_shard_03",
+      "count": 13,
+      "status_counts": {
+        "designed": 13
+      },
+      "ids": [
+        "case_0003",
+        "case_0011",
+        "case_0019",
+        "case_0027",
+        "case_0035",
+        "case_0043",
+        "case_0051",
+        "case_0059",
+        "case_0067",
+        "case_0075",
+        "case_0083",
+        "case_0091",
+        "case_0099"
+      ]
+    },
+    {
+      "root": "D:\\SeisFrameRuns\\v5DesignVerification100_Repairs_20261013_shard_04",
+      "count": 13,
+      "status_counts": {
+        "designed": 13
+      },
+      "ids": [
+        "case_0004",
+        "case_0012",
+        "case_0020",
+        "case_0028",
+        "case_0036",
+        "case_0044",
+        "case_0052",
+        "case_0060",
+        "case_0068",
+        "case_0076",
+        "case_0084",
+        "case_0092",
+        "case_0100"
+      ]
+    },
+    {
+      "root": "D:\\SeisFrameRuns\\v5DesignVerification100_Repairs_20261013_shard_05",
+      "count": 12,
+      "status_counts": {
+        "designed": 12
+      },
+      "ids": [
+        "case_0005",
+        "case_0013",
+        "case_0021",
+        "case_0029",
+        "case_0037",
+        "case_0045",
+        "case_0053",
+        "case_0061",
+        "case_0069",
+        "case_0077",
+        "case_0085",
+        "case_0093"
+      ]
+    },
+    {
+      "root": "D:\\SeisFrameRuns\\v5DesignVerification100_Repairs_20261013_shard_06",
+      "count": 12,
+      "status_counts": {
+        "designed": 12
+      },
+      "ids": [
+        "case_0006",
+        "case_0014",
+        "case_0022",
+        "case_0030",
+        "case_0038",
+        "case_0046",
+        "case_0054",
+        "case_0062",
+        "case_0070",
+        "case_0078",
+        "case_0086",
+        "case_0094"
+      ]
+    },
+    {
+      "root": "D:\\SeisFrameRuns\\v5DesignVerification100_Repairs_20261013_shard_07",
+      "count": 12,
+      "status_counts": {
+        "designed": 12
+      },
+      "ids": [
+        "case_0007",
+        "case_0015",
+        "case_0023",
+        "case_0031",
+        "case_0039",
+        "case_0047",
+        "case_0055",
+        "case_0063",
+        "case_0071",
+        "case_0079",
+        "case_0087",
+        "case_0095"
+      ]
+    },
+    {
+      "root": "D:\\SeisFrameRuns\\v5DesignVerification100_Repairs_20261013_shard_08",
+      "count": 12,
+      "status_counts": {
+        "designed": 12
+      },
+      "ids": [
+        "case_0008",
+        "case_0016",
+        "case_0024",
+        "case_0032",
+        "case_0040",
+        "case_0048",
+        "case_0056",
+        "case_0064",
+        "case_0072",
+        "case_0080",
+        "case_0088",
+        "case_0096"
+      ]
+    }
+  ],
+  "v5_historical_unique_cases": 100,
+  "generation_defaults_not_approved_target": {
+    "path": "C:\\Users\\andro\\Documents\\GitHub\\StructGNN-OpenSeesPy-Integrated\\RC Structure\\Data_Generation\\Generate_Parameterized_Dataset.py",
+    "num_cases": 2500,
+    "seed": 20260731,
+    "sampling_method": "seeded_shuffled_cartesian_prefix_v1",
+    "records_per_case": 1,
+    "runs_per_record": 1,
+    "default_intensity_ladder": [
+      1.0
+    ],
+    "maximum_points_per_motion": 15000,
+    "set_name": "peer_mle_all",
+    "note": "Separate from100caseLHS; existing defaults are not a frozen October31production protocol."
+  },
+  "motion_metadata_inventory": {
+    "source": "C:\\Users\\andro\\Documents\\GitHub\\StructGNN-OpenSeesPy-Integrated\\RC Structure\\Ground_Motions\\metadata",
+    "peer_mle_all_component_rows": 164,
+    "pair_count": 82,
+    "usable_pairs_max15000": 54,
+    "eligible_result_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      13,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      74,
+      75,
+      76,
+      79,
+      80,
+      82
+    ],
+    "missing_processed_files": [],
+    "scope": "Metadata eligibility and file existence only. No waveform values or scale calibration revalidated."
+  },
+  "historical_parameterized_plans": [
+    {
+      "path": "C:\\Users\\andro\\Documents\\GitHub\\StructGNN-OpenSeesPy-Integrated\\RC Structure\\outputs\\parameterized_2500\\parameter_plan.json",
+      "sha256": "9ef34ae5e4a020eafa03f197be0bd43fee7e9068769b0a117fb1bfcdf7dc1ae5",
+      "keys": [
+        "version",
+        "seed",
+        "num_cases",
+        "max_npts",
+        "ranges",
+        "created_at",
+        "bay_width_policy",
+        "record_policy",
+        "eligible_result_ids",
+        "cases"
+      ],
+      "metadata": {
+        "version": 1,
+        "seed": 20260731,
+        "num_cases": 2500,
+        "max_npts": 15000,
+        "ranges": {
+          "num_bay_x": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "num_bay_y": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "num_floor": [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ],
+          "story_height_ft": [
+            10,
+            11,
+            12,
+            13,
+            14
+          ],
+          "bay_width_ft": [
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ]
+        },
+        "created_at": "2026-08-01T07:31:41.335806+00:00",
+        "bay_width_policy": "same width in X and Y",
+        "record_policy": "seeded shuffle then balanced round-robin",
+        "eligible_result_ids": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          13,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          74,
+          75,
+          76,
+          79,
+          80,
+          82
+        ]
+      },
+      "cases": 2500
+    },
+    {
+      "path": "C:\\Users\\andro\\Documents\\GitHub\\StructGNN-OpenSeesPy-Integrated\\RC Structure\\outputs\\parameterized_expansion_2501_3800\\parameter_plan.json",
+      "sha256": "c8a6231e6c042e27314ca0f44a451ab32b2e12d5b563f6e9e579d9fcc164e9c7",
+      "keys": [
+        "version",
+        "seed",
+        "num_cases",
+        "max_npts",
+        "ranges",
+        "set_name",
+        "geometry_offset",
+        "case_id_offset",
+        "eligible_result_ids",
+        "created_at",
+        "bay_width_policy",
+        "record_policy",
+        "cases"
+      ],
+      "metadata": {
+        "version": 2,
+        "seed": 20260731,
+        "num_cases": 1300,
+        "max_npts": 30000,
+        "ranges": {
+          "num_bay_x": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "num_bay_y": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "num_floor": [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ],
+          "story_height_ft": [
+            10,
+            11,
+            12,
+            13,
+            14
+          ],
+          "bay_width_ft": [
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ]
+        },
+        "set_name": "peer_expansion_30k",
+        "geometry_offset": 2500,
+        "case_id_offset": 2500,
+        "eligible_result_ids": [
+          12,
+          14,
+          24,
+          31,
+          32,
+          33,
+          46,
+          47,
+          48,
+          49,
+          50,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          71,
+          72,
+          73,
+          77,
+          78,
+          81
+        ],
+        "created_at": "2026-08-22T03:10:56.875751+00:00",
+        "bay_width_policy": "same width in X and Y",
+        "record_policy": "seeded shuffle then balanced round-robin"
+      },
+      "cases": 1300
+    }
+  ]
+}

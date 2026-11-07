@@ -43,6 +43,8 @@ so a candidate that fails (or an unexpected exception after it) leaves its evide
 """
 from __future__ import annotations
 
+from Design.Config import validate_beam_practical_ceiling
+
 import json
 import time
 import traceback
@@ -677,6 +679,7 @@ def search(seed, cfg, policy=None, log_path=None, verbose=True, context=None):
     ``final`` is the evaluation of the design the search ends on (with its in-memory evidence), or None
     when no feasible design was found within the feasibility budget; the candidate log says why.
     """
+    validate_beam_practical_ceiling(cfg)
     policy = policy or SearchPolicy()
     problems = policy.problems()
     if problems:

@@ -9,9 +9,9 @@ design assumed. This module is the single source for both.
 Strain compatibility (22.2): ecu = 0.003 at the compression face, Whitney
 block with beta1 from 22.2.2.4.3, elastic-perfectly-plastic steel, every bar
 layer in the composite section (beam top and bottom bars, slab top and bottom
-mats within the flange) as a discrete layer, zero axial force. Displaced
-concrete at steel layers is ignored (slightly conservative for compression
-steel). Negative (hogging) bending puts the web in compression; positive
+mats within the flange) as a discrete layer, zero axial force. The Whitney
+block excludes concrete displaced by steel within that block, consistently
+with the column P-M routines. Negative (hogging) bending puts the web in compression; positive
 (sagging) bending puts the flange in compression, with the block allowed to
 pass into the web.
 
@@ -50,7 +50,11 @@ def effective_flange_width(bw, slab_h, clear_span, clear_to_adjacent_web, slab_s
     return sp.effective_flange_width_in(bw, slab_h, clear_span, clear_to_adjacent_web, slab_sides)
 
 
-def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, flange_depth=0.0):
+SECTION_STRENGTH_METHOD = "strain_compatibility_net_concrete_v2"
+
+
+def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, flange_depth=0.0,
+                   *, flange_at_far_face=False):
     """Nominal moment (kip-in) of a section with steel ``layers`` and no axial load.
 
     ``layers``: iterable of (depth_from_compression_face_in, area_in2) or
@@ -58,7 +62,10 @@ def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, 
     SLAB_FY_KSI beside Grade 80 beam bars); a layer without its own grade
     takes ``fy_ksi``. The compression block occupies ``flange_width`` down to
     ``flange_depth`` and ``web_width`` below it; pass flange_width=None for a
-    rectangular section.
+    rectangular section. ``flange_at_far_face`` places the flange at the face
+    opposite compression (hogging); if the block reaches it, that concrete is
+    included. ``steel_forces_kip`` remains actual steel force; the separately
+    returned displacement forces remove the overlapping concrete exactly once.
     """
     layers = [(float(layer[0]), float(layer[1]),
                float(layer[2]) if len(layer) > 2 and isinstance(layer[2], (int, float)) and not isinstance(layer[2], bool) else float(fy_ksi))
@@ -70,13 +77,13 @@ def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, 
 
     def block(c):
         a = min(b1 * c, depth)
-        if flange_width is None or a <= flange_depth:
-            force = 0.85 * fc_ksi * bf * a
-            return force, a / 2.0, a
-        flange = 0.85 * fc_ksi * bf * flange_depth
-        web = 0.85 * fc_ksi * web_width * (a - flange_depth)
-        centroid = (flange * flange_depth / 2.0 + web * (flange_depth + (a - flange_depth) / 2.0)) / (flange + web)
-        return flange + web, centroid, a
+        # Full-depth web plus flange overhang only; no concrete overlap.
+        web = 0.85 * fc_ksi * web_width * a
+        start = depth - flange_depth if flange_at_far_face else 0.0
+        stop = min(a, depth if flange_at_far_face else flange_depth)
+        extra = 0.85 * fc_ksi * (bf - web_width) * max(0.0, stop - start)
+        force = web + extra
+        return force, (web * a / 2.0 + extra * (start + stop) / 2.0) / force, a
 
     def steel(c):
         forces = []
@@ -87,8 +94,9 @@ def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, 
         return forces
 
     def unbalance(c):
-        force, _, _ = block(c)
-        return force + sum(f for _, f in steel(c))
+        force, _, a = block(c)
+        displaced = 0.85 * fc_ksi * sum(area for y, area, _ in layers if y <= a)
+        return force - displaced + sum(f for _, f in steel(c))
 
     low, high = 1e-6, depth
     if unbalance(low) > 0 or unbalance(high) < 0:
@@ -102,12 +110,20 @@ def section_moment(layers, fc_ksi, fy_ksi, depth, web_width, flange_width=None, 
     c = 0.5 * (low + high)
     force, centroid, a = block(c)
     forces = steel(c)
-    moment = -(force * centroid + sum(y * f for y, f in forces))
+    displaced = [(y, 0.85 * fc_ksi * area) for y, area, _ in layers if y <= a]
+    residual = force + sum(f for _, f in forces) - sum(f for _, f in displaced)
+    if abs(residual) > 1e-8 * max(1.0, sum(area * grade for _, area, grade in layers)):
+        raise ValueError("Beam section axial equilibrium did not converge.")
+    moment = -(force * centroid + sum(y * f for y, f in forces) - sum(y * f for y, f in displaced))
     extreme = max(y for y, _, _ in layers)
     tension_strain = 0.003 * (extreme - c) / c
     return {"mn_kip_in": moment, "neutral_axis_in": c, "stress_block_in": a,
             "tension_strain": tension_strain, "tension_controlled": tension_strain >= fy_ksi / ES_KSI + 0.003,
-            "beta1": b1, "steel_forces_kip": [(y, f) for y, f in forces]}
+            "beta1": b1, "steel_forces_kip": [(y, f) for y, f in forces],
+            "displaced_concrete_forces_kip": displaced,
+            "gross_concrete_force_kip": force, "gross_concrete_centroid_in": centroid,
+            "axial_equilibrium_residual_kip": residual,
+            "method": SECTION_STRENGTH_METHOD, "flange_at_far_face": flange_at_far_face}
 
 
 class BeamBarRowsError(ValueError):
@@ -229,7 +245,25 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
         sides = 2 if position == "interior" else 1
         bf, overhang = effective_flange_width(bw, t, clear_span, clear_web, sides)
     top_area, bot_area = beam["top_bars"] * ab, beam["bot_bars"] * ab
-    slab_layers = _slab_layers_from_top(t, layout, axis, bf) if layout is not None else []
+    slab_inventory=None
+    from Design import SMRF_Conventional_Detail as conventional
+    if layout is not None and flange is not None and flange.get("member_tag") is not None and not conventional.active():
+        from Model import Member_Groups as mg
+        from Design.SMRF_Joint_Mat_Physical import member_slab_inventory
+        slab_inventory=member_slab_inventory(mg.active().member(flange["member_tag"]),flange)
+        if slab_inventory["status"]=="pass":
+            slab_layers=[(r["depth_in"],r["area_in2"],face) for face,r in slab_inventory["layers"].items()]
+        else:
+            # Capacity-design demand must not fall because actual inventory
+            # is unavailable. This is a bounded possible-bar upper inventory,
+            # never a developed-strength credit; the required physical row
+            # gates acceptance and end strength/sizing drops this credit.
+            slab_layers=[(y,layout["layers"][f"{axis}_{face}"]["bar_area_in2"]*
+                          (math.floor(bf/layout["layers"][f"{axis}_{face}"]["spacing_in"])+1),face)
+                         for y,_a,face in _slab_layers_from_top(t,layout,axis,bf)]
+            slab_inventory["numerical_fallback"]="full-developed maximum integer bar inventory for capacity-design demand only"
+    else:
+        slab_layers = _slab_layers_from_top(t, layout, axis, bf) if layout is not None else []
     slab_area = sum(area for _, area, _ in slab_layers)
     slab_fy = float(slab.get("fy_ksi") or _slab_fy_default())           # the grade of the mats, not of the beam bars
     # Rectangular beam only. Layers are (depth from the compression face, area), one per bar row.
@@ -237,7 +271,8 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
     rect_pos = section_moment(web_layers("positive"), fc, fy, h, bw)
     # Composite. Negative: compression face is the beam bottom.
     neg_layers = web_layers("negative") + [(h - y, a, slab_fy) for y, a, _ in slab_layers]
-    comp_neg = section_moment(neg_layers, fc, fy, h, bw)
+    comp_neg = section_moment(neg_layers, fc, fy, h, bw, flange_width=bf, flange_depth=t,
+                              flange_at_far_face=True)
     pos_layers = web_layers("positive") + [(y, a, slab_fy) for y, a, _ in slab_layers]
     comp_pos = section_moment(pos_layers, fc, fy, h, bw, flange_width=bf, flange_depth=t)
     # Where the slab bars are not developed (an exterior end whose hook does
@@ -245,6 +280,8 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
     # bottom mat would otherwise add tension steel to sagging. The flange
     # concrete stays in compression under sagging; it needs no development.
     undeveloped_pos = section_moment(web_layers("positive"), fc, fy, h, bw, flange_width=bf, flange_depth=t)
+    undeveloped_neg = section_moment(web_layers("negative"), fc, fy, h, bw, flange_width=bf, flange_depth=t,
+                                    flange_at_far_face=True)
     return {
         "axis": axis, "position": position, "slab_sides": sides,
         "centroid_offsets_in": {"top": off_top, "bottom": off_bot},
@@ -254,18 +291,20 @@ def composite_beam_strengths(beam, slab, layout, geometry, axis, position, flang
         "effective_flange_width_in": bf, "flange_overhang_in": overhang,
         "clear_span_in": clear_span, "clear_to_adjacent_web_in": clear_web,
         "slab_steel_in_flange_in2": slab_area, "slab_steel_fy_ksi": slab_fy,
+        "slab_physical_inventory":slab_inventory,
         "slab_layers_from_top": [{"face": face, "depth_in": y, "area_in2": a} for y, a, face in slab_layers],
         "rectangular": {"positive": rect_pos, "negative": rect_neg},
         "composite": {"positive": comp_pos, "negative": comp_neg},
-        "undeveloped": {"positive": undeveloped_pos, "negative": rect_neg},
+        "undeveloped": {"positive": undeveloped_pos, "negative": undeveloped_neg},
         "mn_positive_kip_in": comp_pos["mn_kip_in"], "mn_negative_kip_in": comp_neg["mn_kip_in"],
         "mn_undeveloped_positive_kip_in": undeveloped_pos["mn_kip_in"],
-        "mn_undeveloped_negative_kip_in": rect_neg["mn_kip_in"],
+        "mn_undeveloped_negative_kip_in": undeveloped_neg["mn_kip_in"],
         "slab_increment_positive_kip_in": comp_pos["mn_kip_in"] - rect_pos["mn_kip_in"],
         "slab_increment_negative_kip_in": comp_neg["mn_kip_in"] - rect_neg["mn_kip_in"],
         "flange_concrete_increment_positive_kip_in": undeveloped_pos["mn_kip_in"] - rect_pos["mn_kip_in"],
         "basis": ("ACI 318-19 6.3.2.1 effective flange; 18.7.3.2 slab mats within it as discrete layers; "
-                  "22.2 strain compatibility, ecu = 0.003, Whitney block, EPP steel, zero axial force; "
+                  "22.2 strain compatibility, ecu = 0.003, Whitney block less displaced concrete, EPP steel, "
+                  "zero axial force; actual flange position in either bending sign; "
                   "continuous uniform slab mats are developed at interior beam ends by continuity (25.4.2.4 "
                   "within half the adjacent clear span); exterior ends are credited per the perimeter hook check"),
     }
@@ -397,24 +436,34 @@ def perimeter_slab_bar_anchorage(layout, axis, perimeter_beam_width_in, beam_cle
     if layout is None:
         return None
     layers = {face: layout["layers"][f"{axis}_{face}"] for face in ("top", "bottom")}
-    worst, detail, bar, location = 0.0, None, None, None
+    records=[]
+    datum = "support_face" if embedment_available_in is None else "joint_face"
+    unstaggered = (perimeter_beam_width_in - beam_clear_cover_in - hoop_db_in if embedment_available_in is None
+                  else float(embedment_available_in))
     for face, layer in layers.items():
-        bar = layout.get("bar_size") or layer.get("bar_size") or next(
+        bar = layer.get("bar_size") or layout.get("bar_size") or next(
             size for size, area in _BAR_AREA.items() if abs(area - layer["bar_area_in2"]) < 1e-9)
         location = hook_location_factor(bar, corner)
         ldh, factors = hook_development_length_in(bar, fc_beam_ksi, fy_ksi, layer["spacing_in"], location["psi_o"])
-        if ldh > worst:
-            worst, detail = ldh, {"face": face, "spacing_in": layer["spacing_in"], **factors}
-    datum = "support_face" if embedment_available_in is None else "joint_face"
-    available = (perimeter_beam_width_in - beam_clear_cover_in - hoop_db_in if embedment_available_in is None
-                 else float(embedment_available_in))
-    ties = location["confinement_required_25_4_3_4"]
-    return {"axis": axis, "bar_size": bar, "ldh_required_in": worst, "embedment_available_in": available,
-            "developed": worst <= available and not ties, "governing": detail, "datum": datum,
+        db=factors["db_in"]
+        stagger=db+max(1.,db) if face=="bottom" else 0.
+        available=unstaggered-stagger
+        ties=location["confinement_required_25_4_3_4"]
+        records.append({"face":face,"bar_size":bar,"ldh_required_in":ldh,"embedment_available_in":available,
+                        "unstaggered_embedment_in":unstaggered,"hook_axial_stagger_in":stagger,
+                        "spacing_in":layer["spacing_in"],"developed":ldh<=available and not ties,
+                        "location":location,"confinement_required_25_4_3_4":ties,**factors})
+    worst=max(records,key=lambda r:(not r["developed"],r["ldh_required_in"]-r["embedment_available_in"]))
+    location=worst["location"]
+    ties=any(r["confinement_required_25_4_3_4"] for r in records)
+    return {"axis": axis, "bar_size": worst["bar_size"], "ldh_required_in": worst["ldh_required_in"],
+            "embedment_available_in": worst["embedment_available_in"],
+            "developed": all(r["developed"] for r in records), "governing": worst, "datum": datum,"layers":records,
             "psi_o": location["psi_o"], "location": location, "confinement_required_25_4_3_4": ties,
             "hook": "standard 90-degree hook into the perimeter beam, ACI 318-19 25.4.3.1 (not the 18.8.5.1 joint formula)",
             "basis": ("slab mats parallel to the beam terminate at the building edge; the perimeter beam is the "
-                      "only embedment beyond the exterior critical section")}
+                      "only embedment beyond the exterior critical section; actual bottom-hook stagger is deducted "
+                      "from each datum's available development")}
 
 
 def beam_family(kind, line_index, num_bay_x, num_bay_y):
@@ -651,12 +700,14 @@ def beam_slab_strengths(record):
                     # section and are counted in neither sign. Hogging is the
                     # rectangular beam; sagging keeps the flange concrete in
                     # compression (no bar development involved) but not the
-                    # bottom mat, which would otherwise add tension steel.
+                    # bottom mat, which would otherwise add tension steel. A
+                    # shallow web can reach far-face flange concrete in hogging.
                     strength = family["undeveloped"][sign]["mn_kip_in"]
                     rectangular = family["rectangular"][sign]["mn_kip_in"]
                     entries[f"{tag}/{end}/{sign}"] = {
-                        "slab_basis": "terminated_undeveloped" if sign == "negative" else "flange_concrete_undeveloped_bars",
-                        "slab_mn_kip_in": 0.0 if sign == "negative" else max(0.0, strength - rectangular),
+                        "slab_basis": ("flange_concrete_undeveloped_bars" if strength - rectangular > 1e-9
+                                       else "terminated_undeveloped"),
+                        "slab_mn_kip_in": max(0.0, strength - rectangular),
                         "section_compatibility_verified": True,
                         "family": f"{axis}_{position}",
                         "mn_composite_kip_in": strength,
@@ -664,10 +715,8 @@ def beam_slab_strengths(record):
                         "effective_flange_width_in": family["effective_flange_width_in"],
                         "slab_steel_in_flange_in2": 0.0,
                         "exterior_end": True, "exterior_anchorage": anchorage[axis],
-                        "basis": ("rectangular beam at an exterior end: slab bars terminate undeveloped at the perimeter"
-                                  if sign == "negative" else
-                                  "beam with the flange concrete in compression at an exterior end: slab bars terminate "
-                                  "undeveloped at the perimeter and are not counted in either mat"),
+                        "basis": ("beam with any flange concrete reached by the compression block at an exterior end; "
+                                  "slab bars terminate undeveloped at the perimeter and are not counted in either mat"),
                     }
                     continue
                 entries[f"{tag}/{end}/{sign}"] = {

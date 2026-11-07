@@ -676,14 +676,17 @@ class ResolvedMember:
 class GroupedDesign:
     """A membership map with the design each group selected. Immutable in use: ``with_designs`` returns a new one."""
 
-    def __init__(self, assignments, designs):
-        counts = (assignments or {}).get("counts") or {}
-        problems = assignment_problems(assignments, counts.get("num_bay_x"), counts.get("num_bay_y"), counts.get("num_floor")) \
-            if all(type(counts.get(k)) is int for k in ("num_bay_x", "num_bay_y", "num_floor")) else ["counts are missing"]
-        if problems:
-            raise GroupedStateError("Member assignments are not valid: " + "; ".join(problems[:6]))
+    def __init__(self, assignments, designs, _parent=None):
+        # A state derived from a validated parent holds the parent's own assignment object (with_designs): validated once.
+        if _parent is None or _parent.assignments is not assignments:
+            counts = (assignments or {}).get("counts") or {}
+            problems = assignment_problems(assignments, counts.get("num_bay_x"), counts.get("num_bay_y"), counts.get("num_floor")) \
+                if all(type(counts.get(k)) is int for k in ("num_bay_x", "num_bay_y", "num_floor")) else ["counts are missing"]
+            if problems:
+                raise GroupedStateError("Member assignments are not valid: " + "; ".join(problems[:6]))
         self.assignments = assignments
-        self.groups = {g["group_id"]: g for g in assignments["groups"]}
+        self.groups = _parent.groups if _parent is not None and _parent.assignments is assignments else {g["group_id"]: g for g in assignments["groups"]}
+        self._identity, self._resolved = None, {}
         missing = sorted(set(self.groups) - set(designs))
         extra = sorted(set(designs) - set(self.groups))
         if missing or extra:
@@ -694,7 +697,7 @@ class GroupedDesign:
         if bad:
             raise GroupedStateError("Group designs are not valid: " + "; ".join(bad[:6]))
         self.designs = dict(designs)
-        self._members = {row["member_tag"]: row for row in assignments["members"]}
+        self._members = _parent._members if _parent is not None and _parent.assignments is assignments else {row["member_tag"]: row for row in assignments["members"]}
         # Under the system policy the groups of one design tie hold one design (the member type aside).
         for tie, groups in self.ties().items():
             keys = {replace(self.designs[gid], member_type="x").section_key() for gid in groups}
@@ -747,11 +750,17 @@ class GroupedDesign:
         return self.assignments["counts"]
 
     def member(self, member_tag):
-        row = self._members.get(int(member_tag))
+        tag = int(member_tag)
+        resolved = self._resolved.get(tag)
+        if resolved is not None:
+            return resolved
+        row = self._members.get(tag)
         if row is None:
             raise GroupedStateError(f"Member {member_tag!r} has no assignment in the installed grouped design.")
-        return ResolvedMember(design=self.designs[row["group_id"]], **{k: row[k] for k in (
+        resolved = ResolvedMember(design=self.designs[row["group_id"]], **{k: row[k] for k in (
             "member_tag", "member_type", "story_or_floor", "grid_i", "grid_j", "node_i", "node_j", "group_id", "location_class", "band")})
+        self._resolved[tag] = resolved                    # a frozen record of an immutable state
+        return resolved
 
     def members(self, member_type=None):
         return [self.member(tag) for tag, row in self._members.items() if member_type is None or row["member_type"] == member_type]
@@ -761,7 +770,7 @@ class GroupedDesign:
         unknown = sorted(set(updates) - set(self.groups))
         if unknown:
             raise GroupedStateError(f"Unknown groups {unknown[:6]}")
-        return GroupedDesign(self.assignments, {**self.designs, **updates})
+        return GroupedDesign(self.assignments, {**self.designs, **updates}, _parent=self)
 
     def is_uniform(self):
         """True when every column group and every beam group selected the same design (the equivalence fixture)."""
@@ -772,9 +781,11 @@ class GroupedDesign:
         return all(len(v) == 1 for v in keys.values())
 
     def identity(self):
-        payload = {"assignments_sha256": self.assignments["sha256"], "policy": self.policy_id,
-                   "designs": {gid: _design_dict(self.designs[gid]) for gid in sorted(self.designs)}}
-        return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
+        if self._identity is None:
+            payload = {"assignments_sha256": self.assignments["sha256"], "policy": self.policy_id,
+                       "designs": {gid: _design_dict(self.designs[gid]) for gid in sorted(self.designs)}}
+            self._identity = hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
+        return self._identity
 
     def to_record(self):
         """The grouped block of a design record: policy, explicit assignments, group designs, per-member geometry."""

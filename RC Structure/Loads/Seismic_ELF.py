@@ -135,13 +135,34 @@ def elf_story_forces(model_period_sec=None):
     }
 
 
-def accidental_torsion_moment(direction, story_force_kip, ratio=0.05, amplification=1.0):
+def accidental_torsion_moment(direction, story_force_kip, ratio=0.05, amplification=1.0, floor=None):
     """ASCE 7-22 12.8.4.2/12.8.4.3: Mta = Ax * (ratio * B_perp) * Fx at one level.
 
     B_perp is the plan dimension perpendicular to the applied force.
     """
-    perpendicular = sp.NUM_BAY_Y * sp.BAY_Y if direction == "x" else sp.NUM_BAY_X * sp.BAY_X
+    if direction not in ('x','y'):
+        raise ValueError('Accidental torsion direction must be x or y')
+    if sp.SLAB_THICKNESS_IN is None:
+        perpendicular = sp.NUM_BAY_Y * sp.BAY_Y if direction == "x" else sp.NUM_BAY_X * sp.BAY_X
+    else:
+        from Model.Floor_Footprint import physical_floor
+        floors=[floor] if floor is not None else range(1,sp.NUM_FLOOR+1)
+        axis='y' if direction=='x' else 'x'
+        widths={f[f'{axis}_max_in']-f[f'{axis}_min_in'] for f in (physical_floor(k) for k in floors)}
+        if len(widths)!=1:
+            raise ValueError('Actual floor widths vary; accidental torsion requires an explicit floor')
+        perpendicular=widths.pop()
     return amplification * ratio * perpendicular * story_force_kip
+
+
+def floor_seismic_mass_center(floor):
+    """Actual installed nodal-mass centroid, independent of master location."""
+    from Model.Build_Model import installed_node_seismic_mass
+    weights=[(installed_node_seismic_mass(floor,i,j),i*sp.BAY_X,j*sp.BAY_Y)
+             for j in range(sp.NUM_BAY_Y+1) for i in range(sp.NUM_BAY_X+1)]
+    total=sum(w for w,x,y in weights)
+    if total<=0:raise ValueError('Positive installed floor mass required')
+    return [sum(w*x for w,x,y in weights)/total,sum(w*y for w,x,y in weights)/total]
 
 
 def apply_elf_loads(direction, model_period_sec=None, load_factor=1.0, elf=None,
@@ -170,21 +191,28 @@ def apply_elf_loads(direction, model_period_sec=None, load_factor=1.0, elf=None,
 
     ops.timeSeries("Linear", series_tag)
     ops.pattern("Plain", pattern_tag, series_tag)
-    torsion = []
+    torsion = [];mass_transport=[];mass_centers=[]
     for index, force in enumerate(elf["story_forces_kip"], start=1):
         master = floor_master_node(index)
         scaled = load_factor * force
         moment = 0.0
         if accidental_torsion_ratio:
             moment = torsion_sign * accidental_torsion_moment(direction, scaled, accidental_torsion_ratio,
-                                                              torsion_amplification)
+                                                              torsion_amplification, floor=index)
         torsion.append(moment)
+        center=floor_seismic_mass_center(index);mass_centers.append(center)
+        # Master is the fixed grid center, not necessarily the actual CM.
+        # Transport force applied at CM to that reference exactly once.
+        transport=(-(center[1]-sp.NUM_BAY_Y*sp.BAY_Y/2)*scaled if direction=='x' else
+                    (center[0]-sp.NUM_BAY_X*sp.BAY_X/2)*scaled)
+        mass_transport.append(transport);moment+=transport
         if direction == "x":
             ops.load(master, scaled, 0.0, 0.0, 0.0, 0.0, moment)
         else:
             ops.load(master, 0.0, scaled, 0.0, 0.0, 0.0, moment)
 
     return {**elf, "accidental_torsion_kip_in": torsion, "accidental_torsion_ratio": accidental_torsion_ratio,
+            "mass_center_xy_in":mass_centers,"mass_center_transport_moment_kip_in":mass_transport,
             "torsion_amplification_ax": torsion_amplification, "torsion_sign": torsion_sign}
 
 

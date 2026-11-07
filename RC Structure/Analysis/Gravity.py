@@ -19,9 +19,17 @@ def _roof_floor_vertical_stats():
     }
 
 
-def run_gravity_analysis():
+def run_gravity_analysis(*, constraint_handler=None):
     ops.system("BandGeneral")
-    apply_analysis_constraints()
+    if constraint_handler is None:
+        apply_analysis_constraints()
+    elif constraint_handler == 'Transformation':
+        # Explicit elastic-model caller: its rigid-floor masters have no
+        # IMK constraint chains. Do not inherit the nonlinear model's penalty
+        # handler merely because its ELEMENT_FORMULATION setting is retained.
+        ops.constraints('Transformation')
+    else:
+        raise ValueError('Unknown explicit gravity-analysis constraint handler')
     ops.numberer("RCM")
     ops.test("NormDispIncr", sp.GRAVITY_TOL, sp.GRAVITY_MAX_ITER)
     ops.algorithm("Newton")

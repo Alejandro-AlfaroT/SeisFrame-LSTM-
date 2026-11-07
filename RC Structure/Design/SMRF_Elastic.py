@@ -13,6 +13,12 @@ from Model.Build_Model import create_nodes, fix_base_nodes, node_tag, create_rig
 from Model.IMK_Hinges import gravity_beam_released, reset_hinge_registry
 
 
+METHOD_VERSION = 'cracked_elastic_design_frame_v2_exact_rigid_floor_constraints'
+# Design_Driver and Perimeter_Systems explicitly select Transformation for
+# this assembly. Its retained floor master nodes have no IMK equalDOF chains;
+# response-history ELEMENT_FORMULATION must not select their solver handler.
+
+
 def physical_members():
     tag = 1
     for k in range(sp.NUM_FLOOR):

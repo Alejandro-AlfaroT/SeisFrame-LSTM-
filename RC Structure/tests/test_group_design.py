@@ -88,8 +88,11 @@ class UniformEquivalence(unittest.TestCase):
                 self.assertEqual(other["group_id"], mg.resolve(int(tag)).group_id)
         self.assertLess(worst, 1e-9)
 
-    def test_column_dcr_is_uniform_and_beam_dcr_uses_resolved_composite_sections(self):
-        self.assertAlmostEqual(self.strengths["worst"]["column"], self.legacy_dcr["column"], places=10)
+    def test_beam_dcr_uses_resolved_composite_sections_and_governing_rows_are_named(self):
+        # The grouped column check now rotates the neutral axis and checks both
+        # axial ends. Equality to the legacy empirical alpha=1.5 contour is no
+        # longer a valid oracle. Independent section integration and the scalar/
+        # vector/end-demand tests verify that corrected column path separately.
         # The legacy beam check is singly reinforced/web-only. The grouped route now uses the
         # existing strain-compatible beam/slab kernel, so equality to that old beam number is wrong.
         expected = 0.0
@@ -156,14 +159,16 @@ class UniformEquivalence(unittest.TestCase):
             rows = checks.column_demand_rows(self.state.groups[gid]["member_tags"], self.actions)
             for design in (gf.COLUMN, gf.SMALL_COLUMN, replace(gf.COLUMN, b_in=14.0, h_in=14.0, top_bars=2, bot_bars=2, side_bars=0)):
                 diagrams = checks.column_pm_diagrams(design)
-                scalar = [checks.column_pm_dcr(diagrams, p, my, mz)["dcr"] for _t, _c, p, my, mz, _vy, _vz in rows]
+                scalar = [checks.column_pm_dcr(diagrams, p, my, mz)["dcr"] for _t, _c, p, my, mz, _vy, _vz, _end in rows]
                 value, index = checks.column_pm_dcr_max(diagrams, rows)
                 self.assertAlmostEqual(value, max(scalar), places=9)
                 self.assertAlmostEqual(scalar[index], max(scalar), places=9)
 
     def test_a_tension_load_beyond_the_surface_is_a_named_failure_with_a_ratio_above_one_in_both_forms(self):
         diagrams = checks.column_pm_diagrams(gf.COLUMN)
-        end = min(p for p, _m in diagrams["y"])
+        # The actual-cage solver uses the exact pure-tension endpoint. The old
+        # sampled uniaxial curve stops slightly short of that endpoint.
+        end = diagrams["biaxial_section"].tension_cap if "biaxial_section" in diagrams else min(p for p, _m in diagrams["y"])
         tension = end - 50.0
         for my, mz in ((0.0, 0.0), (100.0, 100.0)):
             scalar = checks.column_pm_dcr(diagrams, tension, my, mz)
@@ -287,7 +292,7 @@ class ChangedGroupAtABandBoundary(unittest.TestCase):
         # 26 x 26 with 4/4/2 below, 22 x 22 with 3/3/1 above: bars stop where the column steps in, and they lie outside
         # the upper cage
         self.assertEqual((changed["kind"], changed["supported"], changed["column_reinforcement_continuous"]), ("bar_count_reduction", False, False))
-        self.assertEqual(changed["rules"], "column_transition_rules_v2")
+        self.assertEqual(changed["rules"], "column_transition_rules_v3_physical_bar_clearance")
         self.assertGreater(changed["path_counts"]["terminated"], 0)
         self.assertIn("terminated lower bars stay inside the upper cage without an offset",
                       [item["rule"] for item in changed["items"] if not item["passes"]])

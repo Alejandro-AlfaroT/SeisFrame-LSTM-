@@ -201,7 +201,15 @@ class TransferByFloor(unittest.TestCase):
     def test_every_floor_gets_its_own_transfer_and_the_base_reaction_is_the_hand_total(self):
         reaction, forces = self.frame_forces(gf.changed_state(), self.record)
         members = sum(gf.hand_weight_kip(kind, k, i, j) for _tag, kind, k, i, j in gf.hand_members())
+        # The frame's column weight leaves the slab layer out only inside the physical floor (Model.Member_Properties):
+        # the 26 in perimeter columns keep the part that stands outside it (2026-11-06).
+        members += hand_column_weight_outside_the_floor_kip()
         hand = gf.NZ * (1.2 * self.dead_kip + 1.6 * self.live_kip) + 1.2 * members
+        # The transfers are the centreline plate's (480 x 648 in). The frame also receives the perimeter strip of
+        # each floor's physical footprint (2026-11-05): 504 x 666 in on floors 1-2 (24 in edge Y beams), 498 x 666 in
+        # on floors 3-4, as a line load on each perimeter beam (strip width x pressure) and the corner squares.
+        pressure = (1.2 * self.dead_kip + 1.6 * self.live_kip) / AREA_SQFT / 144.0
+        hand += pressure * (2 * 504.0 * 666.0 + 2 * 498.0 * 666.0 - gf.NZ * 480.0 * 648.0)
         self.assertTrue(math.isclose(reaction, hand, rel_tol=1e-8), (reaction, hand))
         tags = {(kind, k, i, j): tag for tag, kind, k, i, j in gf.hand_members()}
         # Statics of every beam: its two end shears carry exactly what ITS floor's transfer put on it plus its
@@ -216,6 +224,10 @@ class TransferByFloor(unittest.TestCase):
             load = sum(factor * next(b["total_kip"] for b in cases[name]["beams"] if (b["axis"], b["line_index"], b["span_index"]) == key)
                        for name, factor in (("dead", 1.2), ("live", 1.6)))
             expected = load + 1.2 * gf.hand_weight_kip(kind, k, i, j)
+            if kind == "beam_x" and j in (0, gf.NY):
+                expected += pressure * 9.0 * gf.BAY_X                             # half of its own 18 in width
+            if kind == "beam_y" and i in (0, gf.NX):
+                expected += pressure * (12.0 if k <= 2 else 9.0) * gf.BAY_Y       # 24 in edge Y beams on floors 1-2
             f = forces[tag]
             self.assertTrue(math.isclose(f[2] + f[8], expected, rel_tol=1e-8, abs_tol=1e-8), (kind, k, i, j, f[2] + f[8], expected))
             totals[(kind, k, i, j)] = load
@@ -418,6 +430,20 @@ class StripDemandsByFloor(unittest.TestCase):
         self.assertFalse(refinement_verified(twice))
 
 
+def hand_column_weight_outside_the_floor_kip():
+    """Column concrete through the 7 in slab depth outside the physical floor, CHANGED state, by hand (2026-11-06).
+
+    gf.hand_weight_kip leaves the whole slab layer out of every column. A 26 in perimeter column stands 13 in beyond
+    its grid line; the physical floor ends at the outer face of the perimeter beam: 12 in beyond the X sides on floors
+    1-2 (24 in edge Y beams), 9 in everywhere else. Column area outside the floor:
+      floors 1-2: corner 676 - 25 x 22 = 126 in2; X-side edge 676 - 25 x 26 = 26 in2; Y-side edge 676 - 26 x 22 = 104 in2;
+      floors 3-4: corner 676 - 22 x 22 = 192 in2; X-side and Y-side edge 104 in2.
+    Four corners, four X-side and two Y-side edge columns per story: 2 x 816 + 2 x 1392 = 4416 in2 -> 2.6833 kip.
+    """
+    outside_in2 = 2 * (4 * 126.0 + 4 * 26.0 + 2 * 104.0) + 2 * (4 * 192.0 + 4 * 104.0 + 2 * 104.0)
+    return 0.15 / 1728.0 * gf.SLAB * outside_in2
+
+
 class CoupledReference(unittest.TestCase):
     """The monolithic slab/web/column model resolves every floor's beam lines and every story's columns."""
     CASE = {"id": "gravity", "dead_factor": 1.2, "live_factor": 1.6, "live_load_ksf": 0.05, "live_pattern": "all"}
@@ -455,6 +481,7 @@ class CoupledReference(unittest.TestCase):
         result = self.solve(sections)
         self.assertTrue(result["equilibrium"]["numerical_balance_passed"])
         columns = sum(gf.hand_weight_kip(kind, k, i, j) for _t, kind, k, i, j in gf.hand_members() if kind == "column")
+        columns += hand_column_weight_outside_the_floor_kip()
         beams = sum(gf.hand_weight_kip(kind, k, i, j) for _t, kind, k, i, j in gf.hand_members() if kind != "column")
         self.assertTrue(math.isclose(result["weight_ledger"]["column_weight_kip"], 1.2 * columns, rel_tol=1e-12))
         self.assertTrue(math.isclose(result["weight_ledger"]["beam_drop_weight_kip"], 1.2 * beams, rel_tol=1e-12))

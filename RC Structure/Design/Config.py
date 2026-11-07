@@ -151,7 +151,7 @@ class RebarConfig:
     rho_col_min: float = 0.01
     rho_col_max: float = 0.06
     rho_col_practical_max: float = 0.04
-    rho_beam_practical_max: float = 0.015
+    rho_beam_practical_max: float = 0.0175
 
     cover_in: float = field(default_factory=lambda: sp.COVER)
     beam_clear_cover_in: float = field(default_factory=lambda: sp.BEAM_CLEAR_COVER_IN)
@@ -515,6 +515,16 @@ class FloorAnalysisConfig:
     # procedure; it replaces the two fields above. None: no procedure. In the
     # request identity like the plan.
     slab_procedure: Optional[dict] = None
+    # Distinct source/domain-bound computed route. Never sets legacy assertions;
+    # pending method proofs and every candidate's actual checks remain blocking.
+    common_action_procedure: Optional[dict] = None
+    # How the plate strip demands are accepted for slab design (2026-11-07): "computed_preconditions_v1" on complete
+    # floors, balanced cases, valid face recovery and a passed refinement (Design.SMRF_Conventional_Floor);
+    # "engineering_assertions_v0" on the named assertions of SlabActionAssertions.
+    slab_evidence_basis: str = "computed_preconditions_v1"
+    # The reinforcement detailing basis of the frame-plus-transfer route (2026-11-07): closed-form code rules
+    # (Design.SMRF_Conventional_Detail); "physical_3d_v2" selects the 3D bar inventory, which the computed route uses.
+    detail_basis: str = "conventional_detailing_v1"
 
 
 # The one PROBE refinement plan both probe factories (Design/Verify_Designs
@@ -668,13 +678,22 @@ class DesignConfig:
 BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX = 0.0175
 
 
-def with_beam_practical_ratio(cfg, value):
-    """A copy of ``cfg`` whose practical beam face ratio ceiling (RebarConfig.rho_beam_practical_max) is ``value``:
-    a finite number above zero and at most BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX, a ValueError otherwise. A smaller,
-    stricter value is kept as given; ``cfg`` itself is not changed."""
+def validate_beam_practical_ratio(value):
+    """Return a valid configured ceiling; reject invalid/unauthorized values without clamping."""
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
-        raise ValueError(f"the practical beam steel ratio ceiling must be a positive number, not {value!r}")
+        raise ValueError(f"the practical beam steel ratio ceiling must be a finite positive number, not {value!r}")
     if value > BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX:
         raise ValueError(f"the practical beam steel ratio ceiling {value:g} is above the authorized "
                          f"{BEAM_PRACTICAL_RATIO_AUTHORIZED_MAX:g}")
-    return replace(cfg, rebar=replace(cfg.rebar, rho_beam_practical_max=float(value)))
+    return float(value)
+
+
+def validate_beam_practical_ceiling(cfg):
+    """Validate mutable engineering configuration at use, including missing declarations."""
+    return validate_beam_practical_ratio(getattr(getattr(cfg, "rebar", None), "rho_beam_practical_max", None))
+
+
+def with_beam_practical_ratio(cfg, value):
+    """Copy ``cfg`` with a validated ceiling; preserve stricter values and leave the input unchanged."""
+    value = validate_beam_practical_ratio(value)
+    return replace(cfg, rebar=replace(cfg.rebar, rho_beam_practical_max=value))
